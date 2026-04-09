@@ -37,7 +37,7 @@ export class HealthUI {
     document.body.appendChild(this.container)
 
     this.heartIcon = document.createElement('img')
-    this.heartIcon.src = './src/assets/icons/heart.png'
+    this.heartIcon.src = new URL('../assets/icons/heart.png', import.meta.url).href
     this.heartIcon.alt = ''
     this.heartIcon.style.width = '64px'
     this.heartIcon.style.height = '64px'

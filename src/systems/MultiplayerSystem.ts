@@ -5,7 +5,7 @@ import { AnimationManager, type AnimationState } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
 import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
-const IDLE_FBX = './src/assets/player/animations/Idle.fbx'
+const IDLE_FBX = new URL('../assets/player/animations/Idle.fbx', import.meta.url).href
 
 export type WorldState = {
   matchStartTime: number
@@ -99,9 +99,9 @@ export class MultiplayerSystem {
 
   public async init() {
     try {
-      this.rankTextures[1] = this.textureLoader.load('./src/assets/leaderboard/1st.png')
-      this.rankTextures[2] = this.textureLoader.load('./src/assets/leaderboard/2nd.png')
-      this.rankTextures[3] = this.textureLoader.load('./src/assets/leaderboard/3rd.png')
+      this.rankTextures[1] = this.textureLoader.load(new URL('../assets/leaderboard/1st.png', import.meta.url).href)
+      this.rankTextures[2] = this.textureLoader.load(new URL('../assets/leaderboard/2nd.png', import.meta.url).href)
+      this.rankTextures[3] = this.textureLoader.load(new URL('../assets/leaderboard/3rd.png', import.meta.url).href)
       ;[1, 2, 3].forEach((k) => {
         const t = this.rankTextures[k] as THREE.Texture | null
         if (!t) return
@@ -443,7 +443,7 @@ export class MultiplayerSystem {
 
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
-      this.loader.loadAsync(`./src/assets/player/weps/${cfg.file}`).then(fbx => {
+      this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href).then(fbx => {
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)

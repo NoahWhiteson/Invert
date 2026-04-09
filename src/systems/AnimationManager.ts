@@ -3,14 +3,14 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
 export type AnimationState = 'idle' | 'walk' | 'sprint' | 'crouch_idle' | 'crouch_walk' | 'firing' | 'jump'
 
-const FIRING_RIFLE_PATH = './src/assets/player/animations/Firing Rifle.fbx'
+const FIRING_RIFLE_PATH = new URL('../assets/player/animations/Firing Rifle.fbx', import.meta.url).href
 
 const ANIM_FILES: Record<Exclude<AnimationState, 'idle' | 'firing'>, string> = {
-  walk: './src/assets/player/animations/Walk.fbx',
-  sprint: './src/assets/player/animations/Sprint.fbx',
-  crouch_idle: './src/assets/player/animations/Crouching Idle.fbx',
-  crouch_walk: './src/assets/player/animations/Crouched Walk.fbx',
-  jump: './src/assets/player/animations/Jump.fbx',
+  walk: new URL('../assets/player/animations/Walk.fbx', import.meta.url).href,
+  sprint: new URL('../assets/player/animations/Sprint.fbx', import.meta.url).href,
+  crouch_idle: new URL('../assets/player/animations/Crouching Idle.fbx', import.meta.url).href,
+  crouch_walk: new URL('../assets/player/animations/Crouched Walk.fbx', import.meta.url).href,
+  jump: new URL('../assets/player/animations/Jump.fbx', import.meta.url).href,
 }
 
 function zeroOutRootPositionTracks(clip: THREE.AnimationClip) {

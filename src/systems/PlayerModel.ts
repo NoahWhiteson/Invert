@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { AnimationManager } from './AnimationManager'
 import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
-const IDLE_FBX = './src/assets/player/animations/Idle.fbx'
+const IDLE_FBX = new URL('../assets/player/animations/Idle.fbx', import.meta.url).href
 
 /**
  * Static player mesh from Idle.fbx (now with AnimationManager).
@@ -137,7 +137,7 @@ export class PlayerModel {
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
       try {
-        const fbx = await this.loader.loadAsync(`./src/assets/player/weps/${cfg.file}`)
+        const fbx = await this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)

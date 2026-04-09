@@ -19,7 +19,7 @@ export class WeaponUI {
       const slot = document.createElement('div')
       slot.style.width = '64px'
       slot.style.height = '64px'
-      slot.style.backgroundImage = "url('./src/assets/icons/hotbar.png')"
+      slot.style.backgroundImage = `url('${new URL('../assets/icons/hotbar.png', import.meta.url).href}')`
       slot.style.backgroundSize = 'contain'
       slot.style.backgroundRepeat = 'no-repeat'
       slot.style.backgroundPosition = 'center'

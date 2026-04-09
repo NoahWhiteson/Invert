@@ -1,7 +1,9 @@
 import * as THREE from 'three'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
-const WEP_DIR = './src/assets/player/weps'
+function weaponAssetUrl(file: string): string {
+  return new URL(`../assets/player/weps/${file}`, import.meta.url).href
+}
 
 const WEAPON_VERTEX = `
 varying vec2 vUv;
@@ -314,7 +316,7 @@ export class HeldWeapons {
 
     for (let i = 0; i < SLOT_CONFIG.length; i++) {
       const cfg = SLOT_CONFIG[i]!
-      const url = `${WEP_DIR}/${cfg.file}`
+      const url = weaponAssetUrl(cfg.file)
       try {
         const fbx = await loader.loadAsync(url)
         const wrap = new THREE.Group()
@@ -438,7 +440,7 @@ export class HeldWeapons {
 
   private async tryLoadShellTemplate(loader: FBXLoader, files: string[]): Promise<THREE.Object3D | null> {
     for (const f of files) {
-      const url = `${WEP_DIR}/${f}`
+      const url = weaponAssetUrl(f)
       try {
         const fbx = await loader.loadAsync(url)
         fbx.traverse((ch) => {

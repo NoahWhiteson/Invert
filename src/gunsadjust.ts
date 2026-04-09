@@ -3,8 +3,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 
 // Settings
-const WEPS_PATH = '/src/assets/player/weps/'
-const ANIMS_PATH = '/src/assets/player/animations/'
+const WEPS_PATH = new URL('./assets/player/weps/', import.meta.url).href
+const ANIMS_PATH = new URL('./assets/player/animations/', import.meta.url).href
 
 // State
 let scene: THREE.Scene

@@ -61,7 +61,7 @@ export class SettingsUI {
 
     // 1. Settings Button (Top Right Gear)
     this.button = document.createElement('img')
-    this.button.src = './src/assets/icons/settings.png'
+    this.button.src = new URL('../assets/icons/settings.png', import.meta.url).href
     this.button.style.position = 'absolute'
     this.button.style.top = '24px'
     this.button.style.right = '24px'
@@ -76,7 +76,7 @@ export class SettingsUI {
 
     // 2. Custom Cursor
     this.customCursor = document.createElement('img')
-    this.customCursor.src = './src/assets/icons/mouse.png'
+    this.customCursor.src = new URL('../assets/icons/mouse.png', import.meta.url).href
     this.customCursor.style.position = 'fixed'
     this.customCursor.style.width = '24px'
     this.customCursor.style.height = '24px'
@@ -545,10 +545,10 @@ export class SettingsUI {
       this.isHovering = isOverButton
 
       if (this.isHovering || isOverTrack || this.isDraggingFov || isOverCircle || isOverPlus || this.draggingType || isOverGraphic || isOverReset) {
-        this.customCursor.src = './src/assets/icons/click.png'
+        this.customCursor.src = new URL('../assets/icons/click.png', import.meta.url).href
         this.targetScale = this.isMouseDown ? 0.75 : 1.1
       } else {
-        this.customCursor.src = './src/assets/icons/mouse.png'
+        this.customCursor.src = new URL('../assets/icons/mouse.png', import.meta.url).href
         this.targetScale = 1.0
       }
 

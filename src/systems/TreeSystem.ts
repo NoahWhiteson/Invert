@@ -23,7 +23,7 @@ export class TreeSystem {
     this.container.name = 'treeSystemContainer'
     scene.add(this.container)
 
-    const pineTexture = this.textureLoader.load('./src/assets/models/grave_map/colormap.png')
+    const pineTexture = this.textureLoader.load(new URL('../assets/models/grave_map/colormap.png', import.meta.url).href)
     pineTexture.colorSpace = THREE.SRGBColorSpace
     pineTexture.magFilter = THREE.NearestFilter
 
@@ -143,7 +143,7 @@ export class TreeSystem {
 
   private async ensureSourceTreeLoaded() {
     if (this.sourceTree) return
-    const object = await this.objLoader.loadAsync('./src/assets/models/grave_map/pine.obj')
+    const object = await this.objLoader.loadAsync(new URL('../assets/models/grave_map/pine.obj', import.meta.url).href)
     const meshes: THREE.Mesh[] = []
     object.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {

@@ -154,7 +154,8 @@ class LeaderboardRow {
   private createIcon(rank: number): HTMLImageElement | HTMLSpanElement {
     if (rank <= 3) {
       const img = document.createElement('img')
-      img.src = `./src/assets/leaderboard/${rank}${rank === 1 ? 'st' : rank === 2 ? 'nd' : 'rd'}.png`
+      const suffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : 'rd'
+      img.src = new URL(`../assets/leaderboard/${rank}${suffix}.png`, import.meta.url).href
       img.style.width = '32px'
       img.style.height = '32px'
       img.style.objectFit = 'contain'

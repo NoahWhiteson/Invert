@@ -5,7 +5,7 @@ import { AnimationManager } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
 import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
-const IDLE_FBX = './src/assets/player/animations/Idle.fbx'
+const IDLE_FBX = new URL('../assets/player/animations/Idle.fbx', import.meta.url).href
 
 type TargetState = {
   container: THREE.Group
@@ -238,7 +238,7 @@ export class TargetPlayersSystem {
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
       try {
-        const fbx = await this.loader.loadAsync(`./src/assets/player/weps/${cfg.file}`)
+        const fbx = await this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)
