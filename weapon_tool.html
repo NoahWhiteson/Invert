@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Weapon Positioning Tool</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #222;
+      color: white;
+      font-family: sans-serif;
+    }
+    #ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 10;
+      width: 300px;
+      border: 1px solid #444;
+    }
+    .control-group {
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 14px;
+    }
+    select, input[type="range"] {
+      width: 100%;
+      margin-bottom: 5px;
+    }
+    .val-display {
+      font-family: monospace;
+      font-size: 12px;
+      color: #aaa;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      background: #444;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    button:hover { background: #555; }
+    #output {
+      margin-top: 10px;
+      background: #111;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      user-select: all;
+    }
+    hr { border-color: #444; margin: 15px 0; }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div class="control-group">
+      <label>Weapon Selection:</label>
+      <select id="wepSelect">
+        <option value="ak47.fbx">AK-47</option>
+        <option value="shotgun.fbx">Shotgun</option>
+        <option value="nade_low.fbx">Grenade</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Animation:</label>
+      <select id="animSelect">
+        <!-- Will be populated dynamically -->
+        <option value="rifle_idle.fbx">Rifle Idle</option>
+        <option value="rifle_walk.fbx">Rifle Walk</option>
+        <option value="rifle_sprint.fbx">Rifle Sprint</option>
+        <option value="rifle_aim.fbx">Rifle Aim</option>
+        <option value="rifle_fire.fbx">Rifle Fire</option>
+      </select>
+    </div>
+
+    <button id="toggleAnimBtn">Play / Pause Animation</button>
+    <button id="resetTransformBtn">Reset Weapon Transform</button>
+
+    <hr/>
+
+    <div class="control-group">
+      <label>Position X <span id="valPosX" class="val-display">0.00</span></label>
+      <input type="range" id="posX" min="-1" max="1" step="0.005" value="0.0">
+    </div>
+    <div class="control-group">
+      <label>Position Y <span id="valPosY" class="val-display">0.00</span></label>
+      <input type="range" id="posY" min="-1" max="1" step="0.005" value="0.0">
+    </div>
+    <div class="control-group">
+      <label>Position Z <span id="valPosZ" class="val-display">0.00</span></label>
+      <input type="range" id="posZ" min="-1" max="1" step="0.005" value="0.0">
+    </div>
+
+    <hr/>
+
+    <div class="control-group">
+      <label>Rotation X (Pitch) <span id="valRotX" class="val-display">0.00</span></label>
+      <input type="range" id="rotX" min="-3.14" max="3.14" step="0.01" value="0.0">
+    </div>
+    <div class="control-group">
+      <label>Rotation Y (Yaw) <span id="valRotY" class="val-display">0.00</span></label>
+      <input type="range" id="rotY" min="-3.14" max="3.14" step="0.01" value="0.0">
+    </div>
+    <div class="control-group">
+      <label>Rotation Z (Roll) <span id="valRotZ" class="val-display">0.00</span></label>
+      <input type="range" id="rotZ" min="-3.14" max="3.14" step="0.01" value="0.0">
+    </div>
+
+    <hr/>
+
+    <div class="control-group">
+      <label>Uniform Scale <span id="valScale" class="val-display">0.0085</span></label>
+      <input type="range" id="scale" min="0.001" max="0.02" step="0.0001" value="0.0085">
+    </div>
+
+    <button id="copyBtn">Copy Config JSON</button>
+    <div id="output"></div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+    // Settings
+    const PLAYER_PATH = '/src/assets/player/';
+    const WEPS_PATH = '/src/assets/player/weps/';
+    const ANIMS_PATH = '/src/assets/player/animations/';
+
+    // State
+    let scene, camera, renderer, controls, mixer;
+    let playerModel, currentWeapon, rightHandBone, weaponAnchor;
+    let currentAction = null;
+    let clock = new THREE.Clock();
+
+    const loader = new FBXLoader();
+    
+    // UI Elements
+    const wepSelect = document.getElementById('wepSelect');
+    const animSelect = document.getElementById('animSelect');
+    const toggleAnimBtn = document.getElementById('toggleAnimBtn');
+    const resetTransformBtn = document.getElementById('resetTransformBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const output = document.getElementById('output');
+
+    const inputs = {
+      px: document.getElementById('posX'),
+      py: document.getElementById('posY'),
+      pz: document.getElementById('posZ'),
+      rx: document.getElementById('rotX'),
+      ry: document.getElementById('rotY'),
+      rz: document.getElementById('rotZ'),
+      s: document.getElementById('scale')
+    };
+
+    const displays = {
+      px: document.getElementById('valPosX'),
+      py: document.getElementById('valPosY'),
+      pz: document.getElementById('valPosZ'),
+      rx: document.getElementById('valRotX'),
+      ry: document.getElementById('valRotY'),
+      rz: document.getElementById('valRotZ'),
+      s: document.getElementById('valScale')
+    };
+
+    // Pre-saved weapon defaults just so everything isn't 0,0,0
+    const WEP_DEFAULTS = {
+      'ak47.fbx': { px: 0.14, py: -0.11, pz: -0.42, rx: 0, ry: 0, rz: 0, s: 0.0085 },
+      'shotgun.fbx': { px: 0.13, py: -0.1, pz: -0.38, rx: 0.03, ry: 0.03, rz: 0, s: 0.0085 },
+      'nade_low.fbx': { px: 0.18, py: -0.14, pz: -0.32, rx: -0.35, ry: 0.25, rz: 0.15, s: 0.012 }
+    };
+
+    init();
+    animate();
+
+    async function init() {
+      // Scene setup
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x333333);
+      scene.fog = new THREE.Fog(0x333333, 10, 50);
+
+      const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x444444);
+      scene.add(gridHelper);
+
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+      hemiLight.position.set(0, 20, 0);
+      scene.add(hemiLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dirLight.position.set(3, 10, -10);
+      scene.add(dirLight);
+
+      camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+      camera.position.set(1, 1.5, -2);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      document.body.appendChild(renderer.domElement);
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 1, 0);
+      controls.update();
+
+      // Load Player Model
+      try {
+        console.log("Loading player model...");
+        playerModel = await loader.loadAsync(PLAYER_PATH + 'model.fbx');
+        playerModel.scale.setScalar(0.012);
+        
+        // Add a simple blue material to player so we can see it
+        playerModel.traverse((c) => {
+          if (c.isMesh) {
+            c.material = new THREE.MeshStandardMaterial({ color: 0x4a90e2, roughness: 0.7 });
+          }
+        });
+        
+        scene.add(playerModel);
+        mixer = new THREE.AnimationMixer(playerModel);
+
+        // Find Right Hand Bone
+        playerModel.traverse((c) => {
+          if (c.isBone && c.name.toLowerCase().includes('hand')) {
+             if (c.name.toLowerCase().includes('r')) {
+               rightHandBone = c;
+               console.log("Found Right Hand Bone:", c.name);
+             }
+          }
+        });
+
+        if (!rightHandBone) {
+          // Fallback if exact name is different
+          playerModel.traverse(c => {
+             if (c.isBone && c.name.includes('Hand_R')) rightHandBone = c;
+          });
+        }
+
+        // Create weapon anchor point attached to the hand
+        weaponAnchor = new THREE.Group();
+        if (rightHandBone) {
+          rightHandBone.add(weaponAnchor);
+        } else {
+             console.warn("Could not find right hand bone. Attaching to root.");
+             playerModel.add(weaponAnchor);
+        }
+
+        // Load Initial Weapon
+        loadWeapon(wepSelect.value);
+        
+        // Load initial animation
+        loadAnimation(animSelect.value);
+
+      } catch (e) {
+        console.error("Error loading base model:", e);
+        document.getElementById('output').textContent = "ERROR Loading model. Check console.\nEnsure files exist at /src/assets/player/...";
+      }
+
+      // Event Listeners
+      wepSelect.addEventListener('change', () => loadWeapon(wepSelect.value));
+      animSelect.addEventListener('change', () => loadAnimation(animSelect.value));
+      
+      toggleAnimBtn.addEventListener('click', () => {
+        if (!currentAction) return;
+        currentAction.paused = !currentAction.paused;
+      });
+
+      resetTransformBtn.addEventListener('click', () => {
+        if (!currentWeapon) return;
+        const fn = wepSelect.value;
+        const d = WEP_DEFAULTS[fn] || { px:0, py:0, pz:0, rx:0, ry:0, rz:0, s:0.01 };
+        
+        inputs.px.value = d.px; inputs.py.value = d.py; inputs.pz.value = d.pz;
+        inputs.rx.value = d.rx; inputs.ry.value = d.ry; inputs.rz.value = d.rz;
+        inputs.s.value = d.s;
+        
+        updateWeaponTransform();
+      });
+
+      copyBtn.addEventListener('click', () => {
+        const json = {
+          file: wepSelect.value,
+          pos: { x: parseFloat(inputs.px.value), y: parseFloat(inputs.py.value), z: parseFloat(inputs.pz.value) },
+          rot: { x: parseFloat(inputs.rx.value), y: parseFloat(inputs.ry.value), z: parseFloat(inputs.rz.value) },
+          uniformScale: parseFloat(inputs.s.value)
+        };
+        const str = JSON.stringify(json, null, 2);
+        navigator.clipboard.writeText(str);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => copyBtn.textContent = "Copy Config JSON", 2000);
+      });
+
+      // Bind all range inputs to the update function
+      Object.values(inputs).forEach(input => {
+        input.addEventListener('input', updateWeaponTransform);
+      });
+
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    async function loadWeapon(filename) {
+      if (currentWeapon) {
+        weaponAnchor.remove(currentWeapon);
+      }
+      try {
+        console.log("Loading weapon:", filename);
+        currentWeapon = await loader.loadAsync(WEPS_PATH + filename);
+        
+        // Make weapons slightly darker to distinguish from hands
+        currentWeapon.traverse((c) => {
+          if (c.isMesh) {
+            c.material = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.5 });
+          }
+        });
+
+        weaponAnchor.add(currentWeapon);
+        
+        // Auto-apply known defaults if we have them and sliders are at exactly 0
+        // (to prevent every weapon spawning in middle of arm)
+        const d = WEP_DEFAULTS[filename];
+        if (d) {
+           inputs.px.value = d.px; inputs.py.value = d.py; inputs.pz.value = d.pz;
+           inputs.rx.value = d.rx; inputs.ry.value = d.ry; inputs.rz.value = d.rz;
+           inputs.s.value = d.s;
+        }
+
+        updateWeaponTransform();
+      } catch (e) {
+         console.error("Error loading weapon:", e);
+      }
+    }
+
+    async function loadAnimation(filename) {
+      if (!mixer) return;
+      try {
+        const animFbx = await loader.loadAsync(ANIMS_PATH + filename);
+        const clip = animFbx.animations[0];
+        if (!clip) {
+            console.warn("No animation found in", filename);
+            return;
+        }
+
+        mixer.stopAllAction();
+        currentAction = mixer.clipAction(clip);
+        currentAction.play();
+        
+      } catch (e) {
+          console.error("Error loading animation:", e);
+      }
+    }
+
+    function updateWeaponTransform() {
+      if (!currentWeapon) return;
+
+      const px = parseFloat(inputs.px.value);
+      const py = parseFloat(inputs.py.value);
+      const pz = parseFloat(inputs.pz.value);
+      
+      const rx = parseFloat(inputs.rx.value);
+      const ry = parseFloat(inputs.ry.value);
+      const rz = parseFloat(inputs.rz.value);
+      
+      const s = parseFloat(inputs.s.value);
+
+      currentWeapon.position.set(px, py, pz);
+      currentWeapon.rotation.set(rx, ry, rz);
+      currentWeapon.scale.setScalar(s);
+
+      // Update UI displays
+      displays.px.textContent = px.toFixed(3);
+      displays.py.textContent = py.toFixed(3);
+      displays.pz.textContent = pz.toFixed(3);
+      displays.rx.textContent = rx.toFixed(2);
+      displays.ry.textContent = ry.toFixed(2);
+      displays.rz.textContent = rz.toFixed(2);
+      displays.s.textContent = s.toFixed(4);
+
+      // Generate the output config
+      const str = `
+{
+  pos: new THREE.Vector3(${px.toFixed(3)}, ${py.toFixed(3)}, ${pz.toFixed(3)}),
+  rot: new THREE.Euler(${rx.toFixed(2)}, ${ry.toFixed(2)}, ${rz.toFixed(2)}),
+  uniformScale: ${s.toFixed(4)}
+}`;
+      output.textContent = str;
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+      if (mixer) mixer.update(delta);
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>

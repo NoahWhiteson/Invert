@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weapon Position Adjuster</title>
+    <style>
+      body { margin: 0; padding: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif; }
+      #ui { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); padding: 15px; border-radius: 8px; z-index: 10; width: 320px; border: 1px solid #444; }
+      .control-group { margin-bottom: 10px; }
+      label { display: block; margin-bottom: 5px; font-size: 14px; }
+      select, input[type="range"] { width: 100%; margin-bottom: 5px; }
+      .val-display { font-family: monospace; font-size: 12px; color: #aaa; float: right; }
+      button { width: 100%; padding: 8px; background: #444; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+      button:hover { background: #555; }
+      #output { margin-top: 10px; background: #111; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-all; user-select: all; }
+      hr { border-color: #444; margin: 15px 0; }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <div class="control-group">
+        <label>Weapon Selection:</label>
+        <select id="wepSelect">
+          <option value="ak47.fbx">AK-47</option>
+          <option value="shotgun.fbx">Shotgun</option>
+          <option value="nade_low.fbx">Grenade</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Animation:</label>
+        <select id="animSelect">
+          <option value="Idle.fbx">Idle</option>
+          <option value="Walk.fbx">Walk</option>
+          <option value="Sprint.fbx">Sprint</option>
+          <option value="Rifle Idle.fbx">Rifle Idle</option>
+          <option value="Firing Rifle.fbx">Firing Rifle</option>
+          <option value="Jump.fbx">Jump</option>
+          <option value="Crouched Walk.fbx">Crouched Walk</option>
+          <option value="Crouching Idle.fbx">Crouching Idle</option>
+        </select>
+      </div>
+
+      <button id="toggleAnimBtn">Play / Pause Animation</button>
+      <button id="resetTransformBtn">Reset Transform to Defaults</button>
+
+      <hr/>
+      
+      <div class="control-group">
+        <label>Position X <span id="valPosX" class="val-display">0.00</span></label>
+        <input type="range" id="posX" min="-1" max="1" step="0.005" value="0.0">
+      </div>
+      <div class="control-group">
+        <label>Position Y <span id="valPosY" class="val-display">0.00</span></label>
+        <input type="range" id="posY" min="-1" max="1" step="0.005" value="0.0">
+      </div>
+      <div class="control-group">
+        <label>Position Z <span id="valPosZ" class="val-display">0.00</span></label>
+        <input type="range" id="posZ" min="-1" max="1" step="0.005" value="0.0">
+      </div>
+
+      <hr/>
+      
+      <div class="control-group">
+        <label>Rotation X (Pitch) <span id="valRotX" class="val-display">0.00</span></label>
+        <input type="range" id="rotX" min="-3.14" max="3.14" step="0.01" value="0.0">
+      </div>
+      <div class="control-group">
+        <label>Rotation Y (Yaw) <span id="valRotY" class="val-display">0.00</span></label>
+        <input type="range" id="rotY" min="-3.14" max="3.14" step="0.01" value="0.0">
+      </div>
+      <div class="control-group">
+        <label>Rotation Z (Roll) <span id="valRotZ" class="val-display">0.00</span></label>
+        <input type="range" id="rotZ" min="-3.14" max="3.14" step="0.01" value="0.0">
+      </div>
+
+      <hr/>
+      
+      <div class="control-group">
+        <label>Scale <span id="valScale" class="val-display">0.0085</span></label>
+        <input type="range" id="scale" min="0.001" max="0.02" step="0.0001" value="0.0085">
+      </div>
+
+      <button id="copyBtn">Copy Config JSON</button>
+      <div id="output"></div>
+    </div>
+    <script type="module" src="/src/gunsadjust.ts"></script>
+  </body>
+</html>
