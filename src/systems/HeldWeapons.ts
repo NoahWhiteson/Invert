@@ -26,8 +26,8 @@ varying float vHeight;
 uniform sampler2D uTexture;
 void main() {
   vec4 texColor = texture2D(uTexture, vUv);
-  vec3 baseColor = vec3(1.0);
-  
+  vec3 baseColor = texColor.rgb;
+
   // Height shading - gun scale is much smaller than trees
   float hFactor = clamp(vHeight * 0.5 + 0.5, 0.0, 1.0);
   float shade = mix(0.75, 1.0, 0.4 + hFactor * 0.6);
@@ -69,15 +69,10 @@ function applyTreeStyleMesh(mesh: THREE.Mesh, sharedWhite: THREE.CanvasTexture) 
   const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
   const newMats: THREE.ShaderMaterial[] = []
 
-  for (const src of mats) {
-    const std = src as THREE.MeshStandardMaterial
-    const map =
-      'map' in std && std.map ? (std.map as THREE.Texture) : null
-    if (map) {
-      map.colorSpace = THREE.SRGBColorSpace
-      map.magFilter = THREE.NearestFilter
-    }
-    const tex = map ?? sharedWhite
+  for (let mi = 0; mi < mats.length; mi++) {
+    // Stylized white fill + black outline — ignore FBX diffuse so AK/shotgun/nade match art direction.
+    // Custom skins (e.g. fabric on AK) replace `uTexture` later via `setSlotAlbedoTexture`.
+    const tex = sharedWhite
 
     newMats.push(
       new THREE.ShaderMaterial({
@@ -197,6 +192,7 @@ export class HeldWeapons {
   private anchor: THREE.Group
   private roots: (THREE.Group | null)[] = [null, null, null]
   private muzzleAnchors: (THREE.Group | null)[] = [null, null, null]
+  private sharedWhiteTex: THREE.CanvasTexture | null = null
   private loaded = false
   private activeSlot = 0
   private thirdPerson = false
@@ -248,6 +244,10 @@ export class HeldWeapons {
     this.anchor.name = 'heldWeaponsFP'
     this.anchor.visible = false
     camera.add(this.anchor)
+  }
+
+  public get weaponsLoaded(): boolean {
+    return this.loaded
   }
 
   public get currentConfig(): SlotConfig | null {
@@ -313,6 +313,7 @@ export class HeldWeapons {
   public async loadAll(): Promise<void> {
     const loader = new FBXLoader()
     const sharedWhite = whiteTexture()
+    this.sharedWhiteTex = sharedWhite
 
     for (let i = 0; i < SLOT_CONFIG.length; i++) {
       const cfg = SLOT_CONFIG[i]!
@@ -393,6 +394,31 @@ export class HeldWeapons {
     if (!root) return null
     // The actual weapon model is the first child of the wrap group
     return root.children[0] || null
+  }
+
+  /** Albedo for first-person weapon shader (`uTexture`). Pass `null` to restore white. */
+  public setSlotAlbedoTexture(slot: number, texture: THREE.Texture | null) {
+    if (!this.loaded) return
+    const root = this.roots[slot]
+    const fallback = this.sharedWhiteTex ?? whiteTexture()
+    const tex = texture ?? fallback
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.magFilter = THREE.NearestFilter
+    tex.minFilter = THREE.NearestFilter
+    if (!root) return
+    root.traverse((obj) => {
+      if (obj.name === 'weaponOutline' || obj.name === 'muzzleFlashAnchor') return
+      const m = obj as THREE.Mesh
+      if (!m.isMesh || !m.material) return
+      const mats = Array.isArray(m.material) ? m.material : [m.material]
+      for (const mat of mats) {
+        const sm = mat as THREE.ShaderMaterial
+        if (sm.isShaderMaterial && sm.uniforms?.uTexture) {
+          sm.uniforms.uTexture.value = tex
+          tex.needsUpdate = true
+        }
+      }
+    })
   }
 
   public getMuzzleWorldPosAndDir(targetPos: THREE.Vector3, targetDir: THREE.Vector3) {

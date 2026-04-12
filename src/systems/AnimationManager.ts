@@ -217,16 +217,21 @@ export class AnimationManager {
 
     const nextAction = this.actions.get(state)
 
-    if (nextAction) {
-      this.actions.forEach(action => {
-        if (action !== nextAction && action.isRunning()) {
-          action.fadeOut(duration)
-        }
-      })
-      nextAction.reset().fadeIn(duration).play()
-      nextAction.paused = false // Ensure it's not paused
-      this.currentState = state
+    if (!nextAction) {
+      if (state !== 'idle') {
+        this.setState('idle', duration)
+      }
+      return
     }
+
+    this.actions.forEach((action) => {
+      if (action !== nextAction && action.isRunning()) {
+        action.fadeOut(duration)
+      }
+    })
+    nextAction.reset().fadeIn(duration).play()
+    nextAction.paused = false
+    this.currentState = state
   }
 
   private detachFiringFinishedListener() {
@@ -241,15 +246,15 @@ export class AnimationManager {
     const firingAction = this.actions.get('firing')
     const state = this.pendingLocomotion
     if (state === 'jump') {
-      this.jumpPhase = 'rising'
       const jumpAction = this.actions.get('jump')
       if (jumpAction) {
+        this.jumpPhase = 'rising'
         jumpAction.reset().fadeIn(this.FIRE_FADE_OUT).play()
         jumpAction.paused = false
+        this.currentState = 'jump'
+        if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+        return
       }
-      this.currentState = 'jump'
-      if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
-      return
     }
 
     const nextAction = this.actions.get(state)
@@ -262,6 +267,15 @@ export class AnimationManager {
       nextAction.setEffectiveTimeScale(1).fadeIn(this.FIRE_FADE_OUT).play()
       if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
       this.currentState = state
+      return
+    }
+
+    const idle = this.actions.get('idle')
+    if (idle) {
+      idle.reset().fadeIn(this.FIRE_FADE_OUT).play()
+      if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+      this.currentState = 'idle'
+      this.pendingLocomotion = 'idle'
     }
   }
 
@@ -369,6 +383,60 @@ export class AnimationManager {
       }
     }
     this.mixer.update(dt)
+  }
+
+  /** Firing sometimes never gets mixer `finished` (e.g. state churn); snap back to walk/idle. */
+  public repairFiringStale() {
+    if (this.currentState !== 'firing') return
+    const firing = this.actions.get('firing')
+    if (!firing) {
+      this.currentState = 'idle'
+      const idle = this.actions.get('idle')
+      if (idle) {
+        idle.reset().fadeIn(0.1).play()
+      }
+      return
+    }
+    const dur = Math.max(firing.getClip().duration, 1 / 60)
+    const done = !firing.isRunning() || firing.time + 1 / 60 >= dur * 0.995
+    if (done) {
+      this.detachFiringFinishedListener()
+      this.resumeLocomotionAfterFire()
+    }
+  }
+
+  /** Mixers sometimes end with zero weight (load races / fades); force idle so skinned mesh never T-poses. */
+  public ensureAnyActionOrIdle() {
+    if (this.ragdollFrozen) return
+    if (this.currentState === 'firing') return
+    let anyRunning = false
+    let sumW = 0
+    this.actions.forEach((a) => {
+      sumW += a.getEffectiveWeight()
+      if (a.isRunning()) anyRunning = true
+    })
+    if (anyRunning) return
+    if (sumW < 0.05) {
+      const idle = this.actions.get('idle')
+      if (idle) {
+        idle.reset().fadeIn(0.06).play()
+        this.currentState = 'idle'
+      }
+    }
+  }
+
+  /** After ragdoll / bad mixer state: single clean idle baseline. */
+  public hardResetToIdle() {
+    this.detachFiringFinishedListener()
+    this.ragdollFrozen = false
+    this.mixer.timeScale = 1
+    this.mixer.stopAllAction()
+    this.pendingLocomotion = 'idle'
+    const idle = this.actions.get('idle')
+    if (idle) {
+      idle.reset().play()
+    }
+    this.currentState = 'idle'
   }
 
   public getCurrentState(): AnimationState {

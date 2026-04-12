@@ -1,4 +1,6 @@
 import { InputManager } from '../core/Input'
+import { applyAccountBackupJson, API_ACCOUNT_ID_KEY, getAccountBackupJson } from '../store/skinEconomy'
+import { ECONOMY_RELOADED_EVENT, trySyncEconomyFromApi } from '../net/invertEconomySync'
 import { Crosshair } from './Crosshair'
 
 export type SoundType = 'master' | 'gun' | 'impact' | 'explosion'
@@ -11,12 +13,21 @@ export class SettingsUI {
   private overlay: HTMLDivElement
   private title: HTMLHeadingElement
   private resetBtn: HTMLDivElement
+  private uuidBlock: HTMLDivElement
+  private uuidValueEl: HTMLSpanElement
+  private copyBackupBtn: HTMLDivElement
+  private restoreBackupBtn: HTMLDivElement
+  /** While > Date.now(), `refreshAccountUuidLabel` must not overwrite "Copied". */
+  private copyUuidFlashUntil = 0
+  private copyUuidFlashTimer: ReturnType<typeof setTimeout> | null = null
   public isOpen: boolean = false
 
   private currentScale: number = 1.0
   private targetScale: number = 1.0
   private isMouseDown: boolean = false
   private isHovering: boolean = false
+  /** Extra elements (e.g. main menu nav) that should use the click-hand cursor when hovered. */
+  private extraCursorTargets: HTMLElement[] = []
 
   // Slider State (FOV)
   public fovPercent: number = 0.8
@@ -247,6 +258,86 @@ export class SettingsUI {
     this.resetBtn.style.pointerEvents = 'none'
     document.body.appendChild(this.resetBtn)
 
+    this.uuidBlock = document.createElement('div')
+    this.uuidBlock.style.position = 'fixed'
+    this.uuidBlock.style.top = 'calc(50% + 428px)'
+    this.uuidBlock.style.left = '50%'
+    this.uuidBlock.style.transform = 'translate(-50%, -50%)'
+    this.uuidBlock.style.width = 'min(92vw, 480px)'
+    this.uuidBlock.style.display = 'flex'
+    this.uuidBlock.style.flexDirection = 'column'
+    this.uuidBlock.style.alignItems = 'center'
+    this.uuidBlock.style.gap = '6px'
+    this.uuidBlock.style.opacity = '0'
+    this.uuidBlock.style.pointerEvents = 'none'
+    this.uuidBlock.style.zIndex = '1700'
+
+    const uuidTitle = document.createElement('div')
+    uuidTitle.textContent = 'YOUR UUID'
+    uuidTitle.style.color = 'white'
+    uuidTitle.style.fontFamily = "'m6x11', monospace"
+    uuidTitle.style.fontSize = '22px'
+    uuidTitle.style.webkitTextStroke = '5px #000'
+    uuidTitle.style.paintOrder = 'stroke fill'
+    uuidTitle.style.letterSpacing = '1.5px'
+
+    this.uuidValueEl = document.createElement('span')
+    this.uuidValueEl.style.color = 'white'
+    this.uuidValueEl.style.fontFamily = "'m6x11', monospace"
+    this.uuidValueEl.style.fontSize = '16px'
+    this.uuidValueEl.style.lineHeight = '1.25'
+    this.uuidValueEl.style.textAlign = 'center'
+    this.uuidValueEl.style.wordBreak = 'break-all'
+    this.uuidValueEl.style.webkitTextStroke = '3px #000'
+    this.uuidValueEl.style.paintOrder = 'stroke fill'
+    this.uuidValueEl.style.cursor = 'none'
+
+    const backupHint = document.createElement('div')
+    backupHint.textContent =
+      'Coins live on the server. Clearing site data only removes this device login — use backup to keep the same account.'
+    backupHint.style.color = '#ddd'
+    backupHint.style.fontFamily = "'m6x11', monospace"
+    backupHint.style.fontSize = '12px'
+    backupHint.style.lineHeight = '1.35'
+    backupHint.style.textAlign = 'center'
+    backupHint.style.maxWidth = '440px'
+    backupHint.style.webkitTextStroke = '2px #000'
+    backupHint.style.paintOrder = 'stroke fill'
+
+    const backupRow = document.createElement('div')
+    backupRow.style.display = 'flex'
+    backupRow.style.flexDirection = 'row'
+    backupRow.style.gap = '12px'
+    backupRow.style.marginTop = '2px'
+    backupRow.style.flexWrap = 'wrap'
+    backupRow.style.justifyContent = 'center'
+
+    const backupBtnStyle = (el: HTMLDivElement, label: string) => {
+      el.textContent = label
+      el.style.color = 'white'
+      el.style.fontFamily = "'m6x11', monospace"
+      el.style.fontSize = '20px'
+      el.style.webkitTextStroke = '4px #000'
+      el.style.paintOrder = 'stroke fill'
+      el.style.cursor = 'none'
+      el.style.letterSpacing = '0.5px'
+    }
+
+    this.copyBackupBtn = document.createElement('div')
+    backupBtnStyle(this.copyBackupBtn, 'COPY BACKUP')
+    this.restoreBackupBtn = document.createElement('div')
+    backupBtnStyle(this.restoreBackupBtn, 'RESTORE')
+
+    backupRow.appendChild(this.copyBackupBtn)
+    backupRow.appendChild(this.restoreBackupBtn)
+
+    this.uuidBlock.appendChild(uuidTitle)
+    this.uuidBlock.appendChild(this.uuidValueEl)
+    this.uuidBlock.appendChild(backupHint)
+    this.uuidBlock.appendChild(backupRow)
+    document.body.appendChild(this.uuidBlock)
+    this.refreshAccountUuidLabel()
+
     this.load()
 
     // Handle clicks
@@ -265,6 +356,76 @@ export class SettingsUI {
 
     this.updateStyleButtons()
     this.updateGraphicButtons()
+  }
+
+  private readStoredAccountId(): string {
+    try {
+      return localStorage.getItem(API_ACCOUNT_ID_KEY)?.trim() ?? ''
+    } catch {
+      return ''
+    }
+  }
+
+  private tryCopyAccountBackup() {
+    const j = getAccountBackupJson()
+    if (!j) return
+    void navigator.clipboard.writeText(j).then(
+      () => {
+        this.playClick()
+      },
+      () => {
+        /* clipboard denied */
+      }
+    )
+  }
+
+  private tryRestoreAccountBackup() {
+    const raw = window.prompt('Paste full JSON from Copy backup')
+    if (raw === null || raw.trim() === '') return
+    if (!applyAccountBackupJson(raw)) {
+      window.alert('Invalid backup JSON')
+      return
+    }
+    void trySyncEconomyFromApi().then(() => {
+      window.dispatchEvent(new CustomEvent(ECONOMY_RELOADED_EVENT))
+    })
+    this.playClick()
+  }
+
+  private tryCopyAccountUuid() {
+    const id = this.readStoredAccountId()
+    if (!id) return
+    void navigator.clipboard.writeText(id).then(
+      () => {
+        if (this.copyUuidFlashTimer !== null) {
+          clearTimeout(this.copyUuidFlashTimer)
+          this.copyUuidFlashTimer = null
+        }
+        this.copyUuidFlashUntil = Date.now() + 2000
+        this.uuidValueEl.textContent = 'Copied'
+        this.playClick()
+        this.copyUuidFlashTimer = window.setTimeout(() => {
+          this.copyUuidFlashTimer = null
+          this.copyUuidFlashUntil = 0
+          this.refreshAccountUuidLabel()
+        }, 2000)
+      },
+      () => {
+        /* clipboard denied */
+      }
+    )
+  }
+
+  public refreshAccountUuidLabel() {
+    if (Date.now() < this.copyUuidFlashUntil) return
+    const id = this.readStoredAccountId()
+    if (id.length > 0) {
+      this.uuidValueEl.textContent = id
+      return
+    }
+    this.uuidValueEl.textContent = import.meta.env.DEV
+      ? 'Offline — run npm run server (port 8787)'
+      : '—'
   }
 
   private load() {
@@ -348,10 +509,12 @@ export class SettingsUI {
       `
   }
 
-  private toggleMenu() {
-    this.isOpen = !this.isOpen
-    this.playClick()
-    if (this.isOpen) {
+  private setMenuOpen(open: boolean, playSound: boolean) {
+    if (this.isOpen === open) return
+    this.isOpen = open
+    if (playSound) this.playClick()
+    if (open) {
+      this.refreshAccountUuidLabel()
       this.menu.style.opacity = '1'
       this.menu.style.pointerEvents = 'auto'
       this.overlay.style.opacity = '1'
@@ -359,6 +522,7 @@ export class SettingsUI {
       this.title.style.opacity = '1'
       this.resetBtn.style.opacity = '1'
       this.resetBtn.style.pointerEvents = 'auto'
+      this.uuidBlock.style.opacity = '1'
       this.button.style.filter = 'drop-shadow(2px 2px 0px #000) brightness(0.7)'
     } else {
       this.menu.style.opacity = '0'
@@ -368,9 +532,23 @@ export class SettingsUI {
       this.title.style.opacity = '0'
       this.resetBtn.style.opacity = '0'
       this.resetBtn.style.pointerEvents = 'none'
+      this.uuidBlock.style.opacity = '0'
       this.button.style.filter = 'drop-shadow(2px 2px 0px #000)'
       this.save()
     }
+  }
+
+  private toggleMenu() {
+    this.setMenuOpen(!this.isOpen, true)
+  }
+
+  public openMenu() {
+    if (this.isOpen) return
+    this.setMenuOpen(true, true)
+  }
+
+  public registerCursorTargets(elements: HTMLElement[]) {
+    this.extraCursorTargets = elements
   }
 
   private resetValues() {
@@ -542,9 +720,76 @@ export class SettingsUI {
         this.isMouseDown = false
       }
 
+      const uuidRect = this.uuidValueEl.getBoundingClientRect()
+      const hasAccountId = this.readStoredAccountId().length > 0
+      const isOverUuid =
+        this.isOpen &&
+        hasAccountId &&
+        uuidRect.width > 4 &&
+        uuidRect.height > 4 &&
+        mx >= uuidRect.left &&
+        mx <= uuidRect.right &&
+        my >= uuidRect.top &&
+        my <= uuidRect.bottom
+      if (isOverUuid && this.isMouseDown && this.isOpen) {
+        this.tryCopyAccountUuid()
+        this.isMouseDown = false
+      }
+
+      const copyBr = this.copyBackupBtn.getBoundingClientRect()
+      const restoreBr = this.restoreBackupBtn.getBoundingClientRect()
+      const isOverCopyBackup =
+        this.isOpen &&
+        getAccountBackupJson() !== null &&
+        copyBr.width > 4 &&
+        copyBr.height > 4 &&
+        mx >= copyBr.left &&
+        mx <= copyBr.right &&
+        my >= copyBr.top &&
+        my <= copyBr.bottom
+      const isOverRestoreBackup =
+        this.isOpen &&
+        restoreBr.width > 4 &&
+        restoreBr.height > 4 &&
+        mx >= restoreBr.left &&
+        mx <= restoreBr.right &&
+        my >= restoreBr.top &&
+        my <= restoreBr.bottom
+      if (isOverCopyBackup && this.isMouseDown && this.isOpen) {
+        this.tryCopyAccountBackup()
+        this.isMouseDown = false
+      }
+      if (isOverRestoreBackup && this.isMouseDown && this.isOpen) {
+        this.tryRestoreAccountBackup()
+        this.isMouseDown = false
+      }
+
+      let isOverExtraTarget = false
+      for (const el of this.extraCursorTargets) {
+        const r = el.getBoundingClientRect()
+        if (r.width < 1 && r.height < 1) continue
+        if (mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {
+          isOverExtraTarget = true
+          break
+        }
+      }
+
       this.isHovering = isOverButton
 
-      if (this.isHovering || isOverTrack || this.isDraggingFov || isOverCircle || isOverPlus || this.draggingType || isOverGraphic || isOverReset) {
+      if (
+        this.isHovering ||
+        isOverTrack ||
+        this.isDraggingFov ||
+        isOverCircle ||
+        isOverPlus ||
+        this.draggingType ||
+        isOverGraphic ||
+        isOverReset ||
+        isOverUuid ||
+        isOverCopyBackup ||
+        isOverRestoreBackup ||
+        isOverExtraTarget
+      ) {
         this.customCursor.src = new URL('../assets/icons/click.png', import.meta.url).href
         this.targetScale = this.isMouseDown ? 0.75 : 1.1
       } else {

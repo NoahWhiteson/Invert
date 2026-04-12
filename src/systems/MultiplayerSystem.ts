@@ -16,7 +16,10 @@ interface NetworkPlayer {
   id: string
   username: string
   model: THREE.Group
+  /** PvP kills (server). */
   kills: number
+  /** Bot kills (server). */
+  botKills: number
   lastUpdate: number
   targetPos: THREE.Vector3
   targetQuat: THREE.Quaternion
@@ -38,6 +41,10 @@ interface NetworkPlayer {
 
 export class MultiplayerSystem {
   private socket: WebSocket | null = null
+  private connectUrl: string | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectAttempt = 0
+  private intentionalClose = false
   private players: Map<string, NetworkPlayer> = new Map()
   private localPlayerId: string | null = null
   private scene: THREE.Scene
@@ -62,9 +69,18 @@ export class MultiplayerSystem {
     killerName?: string,
     weapon?: string,
     deathIncoming?: { x: number; y: number; z: number },
-    victimName?: string
+    victimName?: string,
+    /** Authoritative PvP kill count for the attacker (from server). */
+    killerKills?: number,
+    killerBotKills?: number
   ) => void
   public onWorldState?: (state: WorldState) => void
+  /** Server-authoritative PvP + bot counts for the local player (init + player_stats). */
+  public onSessionStats?: (pvpKills: number, botKills: number) => void
+  /** Any roster kill stats changed (remote or local); refresh leaderboard. */
+  public onPlayerStatsUpdate?: () => void
+  /** Server-resolved display name (unique in room; init or after collision fix). */
+  public onLocalUsername?: (username: string) => void
   public onBloodSpawn?: (point: THREE.Vector3, dir: THREE.Vector3, count: number) => void
   public onRemoteFired?: (position: THREE.Vector3, slot: number) => void
   public onRemoteSound?: (
@@ -142,22 +158,96 @@ export class MultiplayerSystem {
   }
 
   public connect(url: string) {
-    this.socket = new WebSocket(url)
-    
-    this.socket.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      this.handleMessage(data)
-    }
+    this.intentionalClose = false
+    this.connectUrl = url
+    this.clearReconnectTimer()
+    this.reconnectAttempt = 0
+    this.openSocket()
+  }
 
-    this.socket.onclose = () => {
-      console.log("Multiplayer connection closed")
+  /** Stop reconnecting and close the socket. */
+  public disconnect() {
+    this.intentionalClose = true
+    this.connectUrl = null
+    this.clearReconnectTimer()
+    if (this.socket) {
+      try {
+        this.socket.close()
+      } catch {
+        /* noop */
+      }
       this.socket = null
     }
   }
 
+  private clearReconnectTimer() {
+    if (this.reconnectTimer != null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.intentionalClose || !this.connectUrl) return
+    if (this.reconnectTimer != null) return
+    const exp = Math.min(this.reconnectAttempt, 6)
+    const delay = Math.min(30_000, 800 * Math.pow(2, exp))
+    this.reconnectAttempt++
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      console.warn(`[multiplayer] reconnect attempt ${this.reconnectAttempt}…`)
+      this.openSocket()
+    }, delay)
+  }
+
+  private openSocket() {
+    if (!this.connectUrl) return
+    if (
+      this.socket !== null &&
+      (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
+    this.socket = new WebSocket(this.connectUrl)
+
+    this.socket.onopen = () => {
+      this.reconnectAttempt = 0
+    }
+
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data as string)
+        this.handleMessage(data)
+      } catch (e) {
+        console.warn('[multiplayer] bad message', e)
+      }
+    }
+
+    this.socket.onerror = () => {
+      console.warn('[multiplayer] socket error')
+    }
+
+    this.socket.onclose = () => {
+      console.log('[multiplayer] connection closed')
+      this.socket = null
+      if (!this.intentionalClose && this.connectUrl) {
+        this.scheduleReconnect()
+      }
+    }
+  }
+
+  private clearRemotePlayers() {
+    for (const id of [...this.players.keys()]) {
+      this.removePlayer(id)
+    }
+  }
+
   private handleMessage(data: any) {
-    switch (data.type) {
+    try {
+      if (!data || typeof data !== 'object') return
+      switch (data.type) {
       case "init":
+        this.clearRemotePlayers()
         this.localPlayerId = data.playerId
         console.log("Local player ID:", this.localPlayerId)
         this.worldState = {
@@ -165,13 +255,26 @@ export class MultiplayerSystem {
           treeLayout: Array.isArray(data.treeLayout) ? data.treeLayout : [],
         }
         this.onWorldState?.(this.worldState)
-        // Process existing players already in the room
         if (data.players) {
-          data.players.forEach(([id, playerData]: [string, any]) => {
-            if (id !== this.localPlayerId) {
+          for (const entry of data.players as [string, any][]) {
+            const [id, playerData] = entry
+            if (id === this.localPlayerId) {
+              const pvp = typeof playerData.kills === 'number' ? playerData.kills : 0
+              const bot = typeof playerData.botKills === 'number' ? playerData.botKills : 0
+              this.onSessionStats?.(pvp, bot)
+              // Do not apply init username — server starts as Player_NNN; that would wipe
+              // menu/localStorage before the first move sends the real display name.
+            } else {
               this.updateRemotePlayer({ ...playerData, playerId: id })
             }
-          })
+          }
+        }
+        this.onPlayerStatsUpdate?.()
+        break
+
+      case "username_sync":
+        if (typeof data.username === 'string' && data.username.length > 0) {
+          this.onLocalUsername?.(data.username)
         }
         break
 
@@ -199,14 +302,23 @@ export class MultiplayerSystem {
         }
         break
 
-      case "player_killed":
+      case "player_killed": {
+        if (typeof data.attackerId === 'string') {
+          const killerP = this.players.get(data.attackerId)
+          if (killerP) {
+            if (typeof data.killerKills === 'number') killerP.kills = data.killerKills
+            if (typeof data.killerBotKills === 'number') killerP.botKills = data.killerBotKills
+          }
+        }
         this.onPlayerKilled?.(
           data.targetId,
           data.attackerId,
           data.killerName,
           data.weapon,
           data.deathIncoming,
-          data.victimName
+          data.victimName,
+          typeof data.killerKills === 'number' ? data.killerKills : undefined,
+          typeof data.killerBotKills === 'number' ? data.killerBotKills : undefined
         )
         const deadPlayer = this.players.get(data.targetId)
         if (deadPlayer) {
@@ -217,6 +329,7 @@ export class MultiplayerSystem {
           deadPlayer.ragdoll = tryCreateSkeletonRagdoll(deadPlayer.model, deadPlayer.anims, impulse)
         }
         break
+      }
 
       case "blood_spawn":
         if (data.point && data.dir) {
@@ -266,6 +379,27 @@ export class MultiplayerSystem {
           }
         }
         break
+
+      case "player_stats": {
+        const pid = data.playerId as string
+        if (typeof pid !== 'string') break
+        if (pid === this.localPlayerId) {
+          const pvp = typeof data.kills === 'number' ? data.kills : 0
+          const bot = typeof data.botKills === 'number' ? data.botKills : 0
+          this.onSessionStats?.(pvp, bot)
+        } else {
+          const p = this.players.get(pid)
+          if (p) {
+            if (typeof data.kills === 'number') p.kills = data.kills
+            if (typeof data.botKills === 'number') p.botKills = data.botKills
+          }
+        }
+        this.onPlayerStatsUpdate?.()
+        break
+      }
+      }
+    } catch (e) {
+      console.warn('[multiplayer] handleMessage error', e)
     }
   }
 
@@ -280,7 +414,8 @@ export class MultiplayerSystem {
     p.targetQuat.set(data.quat.x, data.quat.y, data.quat.z, data.quat.w)
     p.targetViewYaw = typeof data.viewYaw === 'number' ? data.viewYaw : 0
     p.activeSlot = data.slot !== undefined ? data.slot : 0
-    p.kills = data.kills
+    if (typeof data.kills === 'number') p.kills = data.kills
+    if (typeof data.botKills === 'number') p.botKills = data.botKills
     p.lastUpdate = Date.now()
     
     // Update visible gun
@@ -394,6 +529,7 @@ export class MultiplayerSystem {
       username,
       model,
       kills: 0,
+      botKills: 0,
       lastUpdate: Date.now(),
       targetPos: new THREE.Vector3().set(0, 0, 0),
       targetQuat: new THREE.Quaternion().identity(),
@@ -511,6 +647,15 @@ export class MultiplayerSystem {
     tex.needsUpdate = true
   }
 
+  private safeSend(payload: object) {
+    if (this.socket?.readyState !== WebSocket.OPEN) return
+    try {
+      this.socket.send(JSON.stringify(payload))
+    } catch (e) {
+      console.warn('[multiplayer] send failed', e)
+    }
+  }
+
   private removePlayer(id: string) {
     const p = this.players.get(id)
     if (p) {
@@ -534,9 +679,8 @@ export class MultiplayerSystem {
     slot: number = 0,
     isDead: boolean = false
   ) {
-    // Send local update only if not dead
-    if (!isDead && this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({
+    if (!isDead) {
+      this.safeSend({
         type: "move",
         pos: { x: localPos.x, y: localPos.y, z: localPos.z },
         quat: { x: localQuat.x, y: localQuat.y, z: localQuat.z, w: localQuat.w },
@@ -545,7 +689,7 @@ export class MultiplayerSystem {
         kills,
         anim,
         slot
-      }))
+      })
     }
 
     // Update remote players (Interpolation)
@@ -592,56 +736,53 @@ export class MultiplayerSystem {
   }
 
   public sendDamage(targetId: string, damage: number, weapon?: string, incomingWorld?: THREE.Vector3) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(
-        JSON.stringify({
-          type: "damage",
-          targetId,
-          damage,
-          weapon,
-          incoming: incomingWorld
-            ? { x: incomingWorld.x, y: incomingWorld.y, z: incomingWorld.z }
-            : undefined,
-        })
-      )
-    }
+    this.safeSend({
+      type: "damage",
+      targetId,
+      damage,
+      weapon,
+      incoming: incomingWorld
+        ? { x: incomingWorld.x, y: incomingWorld.y, z: incomingWorld.z }
+        : undefined,
+    })
   }
 
   public sendKill(targetId: string) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({
-        type: "kill",
-        targetId
-      }))
-    }
+    this.safeSend({
+      type: "kill",
+      targetId
+    })
+  }
+
+  /** Tell the server you scored a bot kill (authoritative count broadcast to everyone). */
+  public notifyBotKill() {
+    this.safeSend({ type: "bot_kill" })
   }
 
   public sendBlood(point: THREE.Vector3, dir: THREE.Vector3, count: number = 4) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({
-        type: "blood",
-        point: { x: point.x, y: point.y, z: point.z },
-        dir: { x: dir.x, y: dir.y, z: dir.z },
-        count
-      }))
-    }
+    this.safeSend({
+      type: "blood",
+      point: { x: point.x, y: point.y, z: point.z },
+      dir: { x: dir.x, y: dir.y, z: dir.z },
+      count
+    })
   }
 
   public sendSound(sound: 'ak' | 'shotgun' | 'reload' | string, pos: THREE.Vector3, volume: number = 1) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({
-        type: "sound",
-        sound,
-        pos: { x: pos.x, y: pos.y, z: pos.z },
-        volume
-      }))
-    }
+    this.safeSend({
+      type: "sound",
+      sound,
+      pos: { x: pos.x, y: pos.y, z: pos.z },
+      volume
+    })
   }
 
   public sendRespawn() {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: "respawn" }))
-    }
+    this.safeSend({ type: "respawn" })
+  }
+
+  public isConnected(): boolean {
+    return this.socket?.readyState === WebSocket.OPEN
   }
 
   public getRaycastTargets(): THREE.Object3D[] {

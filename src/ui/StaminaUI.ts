@@ -1,6 +1,7 @@
 export class StaminaUI {
   private container: HTMLDivElement
   private bar: HTMLDivElement
+  private suppressForMenu = false
 
   constructor() {
     this.container = document.createElement('div')
@@ -27,7 +28,17 @@ export class StaminaUI {
     this.container.appendChild(this.bar)
   }
 
+  public setSuppressForMenu(suppress: boolean) {
+    this.suppressForMenu = suppress
+    if (suppress) this.container.style.opacity = '0'
+  }
+
   public update(stamina: number, maxStamina: number, isSprinting: boolean, isTrying: boolean, currentTime: number, lastFailedTime: number) {
+    if (this.suppressForMenu) {
+      this.container.style.opacity = '0'
+      return
+    }
+
     const staminaPercent = (stamina / maxStamina) * 100
     this.bar.style.width = `${staminaPercent}%`
 

@@ -5,6 +5,21 @@ import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
 const IDLE_FBX = new URL('../assets/player/animations/Idle.fbx', import.meta.url).href
 
+/** Slightly larger than body; BackSide + black reads as a hard silhouette stroke (no blur). */
+const OUTLINE_HULL_SCALE = 1.14
+
+function createOutlineShellMaterial(): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    side: THREE.BackSide,
+    depthWrite: false,
+    toneMapped: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4,
+  })
+}
+
 /**
  * Static player mesh from Idle.fbx (now with AnimationManager).
  * Feet follow physics: snapped to inner sphere when grounded, same offset as body when airborne.
@@ -47,6 +62,7 @@ export class PlayerModel {
       }
     })
 
+    const shellMat = createOutlineShellMaterial()
     for (const m of meshes) {
       m.castShadow = true
       m.receiveShadow = true
@@ -58,12 +74,32 @@ export class PlayerModel {
         side: THREE.DoubleSide,
       })
 
-      // Add black outline
-      const outlineMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide })
-      const outlineMesh = new THREE.Mesh(m.geometry, outlineMat)
-      outlineMesh.scale.multiplyScalar(1.05)
-      outlineMesh.name = 'characterOutline'
-      m.add(outlineMesh)
+      let shell: THREE.Mesh | THREE.SkinnedMesh
+      if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
+        const sm = m as THREE.SkinnedMesh
+        const skinShell = new THREE.SkinnedMesh(sm.geometry, shellMat)
+        skinShell.skeleton = sm.skeleton
+        skinShell.bindMatrix.copy(sm.bindMatrix)
+        skinShell.bindMatrixInverse.copy(sm.bindMatrixInverse)
+        skinShell.frustumCulled = false
+        shell = skinShell
+      } else {
+        shell = new THREE.Mesh(m.geometry, shellMat)
+      }
+      shell.name = 'characterOutline'
+      shell.castShadow = false
+      shell.receiveShadow = false
+      shell.renderOrder = 1
+      const parent = m.parent
+      if (parent) {
+        shell.position.copy(m.position)
+        shell.quaternion.copy(m.quaternion)
+        shell.scale.copy(m.scale).multiplyScalar(OUTLINE_HULL_SCALE)
+        parent.add(shell)
+      } else {
+        shell.scale.copy(m.scale).multiplyScalar(OUTLINE_HULL_SCALE)
+        m.add(shell)
+      }
     }
 
       const shadowGeo = new THREE.CircleGeometry(0.55, 24)
@@ -115,9 +151,99 @@ export class PlayerModel {
     }
   }
 
-  public setVisible(visible: boolean) {
+  public setVisible(visible: boolean, includeFootShadow = true) {
     if (this.root) this.root.visible = visible
-    if (this.footShadow) this.footShadow.visible = visible
+    if (this.footShadow) {
+      this.footShadow.visible = visible && includeFootShadow
+    }
+  }
+
+  public setOutlineVisible(visible: boolean) {
+    if (!this.root) return
+    this.root.traverse((c) => {
+      if (c.name === 'characterOutline' || c.name === 'weaponOutline') {
+        c.visible = visible
+      }
+    })
+  }
+
+  public setCharacterCastShadow(enabled: boolean) {
+    if (!this.root) return
+    this.root.traverse((c) => {
+      if (c.name === 'characterOutline' || c.name === 'weaponOutline') return
+      if ((c as THREE.Mesh).isMesh) {
+        ;(c as THREE.Mesh).castShadow = enabled
+      }
+    })
+  }
+
+  /** Albedo map for third-person weapon meshes (slot 0 = AK). `null` clears to flat white. */
+  public setThirdPersonGunMap(slot: number, map: THREE.Texture | null) {
+    const g = this.thirdPersonGuns[slot]
+    if (!g) return
+    g.traverse((obj) => {
+      if (obj.name === 'weaponOutline') return
+      const m = obj as THREE.Mesh
+      if (!m.isMesh || !m.material) return
+      const mats = Array.isArray(m.material) ? m.material : [m.material]
+      for (const raw of mats) {
+        const mat = raw as THREE.MeshToonMaterial
+        if (!mat.isMeshToonMaterial) continue
+        if (map) {
+          map.colorSpace = THREE.SRGBColorSpace
+          mat.map = map
+          mat.color.set(0xffffff)
+        } else {
+          mat.map = null
+          mat.color.set(0xffffff)
+        }
+        mat.needsUpdate = true
+      }
+    })
+  }
+
+  /** Main menu: third-person weapon visibility only (body parented in camera space in main). */
+  public applyMenuWeaponSlot(activeSlot: number) {
+    if (!this.root) return
+    this.activeWeaponSlot = activeSlot
+    for (let i = 0; i < this.thirdPersonGuns.length; i++) {
+      const g = this.thirdPersonGuns[i]
+      if (g) g.visible = i === activeSlot
+    }
+    if (this.footShadow) this.footShadow.visible = false
+  }
+
+  /** Main menu body pose; optional `faceToward` for showcase yaw toward camera. */
+  public syncMainMenu(worldPos: THREE.Vector3, activeSlot: number, faceToward?: THREE.Vector3) {
+    if (!this.root) return
+    this.activeWeaponSlot = activeSlot
+    for (let i = 0; i < this.thirdPersonGuns.length; i++) {
+      const g = this.thirdPersonGuns[i]
+      if (g) g.visible = i === activeSlot
+    }
+    this.root.position.copy(worldPos)
+    if (this.footShadow) this.footShadow.visible = false
+
+    if (faceToward) {
+      this._radial.copy(faceToward).sub(worldPos)
+      this._radial.y = 0
+      if (this._radial.lengthSq() < 1e-8) {
+        this.root.rotation.set(0, 0, 0)
+      } else {
+        this._radial.normalize()
+        const yaw = Math.atan2(this._radial.x, this._radial.z)
+        this.root.rotation.set(0, yaw, 0)
+      }
+    } else {
+      this._radial.set(-worldPos.x, 0, -worldPos.z)
+      if (this._radial.lengthSq() < 1e-8) {
+        this.root.rotation.set(0, 0, 0)
+      } else {
+        this._radial.normalize()
+        const yaw = Math.atan2(this._radial.x, this._radial.z)
+        this.root.rotation.set(0, yaw, 0)
+      }
+    }
   }
 
   private async loadThirdPersonGuns() {
@@ -149,16 +275,38 @@ export class PlayerModel {
           }
         })
 
+        const weaponShellMat = createOutlineShellMaterial()
         for (const m of meshes) {
           m.castShadow = true
           m.receiveShadow = true
           m.material = new THREE.MeshToonMaterial({ color: 0xffffff })
 
-          const outlineMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.BackSide })
-          const outlineMesh = new THREE.Mesh(m.geometry, outlineMat)
-          outlineMesh.scale.multiplyScalar(1.05)
-          outlineMesh.name = 'weaponOutline'
-          m.add(outlineMesh)
+          let shell: THREE.Mesh | THREE.SkinnedMesh
+          if ((m as THREE.SkinnedMesh).isSkinnedMesh) {
+            const sm = m as THREE.SkinnedMesh
+            const skinShell = new THREE.SkinnedMesh(sm.geometry, weaponShellMat)
+            skinShell.skeleton = sm.skeleton
+            skinShell.bindMatrix.copy(sm.bindMatrix)
+            skinShell.bindMatrixInverse.copy(sm.bindMatrixInverse)
+            skinShell.frustumCulled = false
+            shell = skinShell
+          } else {
+            shell = new THREE.Mesh(m.geometry, weaponShellMat)
+          }
+          shell.name = 'weaponOutline'
+          shell.castShadow = false
+          shell.receiveShadow = false
+          shell.renderOrder = 1
+          const wParent = m.parent
+          if (wParent) {
+            shell.position.copy(m.position)
+            shell.quaternion.copy(m.quaternion)
+            shell.scale.copy(m.scale).multiplyScalar(OUTLINE_HULL_SCALE)
+            wParent.add(shell)
+          } else {
+            shell.scale.copy(m.scale).multiplyScalar(OUTLINE_HULL_SCALE)
+            m.add(shell)
+          }
         }
 
         let currentHand: any = null

@@ -15,9 +15,24 @@ import { HealthUI } from './ui/HealthUI'
 import { DamageIndicator } from './ui/DamageIndicator'
 import { WeaponUI } from './ui/WeaponUI'
 import { KillFeedUI } from './ui/KillFeedUI'
+import { MainMenuPlayUI } from './ui/MainMenuPlayUI'
+import { MainMenuNavUI } from './ui/MainMenuNavUI'
+import { MainMenuDevblogUI } from './ui/MainMenuDevblogUI'
+import { MainMenuNameInputUI } from './ui/MainMenuNameInputUI'
+import { MainMenuSkinsUI } from './ui/MainMenuSkinsUI'
+import { MainMenuStoreUI } from './ui/MainMenuStoreUI'
+import { loadProfanityList, textContainsProfanity, isProfanityListReady } from './utils/profanityFilter'
+import type { AkGunSkinId } from './store/skinEconomy'
+import {
+  COINS_CHANGED_EVENT,
+  getCoins,
+  ownsAkGunSkin,
+  readEquippedAkSkin,
+  setCoins,
+} from './store/skinEconomy'
 import { BloodSystem } from './systems/BloodSystem'
 import { BulletHoleSystem } from './systems/BulletHoleSystem'
-import { TargetPlayersSystem } from './systems/TargetPlayersSystem'
+import { TargetPlayersSystem, type BotBrainContext } from './systems/TargetPlayersSystem'
 import { DamageTextSystem } from './systems/DamageTextSystem'
 import { LeaderboardUI, type LeaderboardEntry } from './ui/LeaderboardUI'
 import { AnnouncementUI } from './ui/AnnouncementUI'
@@ -29,7 +44,27 @@ import { HeldWeapons } from './systems/HeldWeapons'
 import { AmmoSystem, DEFAULT_WEAPON_AMMO_SPECS } from './systems/AmmoSystem'
 import { AmmoUI } from './ui/AmmoUI'
 import { DeathUI } from './ui/DeathUI'
+import { CoinsHUDUI } from './ui/CoinsHUDUI'
+import {
+  ECONOMY_RELOADED_EVENT,
+  schedulePushCoinsToServer,
+  trySyncEconomyFromApi,
+} from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
+
+void loadProfanityList()
+
+window.addEventListener(COINS_CHANGED_EVENT, (ev) => {
+  const d = (ev as CustomEvent<{ fromServer?: boolean }>).detail
+  if (d?.fromServer) return
+  schedulePushCoinsToServer()
+})
+
+const COINS_PER_KILL = 10
+
+function awardKillCoins() {
+  setCoins(getCoins() + COINS_PER_KILL)
+}
 
 function requireTemporarySitePassword() {
   const expected =
@@ -60,7 +95,7 @@ const sphereRadius = 50
 const geometry = new THREE.SphereGeometry(sphereRadius, 64, 64)
 const material = new THREE.MeshToonMaterial({
   color: 0xffffff,
-  side: THREE.BackSide,
+  side: THREE.DoubleSide,
 })
 const mesh = new THREE.Mesh(geometry, material)
 mesh.receiveShadow = true
@@ -72,6 +107,14 @@ const grass = new GrassSystem(core.scene, sphereRadius)
 const trees = new TreeSystem(core.scene, sphereRadius)
 
 const player = new PlayerController(core.scene, core.camera, sphereRadius)
+
+const MENU_CHAR_LOCAL_POS = new THREE.Vector3(0, -0.52, -5.1)
+const MENU_CHAR_SKINS_X = 3.45
+const menuCharacterHolder = new THREE.Group()
+menuCharacterHolder.name = 'menuCharacterHolder'
+menuCharacterHolder.position.copy(MENU_CHAR_LOCAL_POS)
+menuCharacterHolder.scale.setScalar(3)
+core.camera.add(menuCharacterHolder)
 const blood = new BloodSystem(core.scene, sphereRadius)
 const bulletHoles = new BulletHoleSystem(core.scene, sphereRadius)
 const targetPlayers = new TargetPlayersSystem(core.scene, sphereRadius, 4)
@@ -81,17 +124,140 @@ const leaderboardUI = new LeaderboardUI()
 const announcementUI = new AnnouncementUI()
 const deathUI = new DeathUI()
 const discoveredPlayers = new Set<string>()
-let myKills = 0
-let myUsername = localStorage.getItem('invert_username') || `Player_${Math.floor(Math.random() * 1000)}`
+let myBotKills = 0
+/** PvP kills — set from server `killerKills` on each kill (authoritative). */
+let myPvpKills = 0
+const MAX_USERNAME_CHARS = 8
+
+function clampUsername(raw: string): string {
+  const t = raw.trim()
+  return (t.length > 0 ? t : 'You').slice(0, MAX_USERNAME_CHARS)
+}
+
+const _storedName = localStorage.getItem('invert_username')
+let myUsername = clampUsername(_storedName ?? '')
+if (_storedName !== myUsername) {
+  try {
+    localStorage.setItem('invert_username', myUsername)
+  } catch {
+    /* ignore */
+  }
+}
+
+function persistMyUsernameToLocalStorage() {
+  try {
+    localStorage.setItem('invert_username', myUsername)
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+window.addEventListener('pagehide', persistMyUsernameToLocalStorage)
+
 let lastFirstPlaceId: string | null = null
 let isDead = false
 let deadKillerId: string | null = null
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 
+let atMainMenu = true
+let mainMenuPlayUI!: MainMenuPlayUI
+let mainMenuNavUI!: MainMenuNavUI
+let mainMenuDevblogUI!: MainMenuDevblogUI
+let mainMenuNameUI!: MainMenuNameInputUI
+let mainMenuSkinsUI!: MainMenuSkinsUI
+let mainMenuStoreUI!: MainMenuStoreUI
+let mainMenuView: 'home' | 'skins' | 'store' = 'home'
+/** Player on inner shell during menu; camera target stays strictly inside the sphere (camera is child of playerGroup). */
+const _mainMenuShell = new THREE.Vector3(0, 0, -sphereRadius)
+const _menuSpawnUpScratch = new THREE.Vector3()
+const _menuCamWorldTarget = new THREE.Vector3()
+const _mainMenuBotHint = new THREE.Vector3(0, -38, 0)
+
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (!atMainMenu) return
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+    if (e.code === 'Space' || e.code === 'Enter') e.preventDefault()
+  },
+  { passive: false }
+)
+
 function getRandomSpawnPos(radius: number): THREE.Vector3 {
   const phi = Math.random() * Math.PI
   const theta = Math.random() * Math.PI * 2
   return new THREE.Vector3().setFromSphericalCoords(radius, phi, theta)
+}
+
+function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vector3 | null) {
+  isDead = false
+  deadKillerId = null
+
+  if (localPlayerRagdoll) {
+    localPlayerRagdoll = undefined
+    playerModel.resetPoseAfterRagdoll()
+  }
+
+  player.state.health = health
+  player.state.maxHealth = maxHealth
+
+  const spawnPos = pos && pos.lengthSq() > 1e-8 ? pos.clone() : getRandomSpawnPos(sphereRadius)
+  player.playerGroup.position.copy(spawnPos)
+  player.state.velocity.set(0, 0, 0)
+
+  core.camera.up.set(0, 1, 0)
+  core.camera.quaternion.identity()
+  core.camera.rotation.set(0, 0, 0)
+  const spawnUp =
+    spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
+  player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
+
+  player.state.isThirdPerson = false
+  player.setPointerLockAllowed(true)
+  player.controls.enabled = player.controls.isLocked
+  crosshair.setVisible(true)
+  healthUI.setOpacity(1)
+  ammoUI.setOpacity(1)
+  weaponUI.setOpacity(1)
+  killFeed.setOpacity(1)
+  deathUI.hide()
+}
+
+function onDeathScreenConfirmRespawn() {
+  player.setPointerLockAllowed(true)
+  player.controls.lock()
+  if (multiplayer.isConnected()) {
+    multiplayer.sendRespawn()
+  } else {
+    finishLocalRespawn(100, 100, null)
+  }
+}
+
+function handleLocalDeathFromBot(botIndex: number) {
+  if (isDead) return
+  const botEntry = targetPlayers.getTargetList().find((b) => b.id === `bot_${botIndex}`)
+  const botName = botEntry?.username ?? 'Bot'
+  isDead = true
+  deadKillerId = `bot_${botIndex}`
+  player.state.health = 0
+  targetPlayers.recordBotKill(botIndex)
+  updateLeaderboard()
+  killFeed.push(myUsername, 'AK-47')
+
+  if (playerModel.root) {
+    const impulse = player.state.velocity.clone().multiplyScalar(10)
+    localPlayerRagdoll = tryCreateSkeletonRagdoll(playerModel.root, playerModel.anims, impulse)
+  }
+
+  player.setPointerLockAllowed(false)
+  player.controls.unlock()
+  crosshair.setVisible(false)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  deathUI.show(botName, 'AK-47', onDeathScreenConfirmRespawn)
 }
 
 function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius: number): TreePlacement[] {
@@ -122,7 +288,7 @@ function updateLeaderboard() {
     ...netPlayers.map((p) => ({
       id: p.id,
       username: p.username,
-      kills: p.kills,
+      kills: p.kills + p.botKills,
       rank: 0,
       discovered: true,
     }))
@@ -131,7 +297,7 @@ function updateLeaderboard() {
   const myEntry: LeaderboardEntry = {
     id: 'me',
     username: myUsername,
-    kills: myKills,
+    kills: myBotKills + myPvpKills,
     rank: 0,
     isMe: true,
     discovered: true,
@@ -185,10 +351,20 @@ void Promise.all([
   const multiplayerUrl = (import.meta.env.VITE_MULTIPLAYER_URL as string | undefined)?.trim() || 'ws://127.0.0.1:8787'
   multiplayer.connect(multiplayerUrl)
 
-  // Initial random spawn
-  const initialSpawn = getRandomSpawnPos(sphereRadius)
-  player.playerGroup.position.copy(initialSpawn)
-  player.state.velocity.set(0, 0, 0)
+  multiplayer.onSessionStats = (pvp, bot) => {
+    myPvpKills = pvp
+    myBotKills = bot
+    updateLeaderboard()
+  }
+  multiplayer.onPlayerStatsUpdate = () => updateLeaderboard()
+
+  multiplayer.onLocalUsername = (name) => {
+    const u = clampUsername(typeof name === 'string' ? name : '')
+    myUsername = u
+    persistMyUsernameToLocalStorage()
+    mainMenuNameUI?.syncValue(u)
+    updateLeaderboard()
+  }
 
   multiplayer.onPlayerDamaged = (targetId, damage, _attackerId, health, maxHealth) => {
     if (targetId === multiplayer.getLocalPlayerId()) {
@@ -205,7 +381,16 @@ void Promise.all([
     }
   }
 
-  multiplayer.onPlayerKilled = (targetId, attackerId, killerName, weapon, _deathIncoming, victimName) => {
+  multiplayer.onPlayerKilled = (
+    targetId,
+    attackerId,
+    killerName,
+    weapon,
+    _deathIncoming,
+    victimName,
+    killerKills,
+    killerBotKills
+  ) => {
     if (targetId === multiplayer.getLocalPlayerId()) {
       isDead = true
       deadKillerId = attackerId ?? null
@@ -224,57 +409,30 @@ void Promise.all([
       ammoUI.setOpacity(0)
       weaponUI.setOpacity(0)
       killFeed.setOpacity(0)
-      deathUI.show(killerName || 'Unknown', weapon || 'Unknown', () => {
-        player.setPointerLockAllowed(true)
-        player.controls.lock()
-        multiplayer.sendRespawn()
-      })
+      deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId === multiplayer.getLocalPlayerId()) {
-      myKills++
-      updateLeaderboard()
+      awardKillCoins()
+      if (typeof killerKills === 'number') {
+        myPvpKills = killerKills
+      } else {
+        myPvpKills++
+      }
+      if (typeof killerBotKills === 'number') {
+        myBotKills = killerBotKills
+      }
       const victim =
         victimName ??
         multiplayer.getPlayerById(targetId)?.username ??
         'Unknown'
       killFeed.push(victim, weapon ?? 'Unknown')
     }
+    // MultiplayerSystem already applied killerKills to the remote NetworkPlayer; refresh for victims and witnesses too.
+    updateLeaderboard()
   }
 
   multiplayer.onPlayerRespawn = (playerId, health, maxHealth, pos) => {
     if (playerId !== multiplayer.getLocalPlayerId()) return
-    isDead = false
-    deadKillerId = null
-
-    if (localPlayerRagdoll) {
-      localPlayerRagdoll = undefined
-      playerModel.resetPoseAfterRagdoll()
-    }
-
-    player.state.health = health
-    player.state.maxHealth = maxHealth
-
-    // Use the server's provided position if available, otherwise pick a random one
-    const spawnPos = pos ? new THREE.Vector3().copy(pos) : getRandomSpawnPos(sphereRadius)
-    player.playerGroup.position.copy(spawnPos)
-    player.state.velocity.set(0, 0, 0)
-
-    // Reset camera / spectator up-vector so respawn view isn't sideways after spectating
-    core.camera.up.set(0, 1, 0)
-    core.camera.quaternion.identity()
-    core.camera.rotation.set(0, 0, 0)
-    const spawnUp =
-      spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
-    player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
-
-    player.state.isThirdPerson = false
-    player.setPointerLockAllowed(true)
-    player.controls.enabled = player.controls.isLocked
-    crosshair.setVisible(true)
-    healthUI.setOpacity(1)
-    ammoUI.setOpacity(1)
-    weaponUI.setOpacity(1)
-    killFeed.setOpacity(1)
-    deathUI.hide()
+    finishLocalRespawn(health, maxHealth, pos)
   }
 
   multiplayer.onBloodSpawn = (point, dir, count) => {
@@ -316,9 +474,39 @@ settingsUI.onGraphicsChange = (key, on) => {
 }
 settingsUI.syncSystems()
 const healthUI = new HealthUI()
+void new CoinsHUDUI()
 const damageIndicator = new DamageIndicator()
 const weaponUI = new WeaponUI()
 const killFeed = new KillFeedUI()
+
+function applyMainMenuView() {
+  player.playerGroup.position.copy(_mainMenuShell)
+  _menuSpawnUpScratch.copy(_mainMenuShell).normalize().multiplyScalar(-1)
+  player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _menuSpawnUpScratch)
+  player.state.velocity.set(0, 0, 0)
+
+  player.playerGroup.updateMatrixWorld(true)
+  _menuCamWorldTarget.set(0, 4.5, -(sphereRadius - 9))
+  core.camera.position.copy(_menuCamWorldTarget)
+  player.playerGroup.worldToLocal(core.camera.position)
+  core.camera.up.set(0, 1, 0)
+  core.camera.lookAt(0, 0, 0)
+  player.controls.enabled = false
+  player.setPointerLockAllowed(false)
+  heldWeapons.setThirdPerson(true)
+  crosshair.setVisible(false)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  staminaUI.setSuppressForMenu(true)
+  mainMenuPlayUI.setVisible(true)
+  mainMenuNavUI.setVisible(true)
+  syncMainMenuPanelChrome()
+  leaderboardUI.setVisible(false)
+  timerUI.setVisible(false)
+}
+
 const _v1 = new THREE.Vector3()
 const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
   let playedImpactThisExplosion = false
@@ -367,8 +555,10 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
         damageTexts.spawn(res.pos, Math.round(dmg), idx)
 
         if (res.killed) {
-          myKills++
+          awardKillCoins()
+          myBotKills++
           discoveredPlayers.add(`bot_${idx}`)
+          if (multiplayer.isConnected()) multiplayer.notifyBotKill()
           updateLeaderboard()
           killFeed.push(res.name, 'Grenade')
         }
@@ -413,6 +603,188 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 })
 const heldWeapons = new HeldWeapons(core.scene, core.camera, sphereRadius)
 void heldWeapons.loadAll()
+
+const AK_SKIN_TEX_URL: Record<AkGunSkinId, string> = {
+  fabric: new URL('./assets/skins/Fabric.jpg', import.meta.url).href,
+  marble: new URL('./assets/skins/marble.jpg', import.meta.url).href,
+  dragonskin: new URL('./assets/skins/dragonskin.jpg', import.meta.url).href,
+  facade: new URL('./assets/skins/Facade.jpg', import.meta.url).href,
+  lava: new URL('./assets/skins/lava.jpg', import.meta.url).href,
+}
+const akGunSkinTextures = new Map<AkGunSkinId, THREE.Texture>()
+
+function getAkGunSkinTexture(id: AkGunSkinId): THREE.Texture {
+  let t = akGunSkinTextures.get(id)
+  if (!t) {
+    const loader = new THREE.TextureLoader()
+    t = loader.load(AK_SKIN_TEX_URL[id], (tex) => {
+      tex.flipY = false
+    })
+    t.colorSpace = THREE.SRGBColorSpace
+    akGunSkinTextures.set(id, t)
+  }
+  return t
+}
+
+const WEAPON_SKIN_SLOT_COUNT = 3
+
+function applyDefaultAkGunLook() {
+  for (let s = 0; s < WEAPON_SKIN_SLOT_COUNT; s++) {
+    playerModel.setThirdPersonGunMap(s, null)
+    heldWeapons.setSlotAlbedoTexture(s, null)
+  }
+}
+
+function applyAkGunSkin(id: AkGunSkinId) {
+  const tex = getAkGunSkinTexture(id)
+  for (let s = 0; s < WEAPON_SKIN_SLOT_COUNT; s++) {
+    playerModel.setThirdPersonGunMap(s, tex)
+    heldWeapons.setSlotAlbedoTexture(s, tex)
+  }
+}
+
+function applyEquippedOwnedAkGunSkin() {
+  const eq = readEquippedAkSkin()
+  if (eq === 'default' || !ownsAkGunSkin(eq)) {
+    applyDefaultAkGunLook()
+    return
+  }
+  applyAkGunSkin(eq)
+}
+
+let menuAkGunSkinSynced = false
+let wasMainMenuStoreView = false
+
+async function beginPlayFromMenu() {
+  if (!atMainMenu || isDead) return
+  await trySyncEconomyFromApi()
+  if (!atMainMenu || isDead) return
+  atMainMenu = false
+  const spawnPos = getRandomSpawnPos(sphereRadius)
+  player.playerGroup.position.copy(spawnPos)
+  player.state.velocity.set(0, 0, 0)
+
+  core.camera.up.set(0, 1, 0)
+  core.camera.quaternion.identity()
+  core.camera.rotation.set(0, 0, 0)
+  core.camera.position.set(0, 0, 0)
+
+  const spawnUp =
+    spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
+  player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
+
+  player.state.isThirdPerson = false
+  heldWeapons.setThirdPerson(false)
+  applyEquippedOwnedAkGunSkin()
+  player.state.onGround = true
+  player.setPointerLockAllowed(true)
+  player.controls.enabled = true
+
+  crosshair.setVisible(true)
+  healthUI.setOpacity(1)
+  ammoUI.setOpacity(1)
+  weaponUI.setOpacity(1)
+  killFeed.setOpacity(1)
+  staminaUI.setSuppressForMenu(false)
+  mainMenuPlayUI.setVisible(false)
+  mainMenuNavUI.setVisible(false)
+  mainMenuDevblogUI.setVisible(false)
+  mainMenuNameUI.setVisible(false)
+  mainMenuSkinsUI.setVisible(false)
+  mainMenuStoreUI.setVisible(false)
+  mainMenuView = 'home'
+  menuCharacterHolder.position.copy(MENU_CHAR_LOCAL_POS)
+  menuCharacterHolder.visible = true
+  if (playerModel.root && playerModel.root.parent === menuCharacterHolder) {
+    core.scene.add(playerModel.root)
+  }
+  playerModel.setOutlineVisible(true)
+  playerModel.setCharacterCastShadow(true)
+  leaderboardUI.setVisible(true)
+  timerUI.setVisible(true)
+}
+
+mainMenuPlayUI = new MainMenuPlayUI()
+mainMenuPlayUI.setOnPlay(() => {
+  if (atMainMenu && !isDead) void beginPlayFromMenu()
+})
+
+mainMenuNavUI = new MainMenuNavUI({
+  onHome: () => setMainMenuView('home'),
+  onSkins: () => setMainMenuView('skins'),
+  onStore: () => setMainMenuView('store'),
+  onSettings: () => settingsUI.openMenu(),
+})
+
+mainMenuDevblogUI = new MainMenuDevblogUI()
+
+mainMenuNameUI = new MainMenuNameInputUI(myUsername, (name) => {
+  myUsername = clampUsername(name)
+  persistMyUsernameToLocalStorage()
+  updateLeaderboard()
+})
+
+mainMenuSkinsUI = new MainMenuSkinsUI()
+mainMenuStoreUI = new MainMenuStoreUI({
+  onPurchased: () => mainMenuSkinsUI.refresh(),
+  onSkinSwatchPreview: (skin) => {
+    if (skin === 'default') applyDefaultAkGunLook()
+    else applyAkGunSkin(skin)
+  },
+  onGunSkinPurchase: (id) => applyAkGunSkin(id),
+})
+
+function refreshEconomyDependentUi() {
+  mainMenuStoreUI.refresh()
+  mainMenuSkinsUI.refresh()
+  settingsUI.refreshAccountUuidLabel()
+  if (atMainMenu) applyEquippedOwnedAkGunSkin()
+}
+
+void trySyncEconomyFromApi().then(refreshEconomyDependentUi)
+window.addEventListener(ECONOMY_RELOADED_EVENT, refreshEconomyDependentUi)
+
+function syncMainMenuPanelChrome() {
+  if (!atMainMenu || isDead) return
+  const home = mainMenuView === 'home'
+  const isStore = mainMenuView === 'store'
+  mainMenuNameUI.setVisible(home)
+  menuCharacterHolder.visible = true
+  if (home) {
+    menuCharacterHolder.position.set(0, MENU_CHAR_LOCAL_POS.y, MENU_CHAR_LOCAL_POS.z)
+  } else {
+    menuCharacterHolder.position.set(MENU_CHAR_SKINS_X, MENU_CHAR_LOCAL_POS.y, MENU_CHAR_LOCAL_POS.z)
+  }
+  mainMenuSkinsUI.setVisible(mainMenuView === 'skins')
+  mainMenuStoreUI.setVisible(isStore)
+  mainMenuDevblogUI.setVisible(home)
+
+  if (wasMainMenuStoreView !== isStore) {
+    applyEquippedOwnedAkGunSkin()
+  }
+  wasMainMenuStoreView = isStore
+}
+
+function setMainMenuView(view: 'home' | 'skins' | 'store') {
+  mainMenuView = view
+  syncMainMenuPanelChrome()
+}
+
+void loadProfanityList().then(() => {
+  if (!isProfanityListReady() || !textContainsProfanity(myUsername)) return
+  myUsername = 'You'
+  persistMyUsernameToLocalStorage()
+  mainMenuNameUI.syncValue('You')
+  updateLeaderboard()
+})
+
+settingsUI.registerCursorTargets([
+  ...mainMenuNavUI.getButtons(),
+  mainMenuPlayUI.getPlayButton(),
+  ...mainMenuNameUI.getPointerTargets(),
+  ...mainMenuSkinsUI.getPointerTargets(),
+  ...mainMenuStoreUI.getPointerTargets(),
+])
 
 const raycaster = new THREE.Raycaster()
 const muzzleDir = new THREE.Vector3()
@@ -734,8 +1106,10 @@ function shoot() {
           crosshair.triggerHit()
 
           if (damageRes.killed) {
-            myKills++
+            awardKillCoins()
+            myBotKills++
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
+            if (multiplayer.isConnected()) multiplayer.notifyBotKill()
             updateLeaderboard()
             killFeed.push(damageRes.name, weaponLabelFromSlot(slot))
           }
@@ -839,9 +1213,14 @@ window.game = {
     return 'Leaderboard updated'
   },
   setUsername(name: string) {
-    myUsername = name
-    localStorage.setItem('invert_username', name)
-    return `Username set to ${name}`
+    const u = clampUsername(name)
+    if (isProfanityListReady() && textContainsProfanity(u)) {
+      return 'That username is not allowed'
+    }
+    myUsername = u
+    persistMyUsernameToLocalStorage()
+    mainMenuNameUI?.syncValue(u)
+    return `Username set to ${u}`
   },
 }
 
@@ -858,8 +1237,63 @@ function animate() {
     const time = performance.now() / 1000
     const currentTime = performance.now()
 
+    if (atMainMenu && !isDead) {
+      grass.update(time)
+      trees.update(time)
+      targetPlayers.syncPlayerSpawnHint(_mainMenuBotHint)
+      applyMainMenuView()
+      if (!menuAkGunSkinSynced && playerModel.ready && heldWeapons.weaponsLoaded) {
+        applyEquippedOwnedAkGunSkin()
+        menuAkGunSkinSynced = true
+      }
+      player.state.isThirdPerson = true
+      playerModel.setVisible(true, false)
+      playerModel.setOutlineVisible(true)
+      playerModel.setCharacterCastShadow(false)
+      if (playerModel.root) {
+        if (playerModel.root.parent !== menuCharacterHolder) {
+          menuCharacterHolder.add(playerModel.root)
+        }
+        playerModel.root.position.set(0, 0, 0)
+        playerModel.root.quaternion.identity()
+        playerModel.applyMenuWeaponSlot(AK_SLOT)
+      }
+      if (playerModel.anims) playerModel.anims.setState('idle', 0.12)
+      playerModel.update(dt)
+      heldWeapons.update(dt, player.state.gravity)
+
+      targetPlayers.update(dt, null)
+
+      const frameEquivMenuNade = dt * 60
+      const stepCountMenuNade = Math.max(1, Math.min(Math.floor(frameEquivMenuNade + 1e-9), 120))
+      const stepDtMenuNade = 1 / 60
+      for (let s = 0; s < stepCountMenuNade; s++) {
+        grenadeSystem.update(stepDtMenuNade, player.state.gravity)
+      }
+      if (heldWeapons.getWeaponModel(GRENADE_SLOT)) {
+        grenadeSystem.setModel(heldWeapons.getWeaponModel(GRENADE_SLOT)!)
+      }
+
+      blood.update(core.camera)
+      bulletHoles.update()
+      damageTexts.update(dt, core.camera)
+
+      settingsUI.update(input, false)
+      fpsCounter.update()
+
+      const menuTargetFov = 50 + settingsUI.fovPercent * 70
+      if (core.camera.fov !== menuTargetFov) {
+        core.camera.fov = menuTargetFov
+        core.camera.updateProjectionMatrix()
+      }
+
+      core.render()
+      return
+    }
+
     grass.update(time)
     trees.update(time)
+    targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
     if (!isDead) {
       const activeSlot = heldWeapons.getActiveSlot()
       const isGrenade = activeSlot === GRENADE_SLOT
@@ -996,7 +1430,55 @@ function animate() {
     }
     blood.update(core.camera)
     bulletHoles.update()
-    targetPlayers.update(dt)
+
+    const botBrain: BotBrainContext | null = !settingsUI.isOpen
+      ? {
+          playerPosition: player.playerGroup.position,
+          playerAlive: !isDead,
+          worldMesh: mesh,
+          nowMs: currentTime,
+          onBotHitPlayer: (botIndex, damage, hitFrom) => {
+            if (isDead || settingsUI.isOpen) return
+            player.inflictDamage(damage, hitFrom)
+            playSfx(impactSfx, 0.85, 'impact')
+            crosshair.triggerHit()
+            const headPos = player.playerGroup.position.clone()
+            const dmgUp = headPos.clone().normalize().multiplyScalar(-1)
+            headPos.addScaledVector(dmgUp, 1.2)
+            damageTexts.spawn(headPos, Math.round(damage), stringToId('local_player_dmg'))
+            if (player.state.health <= 0) handleLocalDeathFromBot(botIndex)
+          },
+          onBotHitBot: (shooterIdx, hitObj, damage, bulletDir, hitPoint) => {
+            const hitDir = bulletDir.clone().normalize().negate()
+            const res = targetPlayers.damageFromHitObject(
+              hitObj as THREE.Mesh,
+              damage,
+              bulletDir.clone()
+            )
+            if (!res?.damaged) return
+            playSpatialSfxAt(impactSfx, hitPoint, 0.4, 48, 'impact')
+            blood.spawn(hitPoint, hitDir, 4)
+            multiplayer.sendBlood(hitPoint, hitDir, 4)
+            damageTexts.spawn(res.pos, damage, res.targetIdx)
+            const victim = targetPlayers.getTargetById(`bot_${res.targetIdx}`)
+            if (victim?.ragdoll) {
+              victim.ragdoll.applyExternalImpulse(
+                _colDelta.copy(bulletDir).multiplyScalar(0.12),
+                hitPoint
+              )
+            }
+            if (res.killed) {
+              targetPlayers.recordBotKill(shooterIdx)
+              discoveredPlayers.add(`bot_${res.targetIdx}`)
+              updateLeaderboard()
+            }
+          },
+          onBotFire: (botWorldPos) => {
+            playSpatialSfxAt(akSfx, botWorldPos, 0.9, 95, 'gun')
+          },
+        }
+      : null
+    targetPlayers.update(dt, botBrain)
 
     // Fixed timestep update for grenades (match player physics)
     const frameEquivNade = dt * 60
@@ -1099,7 +1581,7 @@ function animate() {
       player.playerGroup.quaternion,
       viewEuler.y,
       myUsername,
-      myKills,
+      myBotKills + myPvpKills,
       isDead ? 'idle' : animForNet,
       heldWeapons.getActiveSlot(),
       isDead

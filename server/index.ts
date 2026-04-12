@@ -1,7 +1,62 @@
 import { DurableObject } from "cloudflare:workers";
+import { handleApiRequest } from "./api";
+import type { Env } from "./env";
+import {
+	DAMAGE_COOLDOWN_MS,
+	MAX_BOT_KILL_EVENTS_PER_SEC,
+	MAX_DAMAGE_EVENTS_PER_SEC,
+	MAX_JSON_BYTES,
+	MAX_MESSAGES_PER_SEC,
+	RESPAWN_COOLDOWN_MS,
+  sanitizeAnim,
+  sanitizeBloodCount,
+  sanitizeDamage,
+  MAX_USERNAME_LEN,
+  sanitizeQuat,
+  sanitizeSlot,
+  sanitizeSoundName,
+  sanitizeUsername,
+  sanitizeVec3,
+  sanitizeViewYaw,
+  sanitizeVolume,
+  sanitizeWeapon,
+  isValidPlayerId,
+} from "./validation";
 
-export interface Env {
-	GAME_ROOM: DurableObjectNamespace<GameRoom>;
+export type { Env } from "./env";
+
+type PlayerRecord = {
+	id: string;
+	username: string;
+	pos: { x: number; y: number; z: number };
+	quat: { x: number; y: number; z: number; w: number };
+	viewYaw: number;
+	kills: number;
+	botKills: number;
+	anim: string;
+	slot: number;
+	health: number;
+	maxHealth: number;
+	lastUpdate: number;
+	lastDamageWeapon?: string;
+	lastRespawnAt?: number;
+};
+
+function playerPublic(p: PlayerRecord): Record<string, unknown> {
+	return {
+		id: p.id,
+		username: p.username,
+		pos: p.pos,
+		quat: p.quat,
+		viewYaw: p.viewYaw,
+		kills: p.kills,
+		botKills: p.botKills,
+		anim: p.anim,
+		slot: p.slot,
+		health: p.health,
+		maxHealth: p.maxHealth,
+		lastUpdate: p.lastUpdate,
+	};
 }
 
 /**
@@ -10,8 +65,11 @@ export interface Env {
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
-		
-		// For now, everyone joins the "global" room
+
+		if (url.pathname.startsWith("/api/")) {
+			return handleApiRequest(request, env);
+		}
+
 		const roomName = url.searchParams.get("room") || "global";
 		const id = env.GAME_ROOM.idFromName(roomName);
 		const room = env.GAME_ROOM.get(id);
@@ -22,34 +80,145 @@ export default {
 
 /**
  * Durable Object: GameRoom
- * Handles player connections, state syncing, and the leaderboard.
  */
 export class GameRoom extends DurableObject {
-	private players = new Map<string, any>();
+	private players = new Map<string, PlayerRecord>();
 	private sessions = new Set<WebSocket>();
 	private playerSockets = new Map<string, WebSocket>();
 	private readonly matchStartTime: number;
 	private readonly treeLayout: Array<{ phi: number; theta: number; scale: number }>;
+	/** General inbound rate: timestamps (ms) in the last 1s per player */
+	private inboundTs = new Map<string, number[]>();
+	/** Damage events per attacker per rolling second */
+	private damageTs = new Map<string, number[]>();
+	/** Last damage time attacker→target to block burst exploits */
+	private lastDamagePairMs = new Map<string, number>();
+	private botKillTs = new Map<string, number[]>();
 
-	constructor(state: any, env: Env) {
+	constructor(state: DurableObjectState, env: Env) {
 		super(state, env);
 		this.matchStartTime = Date.now();
 		this.treeLayout = this.generateTreeLayout(80, 50, 8);
 	}
 
 	async fetch(request: Request): Promise<Response> {
-		const upgradeHeader = request.headers.get("Upgrade");
-		if (!upgradeHeader || upgradeHeader !== "websocket") {
-			return new Response("Expected Upgrade: websocket", { status: 426 });
+		try {
+			const upgradeHeader = request.headers.get("Upgrade");
+			if (!upgradeHeader || upgradeHeader !== "websocket") {
+				return new Response("Expected Upgrade: websocket", { status: 426 });
+			}
+
+			const [client, server] = new WebSocketPair();
+			this.handleSession(server);
+
+			return new Response(null, {
+				status: 101,
+				webSocket: client,
+			});
+		} catch (err) {
+			console.error("GameRoom.fetch failed", err);
+			return new Response("Internal error", { status: 500 });
 		}
+	}
 
-		const [client, server] = new WebSocketPair();
-		this.handleSession(server);
+	private allowInbound(playerId: string): boolean {
+		const now = Date.now();
+		let a = this.inboundTs.get(playerId) ?? [];
+		a = a.filter((t) => now - t < 1000);
+		if (a.length >= MAX_MESSAGES_PER_SEC) return false;
+		a.push(now);
+		this.inboundTs.set(playerId, a);
+		return true;
+	}
 
-		return new Response(null, {
-			status: 101,
-			webSocket: client,
-		});
+	private allowDamage(attackerId: string): boolean {
+		const now = Date.now();
+		let a = this.damageTs.get(attackerId) ?? [];
+		a = a.filter((t) => now - t < 1000);
+		if (a.length >= MAX_DAMAGE_EVENTS_PER_SEC) return false;
+		a.push(now);
+		this.damageTs.set(attackerId, a);
+		return true;
+	}
+
+	private allowBotKill(playerId: string): boolean {
+		const now = Date.now();
+		let a = this.botKillTs.get(playerId) ?? [];
+		a = a.filter((t) => now - t < 1000);
+		if (a.length >= MAX_BOT_KILL_EVENTS_PER_SEC) return false;
+		a.push(now);
+		this.botKillTs.set(playerId, a);
+		return true;
+	}
+
+	private cleanupRateState(playerId: string) {
+		this.inboundTs.delete(playerId);
+		this.damageTs.delete(playerId);
+		this.botKillTs.delete(playerId);
+		for (const k of [...this.lastDamagePairMs.keys()]) {
+			if (k.startsWith(`${playerId}:`) || k.endsWith(`:${playerId}`)) {
+				this.lastDamagePairMs.delete(k);
+			}
+		}
+	}
+
+	private isUsernameTaken(name: string, excludePlayerId: string): boolean {
+		const key = name.toLowerCase();
+		for (const [id, rec] of this.players) {
+			if (id === excludePlayerId) continue;
+			if (rec.username.toLowerCase() === key) return true;
+		}
+		return false;
+	}
+
+	/** Random unused `Player_XXX` with XXX in 001–999 (3 digits, no shared prefix + _2). */
+	private pickUnusedPlayerTag(excludePlayerId: string): string {
+		const used = new Set<number>();
+		for (const [id, rec] of this.players) {
+			if (id === excludePlayerId) continue;
+			const m = rec.username.match(/^Player_(\d{3})$/i);
+			if (m) used.add(parseInt(m[1]!, 10));
+		}
+		const pool: number[] = [];
+		for (let n = 1; n <= 999; n++) {
+			if (!used.has(n)) pool.push(n);
+		}
+		if (pool.length === 0) return this.emergencyUsername(excludePlayerId);
+		const pick = pool[Math.floor(Math.random() * pool.length)]!;
+		return `Player_${pick.toString().padStart(3, "0")}`;
+	}
+
+	private emergencyUsername(excludePlayerId: string): string {
+		const slug = excludePlayerId.replace(/-/g, "").slice(0, 12);
+		let fallback = `P_${slug}`.slice(0, MAX_USERNAME_LEN);
+		if (!this.isUsernameTaken(fallback, excludePlayerId)) return fallback;
+		for (let n = 2; n < 100; n++) {
+			const suffix = `_${n}`;
+			fallback = (`P_${slug}`).slice(0, MAX_USERNAME_LEN - suffix.length) + suffix;
+			if (!this.isUsernameTaken(fallback, excludePlayerId)) return fallback;
+		}
+		return excludePlayerId.slice(0, MAX_USERNAME_LEN);
+	}
+
+	/**
+	 * Case-insensitive uniqueness. `Player_<any digits>` collisions get a new free 3-digit tag,
+	 * not `Player_1234_2`. Custom names still use numeric suffixes.
+	 */
+	private uniqueUsername(desired: string, excludePlayerId: string): string {
+		let base = desired.trim().slice(0, MAX_USERNAME_LEN);
+		if (!base) base = "Player";
+		if (!this.isUsernameTaken(base, excludePlayerId)) return base;
+		if (/^Player_\d+$/i.test(base)) {
+			return this.pickUnusedPlayerTag(excludePlayerId);
+		}
+		for (let n = 2; n <= 9999; n++) {
+			const suffix = `_${n}`;
+			const maxBase = MAX_USERNAME_LEN - suffix.length;
+			if (maxBase < 1) break;
+			const candidate = base.slice(0, maxBase) + suffix;
+			if (!this.isUsernameTaken(candidate, excludePlayerId)) return candidate;
+		}
+		return this.emergencyUsername(excludePlayerId);
 	}
 
 	handleSession(ws: WebSocket) {
@@ -58,35 +227,53 @@ export class GameRoom extends DurableObject {
 		this.playerSockets.set(playerId, ws);
 		ws.accept();
 
-		this.players.set(playerId, {
+		ws.addEventListener("error", (e) => {
+			console.error("WebSocket error", playerId, e);
+		});
+
+		const initial: PlayerRecord = {
 			id: playerId,
-			username: `Player_${Math.floor(Math.random() * 1000)}`,
+			username: this.pickUnusedPlayerTag(playerId),
 			pos: { x: 0, y: 0, z: 0 },
 			quat: { x: 0, y: 0, z: 0, w: 1 },
 			viewYaw: 0,
 			kills: 0,
+			botKills: 0,
 			anim: "idle",
 			slot: 0,
 			health: 100,
 			maxHealth: 100,
 			lastUpdate: Date.now(),
-		});
+		};
+		this.players.set(playerId, initial);
 
-		// Send initial state
-		ws.send(JSON.stringify({
-			type: "init",
-			playerId,
-			players: Array.from(this.players.entries()),
-			matchStartTime: this.matchStartTime,
-			treeLayout: this.treeLayout
-		}));
-
-		ws.addEventListener("message", async (msg) => {
+		try {
+			ws.send(JSON.stringify({
+				type: "init",
+				playerId,
+				players: Array.from(this.players.entries()).map(([id, p]) => [id, playerPublic(p)]),
+				matchStartTime: this.matchStartTime,
+				treeLayout: this.treeLayout
+			}));
+		} catch (err) {
+			console.error("init send failed", playerId, err);
 			try {
-				const data = JSON.parse(msg.data as string);
+				ws.close();
+			} catch {
+				/* noop */
+			}
+			return;
+		}
+
+		ws.addEventListener("message", (msg) => {
+			try {
+				const raw = msg.data;
+				const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw as ArrayBuffer);
+				if (text.length > MAX_JSON_BYTES) return;
+				const data = JSON.parse(text) as unknown;
 				this.handleMessage(playerId, data, ws);
-			} catch (err) {
-				console.error("Failed to parse message", err);
+			} catch {
+				// ignore malformed
 			}
 		});
 
@@ -94,6 +281,7 @@ export class GameRoom extends DurableObject {
 			this.players.delete(playerId);
 			this.sessions.delete(ws);
 			this.playerSockets.delete(playerId);
+			this.cleanupRateState(playerId);
 			this.broadcast({
 				type: "player_left",
 				playerId
@@ -101,152 +289,269 @@ export class GameRoom extends DurableObject {
 		});
 	}
 
-	handleMessage(playerId: string, data: any, ws: WebSocket) {
-		// Prune stale players every few messages to keep the room clean
-		if (Math.random() < 0.05) this.pruneStalePlayers();
+	handleMessage(playerId: string, data: unknown, ws: WebSocket) {
+		try {
+			if (!this.allowInbound(playerId)) return;
+			if (Math.random() < 0.05) this.pruneStalePlayers();
 
-		switch (data.type) {
-			case "move":
-				// data: { pos: {x,y,z}, quat: {x,y,z,w}, kills: number, username: string }
-				const existing = this.players.get(playerId) || {};
-				this.players.set(playerId, {
-					...existing,
-					...data,
-					id: playerId,
-					lastUpdate: Date.now()
-				});
-				// Broadcast movement to others
-				// Ensure type is "player_moved" and not overwritten by data.type
-				this.broadcast({
-					...data,
-					type: "player_moved",
-					playerId,
-				}, ws);
-				break;
+			if (!data || typeof data !== "object") return;
+			const d = data as Record<string, unknown>;
+			const type = d.type;
+			if (typeof type !== "string") return;
 
-			case "damage":
-				// Someone hit someone else
-				// data: { targetId: string, damage: number }
-				if (!data?.targetId || typeof data.damage !== "number") break;
-				const target = this.players.get(data.targetId);
-				if (!target) break;
-				const prevHealth = target.health ?? 100;
-				const nextHealth = Math.max(0, prevHealth - Math.max(0, data.damage));
-				target.health = nextHealth;
-				target.lastDamageWeapon = data.weapon ?? "unknown";
-				this.players.set(data.targetId, target);
-
-				this.broadcast({
-					type: "player_damaged",
-					attackerId: playerId,
-					targetId: data.targetId,
-					damage: data.damage,
-					health: nextHealth,
-					maxHealth: target.maxHealth ?? 100
-				});
-
-				if (nextHealth <= 0 && prevHealth > 0) {
-					const killer = this.players.get(playerId);
-					const killerName = killer?.username ?? "Unknown";
-					const weapon = target.lastDamageWeapon ?? "unknown";
-					const victimName = target.username ?? "Unknown";
-					this.broadcast({
-						type: "player_killed",
-						attackerId: playerId,
-						targetId: data.targetId,
-						killerName,
-						victimName,
-						weapon,
-						deathIncoming: data.incoming,
-					});
-				}
-				break;
-
-			case "kill": {
-				const killVictim = this.players.get(data.targetId);
-				const killKiller = this.players.get(playerId);
-				this.broadcast({
-					type: "player_killed",
-					attackerId: playerId,
-					targetId: data.targetId,
-					killerName: killKiller?.username ?? "Unknown",
-					victimName: killVictim?.username ?? "Unknown",
-					weapon: data.weapon ?? "unknown",
-				});
-				break;
+			switch (type) {
+				case "move":
+					this.handleMove(playerId, d, ws);
+					break;
+				case "damage":
+					this.handleDamage(playerId, d);
+					break;
+				case "bot_kill":
+					this.handleBotKill(playerId);
+					break;
+				case "blood":
+					this.handleBlood(playerId, d, ws);
+					break;
+				case "sound":
+					this.handleSound(playerId, d, ws);
+					break;
+				case "respawn":
+					this.handleRespawn(playerId);
+					break;
+				default:
+					return;
 			}
-
-			case "blood":
-				// Sync blood impacts across clients
-				this.broadcast({
-					type: "blood_spawn",
-					point: data.point,
-					dir: data.dir,
-					count: data.count ?? 4,
-				}, ws);
-				break;
-
-			case "sound":
-				// Sync positional sound playback across clients
-				this.broadcast({
-					type: "sound_play",
-					sound: data.sound,
-					pos: data.pos,
-					volume: data.volume ?? 1,
-				}, ws);
-				break;
-
-			case "respawn":
-				const me = this.players.get(playerId);
-				if (!me) break;
-				me.health = me.maxHealth ?? 100;
-				// Respawn near bottom side spawn region.
-				const radius = 50 - 0.9;
-				const phi = Math.PI - Math.random() * 0.9;
-				const theta = Math.random() * Math.PI * 2;
-				const x = radius * Math.sin(phi) * Math.cos(theta);
-				const y = radius * Math.cos(phi);
-				const z = radius * Math.sin(phi) * Math.sin(theta);
-				me.pos = { x, y, z };
-				this.players.set(playerId, me);
-				this.broadcast({
-					type: "player_respawn",
-					playerId,
-					health: me.health,
-					maxHealth: me.maxHealth ?? 100,
-					pos: me.pos
-				});
-				break;
+		} catch (err) {
+			console.error("handleMessage error", playerId, err);
 		}
+	}
+
+	private handleMove(playerId: string, d: Record<string, unknown>, ws: WebSocket) {
+		const p = this.players.get(playerId);
+		if (!p) return;
+
+		const pos = sanitizeVec3(d.pos);
+		const quat = sanitizeQuat(d.quat);
+		if (!pos || !quat) return;
+
+		const uname = sanitizeUsername(d.username);
+		if (uname) {
+			const resolved = this.uniqueUsername(uname, playerId);
+			if (resolved !== uname) {
+				try {
+					ws.send(JSON.stringify({ type: "username_sync", username: resolved }));
+				} catch {
+					/* noop */
+				}
+			}
+			p.username = resolved;
+		}
+
+		p.pos = pos;
+		p.quat = quat;
+		p.viewYaw = sanitizeViewYaw(d.viewYaw);
+		p.anim = sanitizeAnim(d.anim);
+		p.slot = sanitizeSlot(d.slot);
+		p.lastUpdate = Date.now();
+
+		this.broadcast({
+			type: "player_moved",
+			playerId,
+			pos: p.pos,
+			quat: p.quat,
+			viewYaw: p.viewYaw,
+			username: p.username,
+			kills: p.kills,
+			botKills: p.botKills,
+			anim: p.anim,
+			slot: p.slot,
+		}, ws);
+	}
+
+	private handleBotKill(playerId: string) {
+		if (!this.allowBotKill(playerId)) return;
+		const p = this.players.get(playerId);
+		if (!p) return;
+		p.botKills += 1;
+		p.lastUpdate = Date.now();
+		this.players.set(playerId, p);
+		this.broadcast({
+			type: "player_stats",
+			playerId,
+			kills: p.kills,
+			botKills: p.botKills,
+		});
+	}
+
+	private handleDamage(attackerId: string, d: Record<string, unknown>) {
+		if (!isValidPlayerId(d.targetId)) return;
+		const targetId = d.targetId;
+		if (targetId === attackerId) return;
+
+		const dmg = sanitizeDamage(d.damage);
+		if (dmg <= 0) return;
+
+		if (!this.allowDamage(attackerId)) return;
+
+		const pairKey = `${attackerId}:${targetId}`;
+		const now = Date.now();
+		const last = this.lastDamagePairMs.get(pairKey) ?? 0;
+		if (now - last < DAMAGE_COOLDOWN_MS) return;
+		this.lastDamagePairMs.set(pairKey, now);
+
+		const target = this.players.get(targetId);
+		if (!target) return;
+
+		const prevHealth = target.health;
+		const nextHealth = Math.max(0, prevHealth - dmg);
+		target.health = nextHealth;
+		target.lastDamageWeapon = sanitizeWeapon(d.weapon);
+		target.lastUpdate = Date.now();
+		this.players.set(targetId, target);
+
+		let incoming: { x: number; y: number; z: number } | undefined;
+		if (d.incoming && typeof d.incoming === "object") {
+			const inc = d.incoming as Record<string, unknown>;
+			const v = sanitizeVec3({ x: inc.x, y: inc.y, z: inc.z });
+			if (v) incoming = v;
+		}
+
+		this.broadcast({
+			type: "player_damaged",
+			attackerId,
+			targetId,
+			damage: dmg,
+			health: nextHealth,
+			maxHealth: target.maxHealth,
+			...(incoming ? { incoming } : {}),
+		});
+
+		if (nextHealth <= 0 && prevHealth > 0) {
+			const killer = this.players.get(attackerId);
+			let killerKills = 0;
+			if (killer) {
+				killer.kills += 1;
+				killerKills = killer.kills;
+				killer.lastUpdate = Date.now();
+				this.players.set(attackerId, killer);
+			}
+			const weapon = target.lastDamageWeapon ?? "unknown";
+			const killerName = killer?.username ?? "Unknown";
+			const victimName = target.username ?? "Unknown";
+			this.broadcast({
+				type: "player_killed",
+				attackerId,
+				targetId,
+				killerName,
+				victimName,
+				weapon,
+				killerKills,
+				killerBotKills: killer?.botKills ?? 0,
+				...(incoming ? { deathIncoming: incoming } : {}),
+			});
+		}
+	}
+
+	private handleBlood(_playerId: string, d: Record<string, unknown>, ws: WebSocket) {
+		const point = sanitizeVec3(d.point);
+		const dir = sanitizeVec3(d.dir);
+		if (!point || !dir) return;
+		const count = sanitizeBloodCount(d.count);
+		this.broadcast({
+			type: "blood_spawn",
+			point,
+			dir,
+			count,
+		}, ws);
+	}
+
+	private handleSound(_playerId: string, d: Record<string, unknown>, ws: WebSocket) {
+		const sound = sanitizeSoundName(d.sound);
+		if (!sound) return;
+		const pos = sanitizeVec3(d.pos);
+		if (!pos) return;
+		const volume = sanitizeVolume(d.volume);
+		this.broadcast({
+			type: "sound_play",
+			sound,
+			pos,
+			volume,
+		}, ws);
+	}
+
+	private handleRespawn(playerId: string) {
+		const me = this.players.get(playerId);
+		if (!me) return;
+		if (me.health > 0) return;
+
+		const now = Date.now();
+		if (now - (me.lastRespawnAt ?? 0) < RESPAWN_COOLDOWN_MS) return;
+		me.lastRespawnAt = now;
+
+		me.health = me.maxHealth;
+		const radius = 50 - 0.9;
+		const phi = Math.PI - Math.random() * 0.9;
+		const theta = Math.random() * Math.PI * 2;
+		const x = radius * Math.sin(phi) * Math.cos(theta);
+		const y = radius * Math.cos(phi);
+		const z = radius * Math.sin(phi) * Math.sin(theta);
+		me.pos = { x, y, z };
+		me.lastUpdate = now;
+		this.players.set(playerId, me);
+
+		this.broadcast({
+			type: "player_respawn",
+			playerId,
+			health: me.health,
+			maxHealth: me.maxHealth,
+			pos: me.pos
+		});
 	}
 
 	private pruneStalePlayers() {
 		const now = Date.now();
-		const timeout = 60000; // 60 seconds of inactivity
+		const timeout = 60000;
 		for (const [id, p] of this.players.entries()) {
 			if (now - p.lastUpdate > timeout) {
-				const ws = this.playerSockets.get(id);
-				if (ws) {
-					try { ws.close(); } catch {}
-					this.sessions.delete(ws);
+				const sock = this.playerSockets.get(id);
+				if (sock) {
+					try { sock.close(); } catch { /* noop */ }
+					this.sessions.delete(sock);
 				}
 				this.players.delete(id);
 				this.playerSockets.delete(id);
+				this.cleanupRateState(id);
 				this.broadcast({ type: "player_left", playerId: id });
 			}
 		}
 	}
 
-	broadcast(message: any, exclude?: WebSocket) {
-		const data = JSON.stringify(message);
-		for (const session of this.sessions) {
+	broadcast(message: Record<string, unknown>, exclude?: WebSocket) {
+		let data: string;
+		try {
+			data = JSON.stringify(message);
+		} catch (err) {
+			console.error("broadcast stringify failed", err);
+			return;
+		}
+		for (const session of [...this.sessions]) {
 			if (session === exclude) continue;
 			try {
 				session.send(data);
 			} catch (err) {
-				// Clean up broken sessions discovered during broadcast
+				console.warn("broadcast send failed, closing socket", err);
 				this.sessions.delete(session);
-				// We don't have id here easily, but pruneStalePlayers will catch the player entry soon
+				for (const [pid, sock] of [...this.playerSockets.entries()]) {
+					if (sock === session) {
+						this.playerSockets.delete(pid);
+						break;
+					}
+				}
+				try {
+					session.close();
+				} catch {
+					/* noop */
+				}
 			}
 		}
 	}

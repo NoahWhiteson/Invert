@@ -91,14 +91,17 @@ export class PlayerController {
     }
 
     let targetFOV = 75
+    let targetZ = 0
     if (this.state.isAiming) {
-      targetFOV = this.state.isThirdPerson ? 68 : 54
+      targetFOV = this.state.isThirdPerson ? 50 : 38
+      targetZ = this.state.isThirdPerson ? 2.5 : -0.8
     } else {
       if (this.state.isSprinting) targetFOV = 88
       if (this.state.isSliding) targetFOV = 98
       if (!this.state.onGround && this.state.velocity.length() > this.state.moveSpeed * 2) targetFOV = 100
+      targetZ = this.state.isThirdPerson ? 4.8 : 0
     }
-    const fovBlend = 1 - Math.pow(0.9, Math.min(frameEquiv, 60))
+    const fovBlend = 1 - Math.pow(0.85, Math.min(frameEquiv, 60))
     camera.fov += (targetFOV - camera.fov) * fovBlend
     camera.updateProjectionMatrix()
 
@@ -112,13 +115,11 @@ export class PlayerController {
       this.state.shakeIntensity *= Math.pow(this.state.shakeReduction, Math.min(frameEquiv, 120))
     } else {
       camera.position.x = 0
-      if (this.state.isThirdPerson) {
-        camera.position.z = 4.8
-        camera.position.y = this.state.currentHeight * 0.42 + 0.35
-      } else {
-        camera.position.z = 0
-        camera.position.y = (this.state.currentHeight / 2) - 0.1
-      }
+      camera.position.z += (targetZ - camera.position.z) * fovBlend
+      
+      const headY = this.state.isThirdPerson ? (this.state.currentHeight * 0.42 + 0.35) : ((this.state.currentHeight / 2) - 0.1)
+      camera.position.y += (headY - camera.position.y) * fovBlend
+      
       this.state.shakeIntensity = 0
     }
 
@@ -175,13 +176,7 @@ export class PlayerController {
 
     const targetHeight = this.state.isCrouching ? this.state.crouchHeight : this.state.height
     this.state.currentHeight += (targetHeight - this.state.currentHeight) * 0.15
-    if (this.state.isThirdPerson) {
-      camera.position.y = this.state.currentHeight * 0.42 + 0.35
-      camera.position.z = 4.8
-    } else {
-      camera.position.y = (this.state.currentHeight / 2) - 0.1
-      camera.position.z = 0
-    }
+    // Camera position is now handled in the main update() to allow for smooth aiming zoom
 
     // Physics Calculation
     const moveDir = new THREE.Vector3()

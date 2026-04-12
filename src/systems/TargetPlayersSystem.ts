@@ -19,7 +19,54 @@ type TargetState = {
   anims?: AnimationManager
   thirdPersonGuns: (THREE.Group | null)[]
   ragdoll?: SkeletonRagdoll
+  /** Body center on / near inner surface (same convention as player: ~sphereRadius - bodyHalf). */
+  shellPoint: THREE.Vector3
+  velocity: THREE.Vector3
+  steerDir: THREE.Vector3
+  onGround: boolean
+  nextJumpAtMs: number
+  locoIntent: 'idle' | 'walk' | 'sprint' | 'jump'
+  facingYawTarget: number
+  stateTimer: number
+  wanderTarget: THREE.Vector3 | null
 }
+
+/** Simplified context for basic wandering. */
+export type BotBrainContext = {
+  playerPosition: THREE.Vector3
+  playerAlive: boolean
+  worldMesh: THREE.Mesh
+  nowMs: number
+  onBotHitPlayer: (botIndex: number, damage: number, hitFromWorld: THREE.Vector3) => void
+  onBotHitBot: (
+    shooterIndex: number,
+    hitObject: THREE.Object3D,
+    damage: number,
+    bulletDirWorld: THREE.Vector3,
+    hitPointWorld: THREE.Vector3
+  ) => void
+  onBotFire: (botWorldPos: THREE.Vector3) => void
+}
+
+const BOT_BODY_HALF = 0.9
+const BOT_GRAVITY = 0.0065
+const BOT_JUMP_FORCE = 0.2
+const BOT_MOVE_ACCEL = 0.02
+const BOT_WALK_SPEED = 0.11
+const BOT_SPRINT_MULT = 1.55
+const BOT_FRICTION_GROUND = 0.1
+const BOT_MOMENTUM_AIR = 0.985
+const BOT_YAW_SMOOTH_RAD_PER_SEC = 18
+const BOT_STEER_SMOOTH = 4.2
+const BOT_JUMP_INTERVAL_MIN_MS = 2800
+const BOT_JUMP_INTERVAL_MAX_MS = 6200
+const BOT_SKIN_HEX = 0x7a8fa6
+const BOT_FOOT_INSET = 0.04
+
+const WANDER_RADIUS = 16
+const WANDER_CHANCE = 0.75
+const IDLE_DURATION = 2200
+const WANDER_DURATION = 10000
 
 export class TargetPlayersSystem {
   private scene: THREE.Scene
@@ -30,6 +77,14 @@ export class TargetPlayersSystem {
   private targets: TargetState[] = []
   private allHitboxes: THREE.Object3D[] = []
   private bindMinY = -0.85
+  private _vA = new THREE.Vector3()
+  private _vB = new THREE.Vector3()
+  private _vC = new THREE.Vector3()
+  private _vD = new THREE.Vector3()
+  private _vE = new THREE.Vector3()
+  private _vF = new THREE.Vector3()
+  private _qInv = new THREE.Quaternion()
+  public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
     this.scene = scene
@@ -71,11 +126,9 @@ export class TargetPlayersSystem {
       if (this.bindMinY > -0.02) this.bindMinY = -0.85
       this.bindMinY += 0.05 
 
-      const spawnPromises: Promise<void>[] = []
       for (let i = 0; i < this.count; i++) {
-        spawnPromises.push(this.spawnTarget(i))
+        await this.spawnTarget(i)
       }
-      await Promise.all(spawnPromises)
     } catch (e) {
       console.warn('TargetPlayersSystem: failed to load target model', e)
     }
@@ -130,15 +183,8 @@ export class TargetPlayersSystem {
         }
 
         setTimeout(() => {
-          if (t.ragdoll) {
-            // Wait for ragdoll sinking to finish before respawn
-            setTimeout(() => {
-              if (t.ragdoll) {
-                t.ragdoll = undefined
-                this.respawnTarget(idx)
-              }
-            }, 3000)
-          }
+          t.ragdoll = undefined
+          this.respawnTarget(idx)
         }, 10000)
       }
       return { damaged: prevHealth > 0, targetIdx: idx, pos, killed, name: t.name }
@@ -165,45 +211,227 @@ export class TargetPlayersSystem {
     if (t) t.kills++
   }
 
+  private groundRadius(): number {
+    return this.sphereRadius - BOT_BODY_HALF
+  }
 
-  public update(dt: number) {
-    for (const t of this.targets) {
+  private updateFacingYawTarget(t: TargetState, faceWorld: THREE.Vector3) {
+    const up = this._vA.copy(t.shellPoint).normalize().multiplyScalar(-1)
+    const flat = this._vE.copy(faceWorld)
+    flat.addScaledVector(up, -flat.dot(up))
+    if (flat.lengthSq() < 1e-8) return
+    flat.normalize()
+
+    this._qInv.copy(t.container.quaternion).invert()
+    flat.applyQuaternion(this._qInv)
+
+    t.facingYawTarget = Math.atan2(flat.x, flat.z)
+  }
+
+  private smoothFacingYaw(t: TargetState, dt: number) {
+    const cur = t.model.rotation.y
+    const tgt = t.facingYawTarget
+    let delta = tgt - cur
+    while (delta > Math.PI) delta -= Math.PI * 2
+    while (delta < -Math.PI) delta += Math.PI * 2
+    const maxStep = BOT_YAW_SMOOTH_RAD_PER_SEC * dt
+    t.model.rotation.y = cur + THREE.MathUtils.clamp(delta, -maxStep, maxStep)
+  }
+
+  private updateBotBrain(t: TargetState, ctx: BotBrainContext, dt: number) {
+    const groundR = this.groundRadius()
+    const radial = this._vA.copy(t.shellPoint).normalize()
+
+    t.stateTimer -= dt * 1000
+
+    if (t.stateTimer <= 0) {
+      if (t.wanderTarget === null) {
+        if (Math.random() < WANDER_CHANCE) {
+          t.wanderTarget = this.pickWanderTarget(t.shellPoint)
+          t.stateTimer = WANDER_DURATION
+          t.locoIntent = 'walk'
+        } else {
+          t.stateTimer = IDLE_DURATION
+          t.locoIntent = 'idle'
+        }
+      } else {
+        t.wanderTarget = null
+        t.stateTimer = IDLE_DURATION
+        t.locoIntent = 'idle'
+      }
+    }
+
+    const rawDesired = this._vF.set(0, 0, 0)
+    let wantMove = false
+    let wantSprint = false
+
+    if (t.wanderTarget) {
+      const toWander = this._vE.copy(t.wanderTarget).sub(t.shellPoint)
+      toWander.addScaledVector(radial, -toWander.dot(radial))
+      const distTan = toWander.length()
+      if (distTan > 1e-8) {
+        rawDesired.copy(toWander).normalize()
+        wantMove = distTan > 1.35
+        wantSprint = distTan > 9
+        if (distTan < 1.2) {
+          t.stateTimer = 0
+        }
+      }
+    }
+
+    const steerBlend = Math.min(1, BOT_STEER_SMOOTH * dt)
+    if (rawDesired.lengthSq() > 1e-12) {
+      if (t.steerDir.lengthSq() < 1e-12) {
+        t.steerDir.copy(rawDesired)
+      } else {
+        t.steerDir.lerp(rawDesired, steerBlend)
+        t.steerDir.addScaledVector(radial, -t.steerDir.dot(radial))
+        if (t.steerDir.lengthSq() > 1e-12) t.steerDir.normalize()
+      }
+    } else {
+      t.steerDir.addScaledVector(radial, -t.steerDir.dot(radial))
+      t.steerDir.multiplyScalar(Math.max(0, 1 - steerBlend * 0.5))
+    }
+
+    const frameEquiv = dt * 60
+    const stepCount = Math.max(1, Math.min(Math.floor(frameEquiv + 1e-9), 120))
+
+    if (
+      t.onGround &&
+      t.wanderTarget &&
+      wantMove &&
+      ctx.nowMs >= t.nextJumpAtMs &&
+      Math.random() < dt * 0.16
+    ) {
+      const downDir = this._vD.copy(t.shellPoint).normalize()
+      const upDir = this._vC.copy(downDir).multiplyScalar(-1)
+      t.velocity.add(upDir.multiplyScalar(BOT_JUMP_FORCE))
+      t.onGround = false
+      t.nextJumpAtMs =
+        ctx.nowMs + BOT_JUMP_INTERVAL_MIN_MS + Math.random() * (BOT_JUMP_INTERVAL_MAX_MS - BOT_JUMP_INTERVAL_MIN_MS)
+    }
+
+    const targetSpeed = wantSprint ? BOT_WALK_SPEED * BOT_SPRINT_MULT : BOT_WALK_SPEED
+
+    for (let s = 0; s < stepCount; s++) {
+      const pos = t.shellPoint
+      const downDir = this._vD.copy(pos).normalize()
+
+      if (t.onGround && wantMove && t.steerDir.lengthSq() > 1e-12) {
+        const push = this._vB.copy(t.steerDir).normalize().multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10)
+        t.velocity.add(push)
+      } else if (!t.onGround && wantMove && t.steerDir.lengthSq() > 1e-12) {
+        const push = this._vB
+          .copy(t.steerDir)
+          .normalize()
+          .multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10 * 0.38)
+        t.velocity.add(push)
+      }
+
+      if (t.onGround) {
+        t.velocity.multiplyScalar(1 - BOT_FRICTION_GROUND)
+        const n = this._vD.copy(pos).normalize()
+        const radialSp = t.velocity.dot(n)
+        const tang = this._vB.copy(t.velocity).addScaledVector(n, -radialSp)
+        if (tang.length() > targetSpeed) tang.setLength(targetSpeed)
+        t.velocity.copy(n.multiplyScalar(radialSp).add(tang))
+      } else {
+        t.velocity.multiplyScalar(BOT_MOMENTUM_AIR)
+      }
+
+      t.velocity.add(this._vC.copy(downDir).multiplyScalar(BOT_GRAVITY))
+      pos.add(t.velocity)
+
+      const dist = pos.length()
+      if (dist >= groundR - 1e-5) {
+        pos.setLength(groundR)
+        const normal = this._vD.copy(pos).normalize()
+        if (t.velocity.dot(normal) > 0) {
+          t.velocity.projectOnPlane(normal)
+        }
+        t.onGround = true
+      } else {
+        t.onGround = false
+      }
+    }
+
+    this.applyShellPlacement(t, t.shellPoint)
+
+    radial.copy(t.shellPoint).normalize()
+    const faceTan = this._vB.copy(t.velocity).addScaledVector(radial, -t.velocity.dot(radial))
+    if (faceTan.lengthSq() > 2e-5) {
+      this.updateFacingYawTarget(t, faceTan.normalize())
+    } else if (t.steerDir.lengthSq() > 1e-10) {
+      this.updateFacingYawTarget(t, t.steerDir)
+    }
+
+    if (t.anims && t.health > 0) {
+      if (!t.onGround) {
+        const distToGround = groundR - t.shellPoint.length()
+        const verticalVel = t.velocity.dot(this._vD.copy(t.shellPoint).normalize())
+        if (verticalVel > 0.04 && distToGround < 1.25) {
+          t.anims.setJumpLandingTrigger()
+        }
+        t.anims.setState('jump', 0.08)
+      } else if (wantMove) {
+        t.anims.setState(wantSprint ? 'sprint' : 'walk', 0.14)
+      } else {
+        t.anims.setState('idle', 0.18)
+      }
+      t.anims.update(dt)
+    }
+  }
+
+  private pickWanderTarget(currentPos: THREE.Vector3): THREE.Vector3 {
+    const R = this.groundRadius()
+    const out = new THREE.Vector3()
+    const up = this._vA.copy(currentPos).normalize()
+    const randomDir = this._vB.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize()
+    const tangent = this._vC.crossVectors(up, randomDir).normalize()
+
+    out.copy(currentPos).addScaledVector(tangent, WANDER_RADIUS * (0.5 + Math.random() * 0.5))
+    out.normalize().multiplyScalar(R)
+    return out
+  }
+
+  public update(dt: number, brain?: BotBrainContext | null) {
+    for (let ti = 0; ti < this.targets.length; ti++) {
+      const t = this.targets[ti]
       if (!t) continue
       if (t.ragdoll) {
         t.ragdoll.update(dt, this.sphereRadius)
         continue
       }
-      
-      // Update animations here if they weren't updated in updateBotAI
+
+      if (brain && t.health > 0) {
+        this.updateBotBrain(t, brain, dt)
+        this.smoothFacingYaw(t, dt)
+      }
+
       if (t.anims && t.health > 0) {
-        t.anims.update(dt)
+        // t.anims.update(dt) // Removed redundant update here, handled in updateBotBrain
+        t.anims.repairFiringStale()
+        t.anims.ensureAnyActionOrIdle()
       } else if (t.anims && t.health <= 0) {
-        // Stop animations if dead but not yet ragdolled
         t.anims.update(0)
       }
 
-      // Ensure model is visible and correctly scaled
       t.model.visible = true
       t.model.scale.setScalar(1)
       t.container.visible = true
       
-      // Ensure all meshes in the model are visible (safety against animation glitches)
       t.model.traverse(c => {
         if (c instanceof THREE.Mesh || (c as any).isSkinnedMesh) {
           c.visible = true
-          // Ensure material is reset if it was modified
           const m = c as THREE.Mesh
           if (m.material) {
             const mat = m.material as THREE.MeshToonMaterial
             if (t.flashTimer <= 0 && mat.color) {
-              mat.color.setHex(0x9f9f9f)
+              mat.color.setHex(BOT_SKIN_HEX)
             }
           }
         }
       })
-      
-      // Force matrix update to prevent T-posing from stale matrices
-      t.container.updateMatrixWorld(true)
       
       if (t.flashTimer > 0) {
         t.flashTimer -= dt
@@ -211,7 +439,7 @@ export class TargetPlayersSystem {
         t.model.traverse((child) => {
           if (child instanceof THREE.Mesh) {
             const mat = child.material as THREE.MeshToonMaterial
-            if (mat) mat.color.setHex(isFlashing ? 0xff0000 : 0x9f9f9f)
+            if (mat) mat.color.setHex(isFlashing ? 0xff0000 : BOT_SKIN_HEX)
           }
         })
       }
@@ -227,7 +455,7 @@ export class TargetPlayersSystem {
       }
     })
     if (!hand) return
-    const handObj = hand as THREE.Object3D; // Cast to avoid 'never' type issue
+    const handObj = hand as THREE.Object3D;
 
     const configs = [
       { file: 'ak47.fbx', scale: 0.0099, pos: new THREE.Vector3(0.035, 0.215, -0.015), rot: new THREE.Euler(3.14, -0.08, -1.51, 'YXZ') },
@@ -274,9 +502,10 @@ export class TargetPlayersSystem {
       if (c instanceof THREE.Mesh || (c as any).isSkinnedMesh) {
         const m = c as THREE.Mesh
         m.frustumCulled = false
-        if (m.material) {
-          m.material = (m.material as THREE.Material).clone()
-        }
+        m.material = new THREE.MeshToonMaterial({
+          color: BOT_SKIN_HEX,
+          side: THREE.DoubleSide,
+        })
       }
     })
     container.add(model)
@@ -295,9 +524,9 @@ export class TargetPlayersSystem {
 
     const floor = this.bindMinY
     const hitboxes: THREE.Mesh[] = [
-      addBox(0.4, 0.7, 0.3, 0, floor + 0.4, 0),    // Lower legs
-      addBox(0.45, 0.7, 0.35, 0, floor + 1.0, 0),   // Upper legs
-      addBox(0.55, 0.8, 0.4, 0, floor + 1.5, 0)    // Torso
+      addBox(0.4, 0.7, 0.3, 0, floor + 0.4, 0),
+      addBox(0.45, 0.7, 0.35, 0, floor + 1.0, 0),
+      addBox(0.55, 0.8, 0.4, 0, floor + 1.5, 0)
     ]
     const headGeo = new THREE.SphereGeometry(0.2, 8, 8)
     const head = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({ visible: false }))
@@ -323,20 +552,20 @@ export class TargetPlayersSystem {
     container.add(nameTag)
 
     this.scene.add(container)
-    const botNames = ['Shadow', 'Hunter', 'Ghost', 'Striker', 'Viper', 'Raven', 'Wolf', 'Blade', 'Tank', 'Sniper']
     const anims = new AnimationManager(model)
-    void anims.loadAll()
+    await anims.loadAll()
+    anims.setState('idle', 0) // Initialize state immediately
+    anims.hardResetToIdle()   // Ensure clean start
 
     const guns: (THREE.Group | null)[] = [null, null, null]
     await this.addThirdPersonGunsToBot(model, guns)
 
-    const targetName = botNames[index % botNames.length]!
+    const targetName = `BOT-${String(index + 1).padStart(2, '0')}`
 
-    // Update Name Tag
     const ctx = nameCanvas.getContext('2d')!
     ctx.clearRect(0, 0, nameCanvas.width, nameCanvas.height)
-    ctx.font = "bold 58px 'm6x11', monospace"
-    ctx.fillStyle = 'white'
+    ctx.font = "bold 52px 'm6x11', monospace"
+    ctx.fillStyle = '#c5d2e8'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.strokeStyle = 'black'
@@ -355,10 +584,62 @@ export class TargetPlayersSystem {
       name: targetName,
       kills: 0,
       anims,
-      thirdPersonGuns: guns
+      thirdPersonGuns: guns,
+      shellPoint: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
+      steerDir: new THREE.Vector3(),
+      onGround: true,
+      nextJumpAtMs: 0,
+      locoIntent: 'idle',
+      facingYawTarget: 0,
+      stateTimer: 0,
+      wanderTarget: null,
     }
     this.respawnTarget(index)
-    console.log(`Bot ${index} spawned at`, container.position)
+  }
+
+  public syncPlayerSpawnHint(pos: THREE.Vector3) {
+    if (pos.lengthSq() > 1) this.lastKnownPlayerPos.copy(pos)
+  }
+
+  private pickSeparatedShellPoint(forIndex: number): THREE.Vector3 {
+    const R = this.groundRadius()
+    const out = new THREE.Vector3()
+    for (let attempt = 0; attempt < 120; attempt++) {
+      out.setFromSphericalCoords(R, Math.random() * Math.PI, Math.random() * Math.PI * 2)
+      let ok = true
+      if (this.lastKnownPlayerPos.lengthSq() > 1 && out.distanceTo(this.lastKnownPlayerPos) < 13) {
+        ok = false
+      }
+      if (ok) {
+        for (let i = 0; i < this.targets.length; i++) {
+          if (i === forIndex) continue
+          const o = this.targets[i]
+          if (!o || o.shellPoint.lengthSq() < 1e-4) continue
+          if (out.distanceTo(o.shellPoint) < 17) {
+            ok = false
+            break
+          }
+        }
+      }
+      if (ok) return out
+    }
+    out.setFromSphericalCoords(this.groundRadius(), Math.random() * Math.PI, Math.random() * Math.PI * 2)
+    return out
+  }
+
+  private applyShellPlacement(t: TargetState, shellOnSphere: THREE.Vector3) {
+    t.shellPoint.copy(shellOnSphere)
+    const upDir = this._vA.copy(shellOnSphere).normalize().multiplyScalar(-1)
+    t.container.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), upDir)
+
+    const radial = this._vB.copy(shellOnSphere).normalize()
+    const feetWorld = this._vC.copy(radial).multiplyScalar(this.sphereRadius - BOT_FOOT_INSET)
+    this._vD
+      .set(0, this.bindMinY, 0)
+      .applyQuaternion(t.model.quaternion)
+      .applyQuaternion(t.container.quaternion)
+    t.container.position.copy(feetWorld).sub(this._vD)
   }
 
   private respawnTarget(index: number) {
@@ -371,26 +652,18 @@ export class TargetPlayersSystem {
       })
     }
     setRagdollOutlinesVisible(t.model, true)
-    
-    const phi = Math.random() * Math.PI
-    const theta = Math.random() * Math.PI * 2
-    const surfacePos = new THREE.Vector3().setFromSphericalCoords(this.sphereRadius, phi, theta)
-    const upDir = surfacePos.clone().normalize().multiplyScalar(-1)
-    
-    t.container.position.copy(surfacePos)
-    t.container.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), upDir)
-    
-    // bindMinY is negative (e.g., -0.8), so this moves the container 
-    // so that the feet (at bindMinY) are at the surfacePos.
-    // Local Y points TOWARD center, so we move in local +Y to move TOWARD center.
-    const offset = new THREE.Vector3(0, -this.bindMinY, 0).applyQuaternion(t.container.quaternion)
-    t.container.position.add(offset)
-    
-    // Ensure they aren't hidden by the surface inset - push slightly away from center
-    const pushOut = surfacePos.clone().normalize().multiplyScalar(0.1)
-    t.container.position.add(pushOut)
-    
+
+    const surfacePos = this.pickSeparatedShellPoint(index)
+    this.applyShellPlacement(t, surfacePos)
+
     t.health = t.maxHealth
+    t.locoIntent = 'idle'
+    t.stateTimer = 0
+    t.wanderTarget = null
+    t.velocity.set(0, 0, 0)
+    t.steerDir.set(0, 0, 0)
+    t.onGround = true
+    t.nextJumpAtMs = performance.now() + 800 + Math.random() * 2400
 
     t.model.position.set(0, 0, 0)
     t.model.quaternion.identity()
@@ -403,9 +676,9 @@ export class TargetPlayersSystem {
     })
 
     if (t.anims) {
-      t.anims.setRagdollFrozen(false)
-      t.anims.setState('idle')
+      t.anims.hardResetToIdle()
     }
+    t.facingYawTarget = t.model.rotation.y
 
     const nameTag = t.container.getObjectByName('nameTag')
     if (nameTag) nameTag.visible = true

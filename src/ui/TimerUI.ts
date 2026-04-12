@@ -1,8 +1,10 @@
+const WAITING_FOR_PLAYERS_TEXT = 'Waiting for 1 More Player'
+
 export class TimerUI {
   private element: HTMLDivElement
   private startTime: number
   private duration: number = 10 * 60 * 1000 // 10 minutes in ms
-  /** When false (solo, under 2 humans), UI stays at 10:00. When true, match clock runs. */
+  /** When false (solo, under 2 humans), UI shows waiting message. When true, match clock runs. */
   private countdownActive = false
   private serverMatchStart: number | null = null
   /** Previous frame remaining ms; used to fire once when crossing into the last minute. */
@@ -27,7 +29,19 @@ export class TimerUI {
     document.body.appendChild(this.element)
 
     this.startTime = Date.now()
-    this.element.innerText = '10:00'
+    this.applyWaitingStyle()
+    this.element.innerText = WAITING_FOR_PLAYERS_TEXT
+  }
+
+  private applyWaitingStyle() {
+    this.element.style.fontSize = '24px'
+    this.element.style.letterSpacing = '2px'
+    this.element.style.color = 'white'
+  }
+
+  private applyCountdownStyle() {
+    this.element.style.fontSize = '32px'
+    this.element.style.letterSpacing = '4px'
   }
 
   /** Call each frame before update(). Countdown runs only when true (2+ human players). */
@@ -35,6 +49,7 @@ export class TimerUI {
     if (this.countdownActive === active) return
     this.countdownActive = active
     if (active) {
+      this.applyCountdownStyle()
       const now = Date.now()
       let t = now
       if (this.serverMatchStart != null) {
@@ -44,16 +59,18 @@ export class TimerUI {
         }
       }
       this.startTime = t
+    } else {
+      this.applyWaitingStyle()
     }
   }
 
   public update() {
     if (!this.countdownActive) {
       this.lastRemainingMs = -1
-      if (this.element.innerText !== '10:00') {
-        this.element.innerText = '10:00'
+      if (this.element.innerText !== WAITING_FOR_PLAYERS_TEXT) {
+        this.element.innerText = WAITING_FOR_PLAYERS_TEXT
       }
-      this.element.style.color = 'white'
+      this.applyWaitingStyle()
       return
     }
 
@@ -94,6 +111,10 @@ export class TimerUI {
     }
 
     this.lastRemainingMs = remaining
+  }
+
+  public setVisible(visible: boolean) {
+    this.element.style.opacity = visible ? '1' : '0'
   }
 
   public setStartTime(startTimeMs: number) {
