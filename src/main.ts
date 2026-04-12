@@ -614,10 +614,12 @@ const AK_SKIN_TEX_URL: Record<AkGunSkinId, string> = {
 const akGunSkinTextures = new Map<AkGunSkinId, THREE.Texture>()
 
 function getAkGunSkinTexture(id: AkGunSkinId): THREE.Texture {
+  const url = AK_SKIN_TEX_URL[id]
+  if (!url) return getAkGunSkinTexture('fabric')
   let t = akGunSkinTextures.get(id)
   if (!t) {
     const loader = new THREE.TextureLoader()
-    t = loader.load(AK_SKIN_TEX_URL[id], (tex) => {
+    t = loader.load(url, (tex) => {
       tex.flipY = false
     })
     t.colorSpace = THREE.SRGBColorSpace

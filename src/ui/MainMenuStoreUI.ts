@@ -1,5 +1,5 @@
+import { purchaseAkGunSkinViaApi, purchaseLootCrateViaApi } from '../net/invertEconomySync'
 import {
-  addOwnedAkGunSkin,
   AK_GUN_SKIN_PRICE,
   type AkGunSkinId,
   type EquippedAkSkin,
@@ -7,10 +7,7 @@ import {
   LOOT_CRATES,
   ownsAkGunSkin,
   readOwnedSkinIds,
-  setCoins,
-  setEquippedAkSkin,
   SKIN_CATALOG,
-  tryOpenLootCrate,
 } from '../store/skinEconomy'
 
 const THICK_OUTLINE =
@@ -262,15 +259,16 @@ export class MainMenuStoreUI {
       const sid = this.storePreviewSkin
       if (sid === null || sid === 'default') return
       void this.clickSfx.play().catch(() => {})
-      const coins = getCoins()
       if (ownsAkGunSkin(sid)) return
       const price = AK_GUN_SKIN_PRICE[sid]
-      if (coins < price) return
-      setCoins(coins - price)
-      addOwnedAkGunSkin(sid)
-      setEquippedAkSkin(sid)
-      this.onGunSkinPurchase?.(sid)
-      this.refresh()
+      if (getCoins() < price) return
+      void (async () => {
+        const ok = await purchaseAkGunSkinViaApi(sid)
+        if (ok) {
+          this.onGunSkinPurchase?.(sid)
+          this.refresh()
+        }
+      })()
     })
 
     this.leftPanel.appendChild(this.gridHost)
@@ -698,13 +696,11 @@ export class MainMenuStoreUI {
       e.preventDefault()
       if (btn.disabled) return
       void this.clickSfx.play().catch(() => {})
-      const r = tryOpenLootCrate(crate.id)
-      if (r.ok) {
-        this.onPurchased?.()
+      void (async () => {
+        const r = await purchaseLootCrateViaApi(crate.id)
+        if (r.ok) this.onPurchased?.()
         this.refresh()
-      } else {
-        this.refresh()
-      }
+      })()
     })
 
     wrap.appendChild(btn)

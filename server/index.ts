@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { handleApiRequest } from "./api";
+import { apiPreflight, handleApiRequest } from "./api";
 import type { Env } from "./env";
 import {
 	DAMAGE_COOLDOWN_MS,
@@ -67,6 +67,9 @@ export default {
 		const url = new URL(request.url);
 
 		if (url.pathname.startsWith("/api/")) {
+			if (request.method === "OPTIONS") {
+				return apiPreflight(request, env);
+			}
 			return handleApiRequest(request, env);
 		}
 

@@ -1,5 +1,12 @@
 import type { Env } from "./env"
 import { isValidAkSkinId, isValidCharacterSkinId } from "./catalog"
+import {
+  AK_SKIN_PRICES,
+  characterSkinPrice,
+  dailyOfferSkinIdsForYmd,
+  LOOT_CRATES,
+  SKIN_CATALOG,
+} from "./economyData"
 
 /** If `CORS_ORIGIN` is unset or `*`, echo request `Origin` so browsers accept cross-site fetches from Vercel etc. */
 function resolveCorsOrigin(request: Request, env: Env): string {
@@ -23,6 +30,19 @@ function corsResponseHeaders(request: Request, allowOrigin: string, forOptions: 
   if (forOptions) h["Access-Control-Max-Age"] = "86400"
   if (allowOrigin !== "*") h["Vary"] = "Origin"
   return h
+}
+
+/** Call from `index` for OPTIONS before any other API work — uses `Headers` so preflight always emits Allow-Origin. */
+export function apiPreflight(request: Request, env: Env): Response {
+  const allowOrigin = resolveCorsOrigin(request, env)
+  const reqHdr = request.headers.get("Access-Control-Request-Headers")
+  const h = new Headers()
+  h.set("Access-Control-Allow-Origin", allowOrigin)
+  h.set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+  h.set("Access-Control-Allow-Headers", reqHdr ?? "Authorization, Content-Type, Accept, Origin, X-Requested-With")
+  h.set("Access-Control-Max-Age", "86400")
+  if (allowOrigin !== "*") h.set("Vary", "Origin")
+  return new Response(null, { status: 204, headers: h })
 }
 
 function json(data: unknown, status: number, request: Request, allowOrigin: string): Response {
@@ -76,6 +96,81 @@ async function resolveAccountId(env: Env, tokenHex: string): Promise<string | nu
   return row?.id ?? null
 }
 
+export type EconomyApiPayload = {
+  accountId: string
+  coins: number
+  ownedCharacterSkins: string[]
+  ownedAkSkins: string[]
+  equippedCharacterSkin: string | null
+  equippedAkSkin: string
+}
+
+async function buildEconomyPayload(env: Env, accountId: string): Promise<EconomyApiPayload> {
+  const coinRow = await env.DB.prepare("SELECT coins FROM account_coins WHERE account_id = ? LIMIT 1")
+    .bind(accountId)
+    .first<{ coins: number }>()
+  const coins = coinRow?.coins ?? 0
+
+  const meta = await env.DB.prepare(
+    "SELECT equipped_character_skin, equipped_ak_skin FROM account_meta WHERE account_id = ? LIMIT 1"
+  )
+    .bind(accountId)
+    .first<{ equipped_character_skin: string | null; equipped_ak_skin: string | null }>()
+
+  const charRows = await env.DB.prepare("SELECT skin_id FROM owned_character_skins WHERE account_id = ?")
+    .bind(accountId)
+    .all<{ skin_id: string }>()
+  const akRows = await env.DB.prepare("SELECT skin_id FROM owned_ak_skins WHERE account_id = ?")
+    .bind(accountId)
+    .all<{ skin_id: string }>()
+
+  const ownedCharacterSkins = (charRows.results ?? [])
+    .map((r) => r.skin_id)
+    .filter((id) => isValidCharacterSkinId(id))
+  const ownedAkSkins = (akRows.results ?? []).map((r) => r.skin_id).filter((id) => isValidAkSkinId(id))
+
+  let equippedCharacterSkin: string | null = meta?.equipped_character_skin ?? null
+  if (equippedCharacterSkin !== null && !isValidCharacterSkinId(equippedCharacterSkin)) equippedCharacterSkin = null
+  if (equippedCharacterSkin !== null && !ownedCharacterSkins.includes(equippedCharacterSkin)) equippedCharacterSkin = null
+
+  let equippedAkSkin: string = meta?.equipped_ak_skin ?? "default"
+  if (equippedAkSkin !== "default" && !isValidAkSkinId(equippedAkSkin)) equippedAkSkin = "default"
+  if (equippedAkSkin !== "default" && !ownedAkSkins.includes(equippedAkSkin)) equippedAkSkin = "default"
+
+  return {
+    accountId,
+    coins,
+    ownedCharacterSkins,
+    ownedAkSkins,
+    equippedCharacterSkin,
+    equippedAkSkin,
+  }
+}
+
+async function readJsonBody(request: Request, allowOrigin: string): Promise<unknown | Response> {
+  const len = parseInt(request.headers.get("Content-Length") ?? "0", 10)
+  if (len > MAX_API_BODY_BYTES) return json({ error: "body_too_large" }, 413, request, allowOrigin)
+
+  const text = await request.text()
+  if (text.length > MAX_API_BODY_BYTES) return json({ error: "body_too_large" }, 413, request, allowOrigin)
+
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return json({ error: "invalid_json" }, 400, request, allowOrigin)
+  }
+}
+
+async function requireBearerAccount(request: Request, env: Env, allowOrigin: string): Promise<{ accountId: string } | Response> {
+  const token = parseBearerToken(request)
+  if (!token) return json({ error: "unauthorized" }, 401, request, allowOrigin)
+
+  const accountId = await resolveAccountId(env, token)
+  if (!accountId) return json({ error: "unauthorized" }, 401, request, allowOrigin)
+
+  return { accountId }
+}
+
 const MAX_COINS = 999_999_999
 
 function sanitizeCoinsBody(raw: unknown): number | null {
@@ -91,10 +186,6 @@ function sanitizeCoinsBody(raw: unknown): number | null {
 export async function handleApiRequest(request: Request, env: Env): Promise<Response> {
   const allowOrigin = resolveCorsOrigin(request, env)
   const url = new URL(request.url)
-
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsResponseHeaders(request, allowOrigin, true) })
-  }
 
   const path = url.pathname.replace(/\/+$/, "") || "/"
 
@@ -151,22 +242,194 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     }
 
     if (path === "/api/v1/economy" && request.method === "GET") {
-      const token = parseBearerToken(request)
-      if (!token) return json({ error: "unauthorized" }, 401, request, allowOrigin)
+      const auth = await requireBearerAccount(request, env, allowOrigin)
+      if (auth instanceof Response) return auth
+      const payload = await buildEconomyPayload(env, auth.accountId)
+      return json(payload, 200, request, allowOrigin)
+    }
 
-      const accountId = await resolveAccountId(env, token)
-      if (!accountId) return json({ error: "unauthorized" }, 401, request, allowOrigin)
+    if (path === "/api/v1/economy/loot-crate" && request.method === "POST") {
+      const auth = await requireBearerAccount(request, env, allowOrigin)
+      if (auth instanceof Response) return auth
+      const { accountId } = auth
+
+      const parsed = await readJsonBody(request, allowOrigin)
+      if (parsed instanceof Response) return parsed
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      const crateId = (parsed as Record<string, unknown>).crateId
+      if (typeof crateId !== "string" || !crateId.length) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      const crate = LOOT_CRATES[crateId]
+      if (!crate) return json({ error: "unknown_crate" }, 400, request, allowOrigin)
 
       const coinRow = await env.DB.prepare("SELECT coins FROM account_coins WHERE account_id = ? LIMIT 1")
         .bind(accountId)
         .first<{ coins: number }>()
       const coins = coinRow?.coins ?? 0
+      if (coins < crate.price) return json({ error: "funds" }, 400, request, allowOrigin)
+
+      const charRows = await env.DB.prepare("SELECT skin_id FROM owned_character_skins WHERE account_id = ?")
+        .bind(accountId)
+        .all<{ skin_id: string }>()
+      const ownedSet = new Set(
+        (charRows.results ?? []).map((r) => r.skin_id).filter((id) => isValidCharacterSkinId(id))
+      )
+      const pool = SKIN_CATALOG.map((s) => s.id).filter((id) => !ownedSet.has(id))
+      if (pool.length === 0) return json({ error: "catalog_empty" }, 400, request, allowOrigin)
+
+      const pick = pool[Math.floor(Math.random() * pool.length)]!
+      const nextCoins = coins - crate.price
+
+      await env.DB.batch([
+        env.DB
+          .prepare("INSERT INTO account_coins (account_id, coins) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET coins = excluded.coins")
+          .bind(accountId, nextCoins),
+        env.DB.prepare("INSERT INTO owned_character_skins (account_id, skin_id) VALUES (?, ?)").bind(accountId, pick),
+      ])
+
+      const payload = await buildEconomyPayload(env, accountId)
+      return json({ ...payload, rewardSkinId: pick }, 200, request, allowOrigin)
+    }
+
+    if (path === "/api/v1/economy/ak-skin" && request.method === "POST") {
+      const auth = await requireBearerAccount(request, env, allowOrigin)
+      if (auth instanceof Response) return auth
+      const { accountId } = auth
+
+      const parsed = await readJsonBody(request, allowOrigin)
+      if (parsed instanceof Response) return parsed
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      const skinId = (parsed as Record<string, unknown>).skinId
+      if (typeof skinId !== "string" || !skinId.length) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      if (!isValidAkSkinId(skinId)) return json({ error: "unknown_skin" }, 400, request, allowOrigin)
+
+      const price = AK_SKIN_PRICES[skinId]
+      if (price === undefined) return json({ error: "unknown_skin" }, 400, request, allowOrigin)
+
+      const akRows = await env.DB.prepare("SELECT skin_id FROM owned_ak_skins WHERE account_id = ? AND skin_id = ? LIMIT 1")
+        .bind(accountId, skinId)
+        .first<{ skin_id: string }>()
+      if (akRows) return json({ error: "owned" }, 400, request, allowOrigin)
+
+      const coinRow = await env.DB.prepare("SELECT coins FROM account_coins WHERE account_id = ? LIMIT 1")
+        .bind(accountId)
+        .first<{ coins: number }>()
+      const coins = coinRow?.coins ?? 0
+      if (coins < price) return json({ error: "funds" }, 400, request, allowOrigin)
+
+      const nextCoins = coins - price
+
+      await env.DB.batch([
+        env.DB
+          .prepare("INSERT INTO account_coins (account_id, coins) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET coins = excluded.coins")
+          .bind(accountId, nextCoins),
+        env.DB.prepare("INSERT INTO owned_ak_skins (account_id, skin_id) VALUES (?, ?)").bind(accountId, skinId),
+        env.DB
+          .prepare(
+            "INSERT INTO account_meta (account_id, equipped_character_skin, equipped_ak_skin) VALUES (?, NULL, ?) " +
+              "ON CONFLICT(account_id) DO UPDATE SET equipped_ak_skin = excluded.equipped_ak_skin"
+          )
+          .bind(accountId, skinId),
+      ])
+
+      const payload = await buildEconomyPayload(env, accountId)
+      return json(payload, 200, request, allowOrigin)
+    }
+
+    if (path === "/api/v1/economy/character-skin" && request.method === "POST") {
+      const auth = await requireBearerAccount(request, env, allowOrigin)
+      if (auth instanceof Response) return auth
+      const { accountId } = auth
+
+      const parsed = await readJsonBody(request, allowOrigin)
+      if (parsed instanceof Response) return parsed
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      const o = parsed as Record<string, unknown>
+      const skinId = o.skinId
+      const shopDateYmd = o.shopDateYmd
+      if (typeof skinId !== "string" || !skinId.length) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      if (typeof shopDateYmd !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(shopDateYmd)) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      if (!isValidCharacterSkinId(skinId)) return json({ error: "not_offered" }, 400, request, allowOrigin)
+
+      const offers = dailyOfferSkinIdsForYmd(shopDateYmd)
+      if (!offers.has(skinId)) return json({ error: "not_offered" }, 400, request, allowOrigin)
+
+      const price = characterSkinPrice(skinId)
+      if (price === undefined) return json({ error: "not_offered" }, 400, request, allowOrigin)
+
+      const ownedRow = await env.DB.prepare(
+        "SELECT skin_id FROM owned_character_skins WHERE account_id = ? AND skin_id = ? LIMIT 1"
+      )
+        .bind(accountId, skinId)
+        .first<{ skin_id: string }>()
+      if (ownedRow) return json({ error: "owned" }, 400, request, allowOrigin)
+
+      const coinRow = await env.DB.prepare("SELECT coins FROM account_coins WHERE account_id = ? LIMIT 1")
+        .bind(accountId)
+        .first<{ coins: number }>()
+      const coins = coinRow?.coins ?? 0
+      if (coins < price) return json({ error: "funds" }, 400, request, allowOrigin)
+
+      const nextCoins = coins - price
+
+      await env.DB.batch([
+        env.DB
+          .prepare("INSERT INTO account_coins (account_id, coins) VALUES (?, ?) ON CONFLICT(account_id) DO UPDATE SET coins = excluded.coins")
+          .bind(accountId, nextCoins),
+        env.DB.prepare("INSERT INTO owned_character_skins (account_id, skin_id) VALUES (?, ?)").bind(accountId, skinId),
+      ])
+
+      const payload = await buildEconomyPayload(env, accountId)
+      return json(payload, 200, request, allowOrigin)
+    }
+
+    if (path === "/api/v1/economy/equipment" && request.method === "PATCH") {
+      const auth = await requireBearerAccount(request, env, allowOrigin)
+      if (auth instanceof Response) return auth
+      const { accountId } = auth
+
+      const parsed = await readJsonBody(request, allowOrigin)
+      if (parsed instanceof Response) return parsed
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+      const body = parsed as Record<string, unknown>
 
       const meta = await env.DB.prepare(
         "SELECT equipped_character_skin, equipped_ak_skin FROM account_meta WHERE account_id = ? LIMIT 1"
       )
         .bind(accountId)
         .first<{ equipped_character_skin: string | null; equipped_ak_skin: string | null }>()
+
+      let equippedCharacterSkin: string | null = meta?.equipped_character_skin ?? null
+      let equippedAkSkinDb: string | null = meta?.equipped_ak_skin ?? null
+
+      if ("equippedCharacterSkin" in body) {
+        const v = body.equippedCharacterSkin
+        if (v === null || v === "") equippedCharacterSkin = null
+        else if (typeof v === "string") equippedCharacterSkin = v
+        else return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
+
+      if ("equippedAkSkin" in body) {
+        const v = body.equippedAkSkin
+        if (v === null || v === "default") equippedAkSkinDb = null
+        else if (typeof v === "string") equippedAkSkinDb = v
+        else return json({ error: "invalid_body" }, 400, request, allowOrigin)
+      }
 
       const charRows = await env.DB.prepare("SELECT skin_id FROM owned_character_skins WHERE account_id = ?")
         .bind(accountId)
@@ -180,27 +443,26 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
         .filter((id) => isValidCharacterSkinId(id))
       const ownedAkSkins = (akRows.results ?? []).map((r) => r.skin_id).filter((id) => isValidAkSkinId(id))
 
-      let equippedCharacterSkin: string | null = meta?.equipped_character_skin ?? null
-      if (equippedCharacterSkin !== null && !isValidCharacterSkinId(equippedCharacterSkin)) equippedCharacterSkin = null
-      if (equippedCharacterSkin !== null && !ownedCharacterSkins.includes(equippedCharacterSkin)) equippedCharacterSkin = null
+      if (equippedCharacterSkin !== null) {
+        if (!isValidCharacterSkinId(equippedCharacterSkin)) return json({ error: "invalid_equipment" }, 400, request, allowOrigin)
+        if (!ownedCharacterSkins.includes(equippedCharacterSkin)) return json({ error: "not_owned" }, 400, request, allowOrigin)
+      }
 
-      let equippedAkSkin: string = meta?.equipped_ak_skin ?? "default"
-      if (equippedAkSkin !== "default" && !isValidAkSkinId(equippedAkSkin)) equippedAkSkin = "default"
-      if (equippedAkSkin !== "default" && !ownedAkSkins.includes(equippedAkSkin)) equippedAkSkin = "default"
+      if (equippedAkSkinDb !== null) {
+        if (!isValidAkSkinId(equippedAkSkinDb)) return json({ error: "invalid_equipment" }, 400, request, allowOrigin)
+        if (!ownedAkSkins.includes(equippedAkSkinDb)) return json({ error: "not_owned" }, 400, request, allowOrigin)
+      }
 
-      return json(
-        {
-          accountId,
-          coins,
-          ownedCharacterSkins,
-          ownedAkSkins,
-          equippedCharacterSkin,
-          equippedAkSkin,
-        },
-        200,
-        request,
-        allowOrigin
-      )
+      await env.DB
+        .prepare(
+          "INSERT INTO account_meta (account_id, equipped_character_skin, equipped_ak_skin) VALUES (?, ?, ?) " +
+            "ON CONFLICT(account_id) DO UPDATE SET equipped_character_skin = excluded.equipped_character_skin, equipped_ak_skin = excluded.equipped_ak_skin"
+        )
+        .bind(accountId, equippedCharacterSkin, equippedAkSkinDb)
+        .run()
+
+      const payload = await buildEconomyPayload(env, accountId)
+      return json(payload, 200, request, allowOrigin)
     }
 
     if (path === "/api/v1/economy" && request.method === "PATCH") {

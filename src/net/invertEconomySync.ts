@@ -1,8 +1,16 @@
 import {
+  addOwnedAkGunSkin,
+  AK_GUN_SKIN_PRICE,
   API_ACCOUNT_ID_KEY,
   API_TOKEN_KEY,
   applyServerEconomySnapshot,
   getCoins,
+  ownsAkGunSkin,
+  setCoins,
+  setEquippedAkSkin,
+  tryOpenLootCrate,
+  type AkGunSkinId,
+  type LootCrateResult,
 } from '../store/skinEconomy'
 
 /** After `trySyncEconomyFromApi` following credential restore. */
@@ -25,13 +33,144 @@ function getApiOrigin(): string | null {
 }
 
 type CreateAccountResponse = { accountId: string; apiToken: string }
-type EconomyResponse = {
+
+export type EconomyResponse = {
   accountId: string
   coins: number
   ownedCharacterSkins: string[]
   ownedAkSkins: string[]
   equippedCharacterSkin: string | null
   equippedAkSkin: string
+}
+
+function getStoredApiToken(): string | null {
+  try {
+    const t = localStorage.getItem(API_TOKEN_KEY)?.trim()
+    return t && /^[0-9a-f]{64}$/i.test(t) ? t.toLowerCase() : null
+  } catch {
+    return null
+  }
+}
+
+let pushCoinsDebounce: ReturnType<typeof setTimeout> | null = null
+
+/** Drop pending PATCH so a stale local balance cannot overwrite D1 after GET /economy applies. */
+export function cancelScheduledCoinPush(): void {
+  if (pushCoinsDebounce !== null) {
+    clearTimeout(pushCoinsDebounce)
+    pushCoinsDebounce = null
+  }
+}
+
+function economyAuthHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  }
+}
+
+function applyEconomyJson(snap: EconomyResponse): void {
+  applyServerEconomySnapshot({
+    coins: snap.coins,
+    ownedCharacterSkins: Array.isArray(snap.ownedCharacterSkins) ? snap.ownedCharacterSkins : [],
+    ownedAkSkins: Array.isArray(snap.ownedAkSkins) ? snap.ownedAkSkins : [],
+    equippedCharacterSkin:
+      snap.equippedCharacterSkin === null || typeof snap.equippedCharacterSkin === 'string'
+        ? snap.equippedCharacterSkin
+        : null,
+    equippedAkSkin: typeof snap.equippedAkSkin === 'string' ? snap.equippedAkSkin : 'default',
+  })
+  cancelScheduledCoinPush()
+}
+
+/**
+ * Buys a loot crate on D1 (random unowned character skin). Falls back to local-only when API/token missing.
+ */
+export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrateResult> {
+  const origin = getApiOrigin()
+  const token = getStoredApiToken()
+  if (!origin || !token) return tryOpenLootCrate(crateId)
+
+  try {
+    const res = await fetch(`${origin}/api/v1/economy/loot-crate`, {
+      method: 'POST',
+      headers: economyAuthHeaders(token),
+      body: JSON.stringify({ crateId }),
+    })
+    const data = (await res.json().catch(() => ({}))) as { error?: string } & Partial<EconomyResponse & { rewardSkinId?: string }>
+    if (!res.ok) {
+      const err = data.error
+      if (err === 'funds') return { ok: false, reason: 'funds' }
+      if (err === 'catalog_empty') return { ok: false, reason: 'catalog_empty' }
+      if (err === 'unknown_crate') return { ok: false, reason: 'unknown_crate' }
+      return { ok: false, reason: 'unknown_crate' }
+    }
+    if (typeof data.coins !== 'number') return tryOpenLootCrate(crateId)
+    applyEconomyJson(data as EconomyResponse)
+    const skinId = typeof data.rewardSkinId === 'string' ? data.rewardSkinId : ''
+    if (!skinId) return { ok: false, reason: 'catalog_empty' }
+    return { ok: true, skinId }
+  } catch {
+    return tryOpenLootCrate(crateId)
+  }
+}
+
+/** Buys an AK gun skin on D1. Without API/token, applies the same purchase locally. */
+export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<boolean> {
+  const origin = getApiOrigin()
+  const token = getStoredApiToken()
+  if (!origin || !token) {
+    if (ownsAkGunSkin(skinId)) return true
+    const price = AK_GUN_SKIN_PRICE[skinId]
+    const coins = getCoins()
+    if (coins < price) return false
+    setCoins(coins - price)
+    addOwnedAkGunSkin(skinId)
+    setEquippedAkSkin(skinId)
+    return true
+  }
+
+  try {
+    const res = await fetch(`${origin}/api/v1/economy/ak-skin`, {
+      method: 'POST',
+      headers: economyAuthHeaders(token),
+      body: JSON.stringify({ skinId }),
+    })
+    const data = (await res.json().catch(() => ({}))) as Partial<EconomyResponse> & { error?: string }
+    if (!res.ok) return false
+    if (typeof data.coins !== 'number') return false
+    applyEconomyJson(data as EconomyResponse)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export type EquipmentPatch = {
+  equippedCharacterSkin?: string | null
+  equippedAkSkin?: string
+}
+
+/** Syncs equipment to D1. Returns true if server applied. If false, caller may write local `invert_equipped_skin` for offline-only. */
+export async function patchEconomyEquipment(patch: EquipmentPatch): Promise<boolean> {
+  const origin = getApiOrigin()
+  const token = getStoredApiToken()
+  if (!origin || !token) return false
+
+  try {
+    const res = await fetch(`${origin}/api/v1/economy/equipment`, {
+      method: 'PATCH',
+      headers: economyAuthHeaders(token),
+      body: JSON.stringify(patch),
+    })
+    const data = (await res.json().catch(() => ({}))) as Partial<EconomyResponse>
+    if (!res.ok) return false
+    if (typeof data.coins !== 'number') return false
+    applyEconomyJson(data as EconomyResponse)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -73,29 +212,9 @@ export async function trySyncEconomyFromApi(): Promise<void> {
     const snap = (await econ.json()) as EconomyResponse
     if (typeof snap.coins !== 'number') return
 
-    applyServerEconomySnapshot({
-      coins: snap.coins,
-      ownedCharacterSkins: Array.isArray(snap.ownedCharacterSkins) ? snap.ownedCharacterSkins : [],
-      ownedAkSkins: Array.isArray(snap.ownedAkSkins) ? snap.ownedAkSkins : [],
-      equippedCharacterSkin:
-        snap.equippedCharacterSkin === null || typeof snap.equippedCharacterSkin === 'string'
-          ? snap.equippedCharacterSkin
-          : null,
-      equippedAkSkin: typeof snap.equippedAkSkin === 'string' ? snap.equippedAkSkin : 'default',
-    })
-    cancelScheduledCoinPush()
+    applyEconomyJson(snap)
   } catch {
     /* offline / CORS — ignore */
-  }
-}
-
-let pushCoinsDebounce: ReturnType<typeof setTimeout> | null = null
-
-/** Drop pending PATCH so a stale local balance cannot overwrite D1 after GET /economy applies. */
-export function cancelScheduledCoinPush(): void {
-  if (pushCoinsDebounce !== null) {
-    clearTimeout(pushCoinsDebounce)
-    pushCoinsDebounce = null
   }
 }
 

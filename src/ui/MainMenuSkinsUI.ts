@@ -3,6 +3,7 @@ const THICK_OUTLINE =
 const LABEL_SHADOW =
   '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
 
+import { patchEconomyEquipment } from '../net/invertEconomySync'
 import { readOwnedSkinIds, SKIN_CATALOG } from '../store/skinEconomy'
 
 export const EQUIPPED_SKIN_KEY = 'invert_equipped_skin'
@@ -71,6 +72,13 @@ export class MainMenuSkinsUI {
   private emptyHintEl: HTMLDivElement
   private gridHost: HTMLDivElement
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
+
+  private async applyCharacterEquipment(skinId: string | null): Promise<void> {
+    void this.clickSfx.play().catch(() => {})
+    const synced = await patchEconomyEquipment({ equippedCharacterSkin: skinId })
+    if (!synced) writeEquippedSkinId(skinId)
+    this.refresh()
+  }
 
   constructor() {
     this.root = document.createElement('div')
@@ -220,9 +228,7 @@ export class MainMenuSkinsUI {
       slot.addEventListener('click', (e) => {
         e.stopPropagation()
         e.preventDefault()
-        void this.clickSfx.play().catch(() => {})
-        writeEquippedSkinId(skinId)
-        this.refresh()
+        void this.applyCharacterEquipment(skinId)
       })
     } else {
       slot.style.cursor = 'default'
@@ -340,9 +346,7 @@ export class MainMenuSkinsUI {
     slot.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
-      void this.clickSfx.play().catch(() => {})
-      writeEquippedSkinId(null)
-      this.refresh()
+      void this.applyCharacterEquipment(null)
     })
 
     slot.appendChild(hb)
