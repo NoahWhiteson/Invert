@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
 import { AnimationManager } from './AnimationManager'
 import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
@@ -31,7 +31,7 @@ export class PlayerModel {
   private thirdPersonGuns: (THREE.Group | null)[] = [null, null, null]
   private activeWeaponSlot = 0
 
-  private loader = new FBXLoader()
+  private loader = createFbxLoaderWithSafeTextures()
   private footShadow?: THREE.Mesh
   private _radial = new THREE.Vector3()
   private _feetWorld = new THREE.Vector3()

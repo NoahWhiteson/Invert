@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { AnimationManager, type AnimationState } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
@@ -48,7 +48,7 @@ export class MultiplayerSystem {
   private players: Map<string, NetworkPlayer> = new Map()
   private localPlayerId: string | null = null
   private scene: THREE.Scene
-  private loader = new FBXLoader()
+  private loader = createFbxLoaderWithSafeTextures()
   private playerTemplate: THREE.Group | null = null
   private allHitboxes: THREE.Object3D[] = []
   private bindMinY = -0.85

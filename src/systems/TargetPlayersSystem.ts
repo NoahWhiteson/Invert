@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { AnimationManager } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
@@ -72,7 +72,7 @@ export class TargetPlayersSystem {
   private scene: THREE.Scene
   private sphereRadius: number
   private count: number
-  private loader = new FBXLoader()
+  private loader = createFbxLoaderWithSafeTextures()
   private template: THREE.Group | null = null
   private targets: TargetState[] = []
   private allHitboxes: THREE.Object3D[] = []

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
 
 export type AnimationState = 'idle' | 'walk' | 'sprint' | 'crouch_idle' | 'crouch_walk' | 'firing' | 'jump'
 
@@ -103,7 +103,7 @@ export class AnimationManager {
     if (this.loadingPromise) return this.loadingPromise
 
     this.loadingPromise = (async () => {
-      const loader = new FBXLoader()
+      const loader = createFbxLoaderWithSafeTextures()
       this.riflePoseTracks.clear()
       this.clipCache.clear()
 

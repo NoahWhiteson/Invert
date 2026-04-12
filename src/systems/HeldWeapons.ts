@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import type { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
 function weaponAssetUrl(file: string): string {
   return new URL(`../assets/player/weps/${file}`, import.meta.url).href
@@ -311,7 +312,7 @@ export class HeldWeapons {
   }
 
   public async loadAll(): Promise<void> {
-    const loader = new FBXLoader()
+    const loader = createFbxLoaderWithSafeTextures()
     const sharedWhite = whiteTexture()
     this.sharedWhiteTex = sharedWhite
 

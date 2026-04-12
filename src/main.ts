@@ -24,6 +24,7 @@ import { MainMenuStoreUI } from './ui/MainMenuStoreUI'
 import { loadProfanityList, textContainsProfanity, isProfanityListReady } from './utils/profanityFilter'
 import type { AkGunSkinId } from './store/skinEconomy'
 import {
+  AK_GUN_SKIN_IDS,
   COINS_CHANGED_EVENT,
   getCoins,
   ownsAkGunSkin,
@@ -619,16 +620,17 @@ const AK_SKIN_TEX_URL: Record<AkGunSkinId, string> = {
 const akGunSkinTextures = new Map<AkGunSkinId, THREE.Texture>()
 
 function getAkGunSkinTexture(id: AkGunSkinId): THREE.Texture {
-  const url = AK_SKIN_TEX_URL[id]
+  const safe: AkGunSkinId = (AK_GUN_SKIN_IDS as readonly string[]).includes(id) ? id : 'fabric'
+  const url = AK_SKIN_TEX_URL[safe]
   if (!url) return getAkGunSkinTexture('fabric')
-  let t = akGunSkinTextures.get(id)
+  let t = akGunSkinTextures.get(safe)
   if (!t) {
     const loader = new THREE.TextureLoader()
     t = loader.load(url, (tex) => {
       tex.flipY = false
     })
     t.colorSpace = THREE.SRGBColorSpace
-    akGunSkinTextures.set(id, t)
+    akGunSkinTextures.set(safe, t)
   }
   return t
 }

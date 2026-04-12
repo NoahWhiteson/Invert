@@ -83,6 +83,18 @@ function applyEconomyJson(snap: EconomyResponse): void {
   cancelScheduledCoinPush()
 }
 
+/** Same rules as server purchase; used when Worker is older than client (POST → 404). */
+function purchaseAkGunSkinLocally(skinId: AkGunSkinId): boolean {
+  if (ownsAkGunSkin(skinId)) return true
+  const price = AK_GUN_SKIN_PRICE[skinId]
+  const coins = getCoins()
+  if (coins < price) return false
+  setCoins(coins - price)
+  addOwnedAkGunSkin(skinId)
+  setEquippedAkSkin(skinId)
+  return true
+}
+
 /**
  * Buys a loot crate on D1 (random unowned character skin). Falls back to local-only when API/token missing.
  */
@@ -99,6 +111,7 @@ export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrat
     })
     const data = (await res.json().catch(() => ({}))) as { error?: string } & Partial<EconomyResponse & { rewardSkinId?: string }>
     if (!res.ok) {
+      if (res.status === 404) return tryOpenLootCrate(crateId)
       const err = data.error
       if (err === 'funds') return { ok: false, reason: 'funds' }
       if (err === 'catalog_empty') return { ok: false, reason: 'catalog_empty' }
@@ -115,20 +128,11 @@ export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrat
   }
 }
 
-/** Buys an AK gun skin on D1. Without API/token, applies the same purchase locally. */
+/** Buys an AK gun skin on D1. Without API/token, or if Worker has no route yet (404), purchase locally. */
 export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<boolean> {
   const origin = getApiOrigin()
   const token = getStoredApiToken()
-  if (!origin || !token) {
-    if (ownsAkGunSkin(skinId)) return true
-    const price = AK_GUN_SKIN_PRICE[skinId]
-    const coins = getCoins()
-    if (coins < price) return false
-    setCoins(coins - price)
-    addOwnedAkGunSkin(skinId)
-    setEquippedAkSkin(skinId)
-    return true
-  }
+  if (!origin || !token) return purchaseAkGunSkinLocally(skinId)
 
   try {
     const res = await fetch(`${origin}/api/v1/economy/ak-skin`, {
@@ -137,7 +141,10 @@ export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<bool
       body: JSON.stringify({ skinId }),
     })
     const data = (await res.json().catch(() => ({}))) as Partial<EconomyResponse> & { error?: string }
-    if (!res.ok) return false
+    if (!res.ok) {
+      if (res.status === 404) return purchaseAkGunSkinLocally(skinId)
+      return false
+    }
     if (typeof data.coins !== 'number') return false
     applyEconomyJson(data as EconomyResponse)
     return true
