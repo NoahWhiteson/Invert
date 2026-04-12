@@ -1,4 +1,8 @@
-import { purchaseAkGunSkinViaApi, purchaseLootCrateViaApi } from '../net/invertEconomySync'
+import {
+  purchaseAkGunSkinViaApi,
+  purchaseLootCrateViaApi,
+  trySyncEconomyFromApi,
+} from '../net/invertEconomySync'
 import {
   AK_GUN_SKIN_PRICE,
   type AkGunSkinId,
@@ -228,6 +232,7 @@ export class MainMenuStoreUI {
     this.buyBtn.style.textShadow = THICK_OUTLINE
     this.buyBtn.style.webkitTextStroke = '2px #000'
     this.buyBtn.style.paintOrder = 'stroke fill'
+    this.buyBtn.style.pointerEvents = 'auto'
 
     this.buyCoin = document.createElement('img')
     this.buyCoin.src = COIN_ICON
@@ -245,7 +250,10 @@ export class MainMenuStoreUI {
     this.buyWrap.appendChild(this.buyBtn)
 
     this.buyBtn.addEventListener('mouseenter', () => {
-      if (this.buyBtn.disabled) return
+      const sid = this.storePreviewSkin
+      if (sid === null || sid === 'default' || ownsAkGunSkin(sid)) return
+      const price = AK_GUN_SKIN_PRICE[sid]
+      if (getCoins() < price) return
       this.buyLabel.style.color = '#ffff00'
       this.buyCoin.style.filter = ICON_HOVER_FILTER
     })
@@ -255,19 +263,17 @@ export class MainMenuStoreUI {
     this.buyBtn.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
-      if (this.buyBtn.disabled) return
       const sid = this.storePreviewSkin
       if (sid === null || sid === 'default') return
-      void this.clickSfx.play().catch(() => {})
       if (ownsAkGunSkin(sid)) return
       const price = AK_GUN_SKIN_PRICE[sid]
       if (getCoins() < price) return
+      void this.clickSfx.play().catch(() => {})
       void (async () => {
         const ok = await purchaseAkGunSkinViaApi(sid)
-        if (ok) {
-          this.onGunSkinPurchase?.(sid)
-          this.refresh()
-        }
+        if (ok) this.onGunSkinPurchase?.(sid)
+        else await trySyncEconomyFromApi()
+        this.refresh()
       })()
     })
 
@@ -289,7 +295,8 @@ export class MainMenuStoreUI {
     const name = AK_SKIN_SHOP_LABEL[prev]
     const canBuy = coins >= price
     this.buyWrap.style.display = 'flex'
-    this.buyBtn.disabled = !canBuy
+    this.buyBtn.disabled = false
+    this.buyBtn.style.opacity = canBuy ? '1' : '0.5'
     this.buyLabel.textContent = `Buy ${name} · ${price}`
     this.buyLabel.style.color = canBuy ? '#fff' : MUTED
     this.buyCoin.style.filter = ICON_BASE_FILTER
@@ -732,11 +739,12 @@ export class MainMenuStoreUI {
 
   public setVisible(visible: boolean) {
     if (visible) {
-      if (this.root.style.display === 'none') {
-        this.storePreviewSkin = null
-      }
+      const opening = this.root.style.display === 'none'
       this.root.style.display = 'block'
-      this.refresh()
+      if (opening) {
+        this.storePreviewSkin = null
+        this.refresh()
+      }
     } else {
       this.root.style.display = 'none'
       this.buyWrap.style.display = 'none'

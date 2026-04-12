@@ -493,6 +493,11 @@ function applyMainMenuView() {
   core.camera.lookAt(0, 0, 0)
   player.controls.enabled = false
   player.setPointerLockAllowed(false)
+  try {
+    player.controls.unlock()
+  } catch {
+    /* noop */
+  }
   heldWeapons.setThirdPerson(true)
   crosshair.setVisible(false)
   healthUI.setOpacity(0)
