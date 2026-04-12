@@ -1,7 +1,7 @@
 const THICK_OUTLINE =
   '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000'
 
-const trailerSrc = `${import.meta.env.BASE_URL}trailer.mp4`.replace(/\/{2,}/g, '/')
+const trailerSrc = `${import.meta.env.BASE_URL ?? '/'}trailer.mp4`.replace(/\/{2,}/g, '/')
 
 export class MainMenuDevblogUI {
   private wrap: HTMLDivElement
