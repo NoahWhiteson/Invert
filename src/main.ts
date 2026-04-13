@@ -1497,6 +1497,14 @@ function animate() {
       ? {
           playerPosition: player.playerGroup.position,
           playerAlive: !isDead,
+          getHumanPositionsForVision: () => {
+            const out: THREE.Vector3[] = []
+            if (!isDead) out.push(player.playerGroup.position)
+            for (const p of multiplayer.getAllPlayers()) {
+              if (!p.ragdoll && p.health > 0) out.push(p.model.position)
+            }
+            return out
+          },
           worldMesh: mesh,
           nowMs: currentTime,
           onBotHitPlayer: (botIndex, damage, hitFrom) => {

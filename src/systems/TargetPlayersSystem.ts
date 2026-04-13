@@ -29,12 +29,17 @@ type TargetState = {
   facingYawTarget: number
   stateTimer: number
   wanderTarget: THREE.Vector3 | null
+  /** True while moving toward a seen human or bot. */
+  chasing: boolean
+  lookPhase: number
 }
 
 /** Simplified context for basic wandering. */
 export type BotBrainContext = {
   playerPosition: THREE.Vector3
   playerAlive: boolean
+  /** Local + remote human body positions (for vision / chase). */
+  getHumanPositionsForVision: () => THREE.Vector3[]
   worldMesh: THREE.Mesh
   nowMs: number
   onBotHitPlayer: (botIndex: number, damage: number, hitFromWorld: THREE.Vector3) => void
@@ -68,6 +73,11 @@ const WANDER_CHANCE = 0.75
 const IDLE_DURATION = 2200
 const WANDER_DURATION = 10000
 
+const VISION_MAX_DIST = 52
+/** ~116° total cone in front of the bot (dot > cos half-angle from forward). */
+const VISION_MIN_COS = Math.cos((58 * Math.PI) / 180)
+const CHASE_RETARGET_MS = 1600
+
 export class TargetPlayersSystem {
   private scene: THREE.Scene
   private sphereRadius: number
@@ -84,6 +94,9 @@ export class TargetPlayersSystem {
   private _vE = new THREE.Vector3()
   private _vF = new THREE.Vector3()
   private _qInv = new THREE.Quaternion()
+  private _fwdScratch = new THREE.Vector3()
+  private _toTanScratch = new THREE.Vector3()
+  private _chaseScratch = new THREE.Vector3()
   public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
@@ -228,6 +241,60 @@ export class TargetPlayersSystem {
     t.facingYawTarget = Math.atan2(flat.x, flat.z)
   }
 
+  /** Tangent "forward" from model yaw + surface frame (for vision cone). */
+  private getBotForwardWorld(t: TargetState, out: THREE.Vector3): void {
+    this._fwdScratch.set(0, 0, 1)
+    this._fwdScratch.applyQuaternion(t.model.quaternion)
+    this._fwdScratch.applyQuaternion(t.container.quaternion)
+    const radial = this._vA.copy(t.shellPoint).normalize()
+    out.copy(this._fwdScratch).addScaledVector(radial, -this._fwdScratch.dot(radial))
+    if (out.lengthSq() < 1e-8) {
+      const aux = Math.abs(radial.y) < 0.85 ? this._vE.set(0, 1, 0) : this._vE.set(1, 0, 0)
+      out.copy(this._vB.crossVectors(aux, radial).normalize())
+    } else {
+      out.normalize()
+    }
+  }
+
+  /**
+   * Nearest ground point to chase if this bot sees a human or another bot (cone + range on inner surface).
+   */
+  private pickChaseGroundPoint(t: TargetState, ctx: BotBrainContext, botIndex: number): THREE.Vector3 | null {
+    const groundR = this.groundRadius()
+    const radial = this._vA.copy(t.shellPoint).normalize()
+    this.getBotForwardWorld(t, this._fwdScratch)
+
+    let bestD2 = Infinity
+
+    const consider = (worldPos: THREE.Vector3) => {
+      const d2 = t.shellPoint.distanceToSquared(worldPos)
+      if (d2 > VISION_MAX_DIST * VISION_MAX_DIST || d2 < 0.8) return
+      this._toTanScratch.copy(worldPos).sub(t.shellPoint)
+      this._toTanScratch.addScaledVector(radial, -this._toTanScratch.dot(radial))
+      if (this._toTanScratch.lengthSq() < 1e-6) return
+      this._toTanScratch.normalize()
+      if (this._fwdScratch.dot(this._toTanScratch) < VISION_MIN_COS) return
+      if (d2 < bestD2) {
+        bestD2 = d2
+        this._chaseScratch.copy(worldPos).normalize().multiplyScalar(groundR)
+      }
+    }
+
+    for (const p of ctx.getHumanPositionsForVision()) {
+      consider(p)
+    }
+
+    for (let j = 0; j < this.targets.length; j++) {
+      if (j === botIndex) continue
+      const o = this.targets[j]
+      if (!o || o.ragdoll || o.health <= 0) continue
+      consider(o.shellPoint)
+    }
+
+    if (bestD2 === Infinity) return null
+    return this._chaseScratch
+  }
+
   private smoothFacingYaw(t: TargetState, dt: number) {
     const cur = t.model.rotation.y
     const tgt = t.facingYawTarget
@@ -238,26 +305,42 @@ export class TargetPlayersSystem {
     t.model.rotation.y = cur + THREE.MathUtils.clamp(delta, -maxStep, maxStep)
   }
 
-  private updateBotBrain(t: TargetState, ctx: BotBrainContext, dt: number) {
+  private updateBotBrain(t: TargetState, ctx: BotBrainContext, botIndex: number, dt: number) {
     const groundR = this.groundRadius()
     const radial = this._vA.copy(t.shellPoint).normalize()
 
-    t.stateTimer -= dt * 1000
+    const chasePoint = this.pickChaseGroundPoint(t, ctx, botIndex)
+    if (chasePoint) {
+      if (!t.wanderTarget) t.wanderTarget = new THREE.Vector3()
+      t.wanderTarget.copy(chasePoint)
+      t.stateTimer = CHASE_RETARGET_MS
+      t.locoIntent = 'walk'
+      t.chasing = true
+    } else {
+      if (t.chasing) {
+        t.chasing = false
+        t.wanderTarget = null
+        t.stateTimer = 0
+      }
 
-    if (t.stateTimer <= 0) {
-      if (t.wanderTarget === null) {
-        if (Math.random() < WANDER_CHANCE) {
-          t.wanderTarget = this.pickWanderTarget(t.shellPoint)
-          t.stateTimer = WANDER_DURATION
-          t.locoIntent = 'walk'
+      t.stateTimer -= dt * 1000
+
+      if (t.stateTimer <= 0) {
+        if (t.wanderTarget === null) {
+          if (Math.random() < WANDER_CHANCE) {
+            t.wanderTarget = new THREE.Vector3()
+            t.wanderTarget.copy(this.pickWanderTarget(t.shellPoint))
+            t.stateTimer = WANDER_DURATION
+            t.locoIntent = 'walk'
+          } else {
+            t.stateTimer = IDLE_DURATION
+            t.locoIntent = 'idle'
+          }
         } else {
+          t.wanderTarget = null
           t.stateTimer = IDLE_DURATION
           t.locoIntent = 'idle'
         }
-      } else {
-        t.wanderTarget = null
-        t.stateTimer = IDLE_DURATION
-        t.locoIntent = 'idle'
       }
     }
 
@@ -363,6 +446,15 @@ export class TargetPlayersSystem {
       this.updateFacingYawTarget(t, faceTan.normalize())
     } else if (t.steerDir.lengthSq() > 1e-10) {
       this.updateFacingYawTarget(t, t.steerDir)
+    } else if (!t.chasing && t.locoIntent === 'idle' && !t.wanderTarget) {
+      t.lookPhase += dt * 0.85
+      const ang = t.lookPhase * 1.05
+      const radialN = this._vD.copy(t.shellPoint).normalize()
+      const aux = Math.abs(radialN.y) < 0.88 ? this._vE.set(0, 1, 0) : this._vE.set(1, 0, 0)
+      const t1 = this._vF.crossVectors(aux, radialN).normalize()
+      const t2 = this._vC.crossVectors(radialN, t1).normalize()
+      const lookDir = this._vB.copy(t1).multiplyScalar(Math.cos(ang)).addScaledVector(t2, Math.sin(ang))
+      this.updateFacingYawTarget(t, lookDir)
     }
 
     if (t.anims && t.health > 0) {
@@ -404,7 +496,7 @@ export class TargetPlayersSystem {
       }
 
       if (brain && t.health > 0) {
-        this.updateBotBrain(t, brain, dt)
+        this.updateBotBrain(t, brain, ti, dt)
         this.smoothFacingYaw(t, dt)
       }
 
@@ -587,6 +679,8 @@ export class TargetPlayersSystem {
       facingYawTarget: 0,
       stateTimer: 0,
       wanderTarget: null,
+      chasing: false,
+      lookPhase: Math.random() * Math.PI * 2,
     }
     this.respawnTarget(index)
   }
@@ -652,6 +746,7 @@ export class TargetPlayersSystem {
     t.health = t.maxHealth
     t.locoIntent = 'idle'
     t.stateTimer = 0
+    t.chasing = false
     t.wanderTarget = null
     t.velocity.set(0, 0, 0)
     t.steerDir.set(0, 0, 0)
