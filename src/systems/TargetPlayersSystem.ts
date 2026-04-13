@@ -32,6 +32,8 @@ type TargetState = {
   /** True while moving toward a seen human or bot. */
   chasing: boolean
   lookPhase: number
+  lastBotFireMs: number
+  lastAimWorld: THREE.Vector3
 }
 
 /** Simplified context for basic wandering. */
@@ -42,15 +44,8 @@ export type BotBrainContext = {
   getHumanPositionsForVision: () => THREE.Vector3[]
   worldMesh: THREE.Mesh
   nowMs: number
-  onBotHitPlayer: (botIndex: number, damage: number, hitFromWorld: THREE.Vector3) => void
-  onBotHitBot: (
-    shooterIndex: number,
-    hitObject: THREE.Object3D,
-    damage: number,
-    bulletDirWorld: THREE.Vector3,
-    hitPointWorld: THREE.Vector3
-  ) => void
-  onBotFire: (botWorldPos: THREE.Vector3) => void
+  /** AK-style hitscan from bot eye; applies damage to player / nets / bots (excludes shooter). */
+  tryBotAkHit: (botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) => void
 }
 
 const BOT_BODY_HALF = 0.9
@@ -77,6 +72,7 @@ const VISION_MAX_DIST = 52
 /** ~116° total cone in front of the bot (dot > cos half-angle from forward). */
 const VISION_MIN_COS = Math.cos((58 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
+const BOT_AK_FIRE_INTERVAL_MS = 100
 
 export class TargetPlayersSystem {
   private scene: THREE.Scene
@@ -97,6 +93,9 @@ export class TargetPlayersSystem {
   private _fwdScratch = new THREE.Vector3()
   private _toTanScratch = new THREE.Vector3()
   private _chaseScratch = new THREE.Vector3()
+  private _aimWorldScratch = new THREE.Vector3()
+  private _eyeScratch = new THREE.Vector3()
+  private _dirScratch = new THREE.Vector3()
   public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
@@ -257,9 +256,13 @@ export class TargetPlayersSystem {
   }
 
   /**
-   * Nearest ground point to chase if this bot sees a human or another bot (cone + range on inner surface).
+   * Chase point on ground + world position of best visible enemy (cone + range on inner surface).
    */
-  private pickChaseGroundPoint(t: TargetState, ctx: BotBrainContext, botIndex: number): THREE.Vector3 | null {
+  private pickVisibleChaseTarget(
+    t: TargetState,
+    ctx: BotBrainContext,
+    botIndex: number
+  ): { chase: THREE.Vector3; aimWorld: THREE.Vector3 } | null {
     const groundR = this.groundRadius()
     const radial = this._vA.copy(t.shellPoint).normalize()
     this.getBotForwardWorld(t, this._fwdScratch)
@@ -277,6 +280,7 @@ export class TargetPlayersSystem {
       if (d2 < bestD2) {
         bestD2 = d2
         this._chaseScratch.copy(worldPos).normalize().multiplyScalar(groundR)
+        this._aimWorldScratch.copy(worldPos)
       }
     }
 
@@ -292,7 +296,7 @@ export class TargetPlayersSystem {
     }
 
     if (bestD2 === Infinity) return null
-    return this._chaseScratch
+    return { chase: this._chaseScratch, aimWorld: this._aimWorldScratch }
   }
 
   private smoothFacingYaw(t: TargetState, dt: number) {
@@ -309,10 +313,11 @@ export class TargetPlayersSystem {
     const groundR = this.groundRadius()
     const radial = this._vA.copy(t.shellPoint).normalize()
 
-    const chasePoint = this.pickChaseGroundPoint(t, ctx, botIndex)
-    if (chasePoint) {
+    const visible = this.pickVisibleChaseTarget(t, ctx, botIndex)
+    if (visible) {
+      t.lastAimWorld.copy(visible.aimWorld)
       if (!t.wanderTarget) t.wanderTarget = new THREE.Vector3()
-      t.wanderTarget.copy(chasePoint)
+      t.wanderTarget.copy(visible.chase)
       t.stateTimer = CHASE_RETARGET_MS
       t.locoIntent = 'walk'
       t.chasing = true
@@ -458,6 +463,21 @@ export class TargetPlayersSystem {
     }
 
     if (t.anims && t.health > 0) {
+      if (
+        visible &&
+        ctx.nowMs - t.lastBotFireMs >= BOT_AK_FIRE_INTERVAL_MS
+      ) {
+        const radialUp = this._vA.copy(t.shellPoint).normalize()
+        this._eyeScratch.copy(radialUp).multiplyScalar(-1.55).add(t.shellPoint)
+        this._dirScratch.copy(t.lastAimWorld).sub(this._eyeScratch)
+        if (this._dirScratch.lengthSq() > 1e-6) {
+          this._dirScratch.normalize()
+          ctx.tryBotAkHit(botIndex, this._eyeScratch, this._dirScratch)
+          t.lastBotFireMs = ctx.nowMs
+          t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
+        }
+      }
+
       if (!t.onGround) {
         const distToGround = groundR - t.shellPoint.length()
         const verticalVel = t.velocity.dot(this._vD.copy(t.shellPoint).normalize())
@@ -681,6 +701,8 @@ export class TargetPlayersSystem {
       wanderTarget: null,
       chasing: false,
       lookPhase: Math.random() * Math.PI * 2,
+      lastBotFireMs: 0,
+      lastAimWorld: new THREE.Vector3(),
     }
     this.respawnTarget(index)
   }
@@ -748,6 +770,7 @@ export class TargetPlayersSystem {
     t.stateTimer = 0
     t.chasing = false
     t.wanderTarget = null
+    t.lastBotFireMs = 0
     t.velocity.set(0, 0, 0)
     t.steerDir.set(0, 0, 0)
     t.onGround = true

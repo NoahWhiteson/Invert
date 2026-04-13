@@ -860,6 +860,118 @@ function pickShootIntersection(
   }
   return best
 }
+
+const _rayOc = new THREE.Vector3()
+const BOT_AK_DAMAGE = 22
+const BOT_AK_SPREAD = 0.03
+
+/** Ray vs sphere; `rd` unit; returns distance along ray or null. */
+function rayIntersectSphereDist(ro: THREE.Vector3, rd: THREE.Vector3, center: THREE.Vector3, r: number): number | null {
+  _rayOc.copy(ro).sub(center)
+  const b = _rayOc.dot(rd)
+  const c = _rayOc.dot(_rayOc) - r * r
+  const disc = b * b - c
+  if (disc < 0) return null
+  const s = Math.sqrt(disc)
+  let t = -b - s
+  if (t < 1e-4) t = -b + s
+  if (t < 1e-4) return null
+  return t
+}
+
+function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
+  if (settingsUI.isOpen) return
+
+  _shotDir.copy(dir)
+  if (BOT_AK_SPREAD > 0) {
+    _shotDir.x += (Math.random() - 0.5) * BOT_AK_SPREAD
+    _shotDir.y += (Math.random() - 0.5) * BOT_AK_SPREAD
+    _shotDir.z += (Math.random() - 0.5) * BOT_AK_SPREAD
+    _shotDir.normalize()
+  }
+  _worldPos.copy(eye)
+
+  const shooterBot = targetPlayers.getTargetById(`bot_${botIndex}`)
+  const soundPos = shooterBot?.container.position ?? eye
+  playSpatialSfxAt(akSfx, soundPos, 0.9, 95, 'gun')
+  multiplayer.sendSound('ak', soundPos, 1)
+
+  const botTargets = targetPlayers.getRaycastTargets().filter(
+    (o) => typeof o.userData.targetIdx !== 'number' || o.userData.targetIdx !== botIndex
+  )
+  const netTargets = multiplayer.getRaycastTargets()
+  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets)
+  const hitDist = h?.distance ?? Infinity
+
+  let tPlayer: number | null = null
+  if (!isDead) {
+    tPlayer = rayIntersectSphereDist(_worldPos, _shotDir, player.playerGroup.position, 0.72)
+  }
+
+  if (tPlayer !== null && tPlayer < hitDist) {
+    const incoming = _tmpKb.copy(_shotDir).multiplyScalar(-1).normalize()
+    player.inflictDamage(BOT_AK_DAMAGE, incoming)
+    playSfx(impactSfx, 0.85, 'impact')
+    crosshair.triggerHit()
+    const headPos = player.playerGroup.position.clone()
+    const dmgUp = headPos.clone().normalize().multiplyScalar(-1)
+    headPos.addScaledVector(dmgUp, 1.2)
+    damageTexts.spawn(headPos, Math.round(BOT_AK_DAMAGE), stringToId('local_player_dmg'))
+    if (player.state.health <= 0) handleLocalDeathFromBot(botIndex)
+    return
+  }
+
+  if (!h) return
+
+  if (h.object === mesh) {
+    const normal = h.face
+      ? _worldNormalScratch.copy(h.face.normal).applyQuaternion(mesh.quaternion)
+      : _worldNormalScratch.copy(h.point).normalize()
+    bulletHoles.spawn(h.point, normal)
+    return
+  }
+
+  if (h.object.userData.networkPlayerId) {
+    const targetId = h.object.userData.networkPlayerId as string
+    const hitDir = _v1.copy(_shotDir).negate().normalize()
+    playSfx(impactSfx, 1.0, 'impact')
+    blood.spawn(h.point, hitDir, 4)
+    multiplayer.sendBlood(h.point, hitDir, 4)
+    multiplayer.sendDamage(targetId, BOT_AK_DAMAGE, 'AK-47', _shotDir)
+    const tp = multiplayer.getPlayerById(targetId)
+    if (tp?.ragdoll) {
+      tp.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.1), h.point)
+    }
+    if (tp) {
+      const headPos = new THREE.Vector3()
+      tp.model.getWorldPosition(headPos)
+      headPos.y += 2.5
+      damageTexts.spawn(headPos, BOT_AK_DAMAGE, stringToId(targetId))
+    }
+    return
+  }
+
+  const hitDir = _v1.copy(_shotDir).negate().normalize()
+  const damageRes = targetPlayers.damageFromHitObject(h.object as THREE.Mesh, BOT_AK_DAMAGE, _shotDir)
+  if (!damageRes?.damaged) return
+  playSpatialSfxAt(impactSfx, h.point, 0.4, 48, 'impact')
+  blood.spawn(h.point, hitDir, 4)
+  multiplayer.sendBlood(h.point, hitDir, 4)
+  damageTexts.spawn(damageRes.pos, BOT_AK_DAMAGE, damageRes.targetIdx)
+  const victim = targetPlayers.getTargetById(`bot_${damageRes.targetIdx}`)
+  if (victim?.ragdoll) {
+    victim.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.12), h.point)
+  }
+  if (damageRes.killed) {
+    awardKillCoins()
+    targetPlayers.recordBotKill(botIndex)
+    discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
+    if (multiplayer.isConnected()) multiplayer.notifyBotKill()
+    updateLeaderboard()
+    killFeed.push(damageRes.name, 'AK-47')
+  }
+}
+
 const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
 let isLeftMouseDown = false
@@ -1507,45 +1619,7 @@ function animate() {
           },
           worldMesh: mesh,
           nowMs: currentTime,
-          onBotHitPlayer: (botIndex, damage, hitFrom) => {
-            if (isDead || settingsUI.isOpen) return
-            player.inflictDamage(damage, hitFrom)
-            playSfx(impactSfx, 0.85, 'impact')
-            crosshair.triggerHit()
-            const headPos = player.playerGroup.position.clone()
-            const dmgUp = headPos.clone().normalize().multiplyScalar(-1)
-            headPos.addScaledVector(dmgUp, 1.2)
-            damageTexts.spawn(headPos, Math.round(damage), stringToId('local_player_dmg'))
-            if (player.state.health <= 0) handleLocalDeathFromBot(botIndex)
-          },
-          onBotHitBot: (shooterIdx, hitObj, damage, bulletDir, hitPoint) => {
-            const hitDir = bulletDir.clone().normalize().negate()
-            const res = targetPlayers.damageFromHitObject(
-              hitObj as THREE.Mesh,
-              damage,
-              bulletDir.clone()
-            )
-            if (!res?.damaged) return
-            playSpatialSfxAt(impactSfx, hitPoint, 0.4, 48, 'impact')
-            blood.spawn(hitPoint, hitDir, 4)
-            multiplayer.sendBlood(hitPoint, hitDir, 4)
-            damageTexts.spawn(res.pos, damage, res.targetIdx)
-            const victim = targetPlayers.getTargetById(`bot_${res.targetIdx}`)
-            if (victim?.ragdoll) {
-              victim.ragdoll.applyExternalImpulse(
-                _colDelta.copy(bulletDir).multiplyScalar(0.12),
-                hitPoint
-              )
-            }
-            if (res.killed) {
-              targetPlayers.recordBotKill(shooterIdx)
-              discoveredPlayers.add(`bot_${res.targetIdx}`)
-              updateLeaderboard()
-            }
-          },
-          onBotFire: (botWorldPos) => {
-            playSpatialSfxAt(akSfx, botWorldPos, 0.9, 95, 'gun')
-          },
+          tryBotAkHit,
         }
       : null
     targetPlayers.update(dt, botBrain)
