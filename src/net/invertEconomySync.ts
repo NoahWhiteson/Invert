@@ -11,6 +11,7 @@ import {
   tryOpenLootCrate,
   type AkGunSkinId,
   type LootCrateResult,
+  type ServerEconomySnapshot,
 } from '../store/skinEconomy'
 
 /** After `trySyncEconomyFromApi` following credential restore. */
@@ -69,18 +70,31 @@ function economyAuthHeaders(token: string): HeadersInit {
   }
 }
 
+function notifyEconomyReloaded(): void {
+  try {
+    window.dispatchEvent(new CustomEvent(ECONOMY_RELOADED_EVENT))
+  } catch {
+    /* noop */
+  }
+}
+
 function applyEconomyJson(snap: EconomyResponse): void {
-  applyServerEconomySnapshot({
-    coins: snap.coins,
-    ownedCharacterSkins: Array.isArray(snap.ownedCharacterSkins) ? snap.ownedCharacterSkins : [],
-    ownedAkSkins: Array.isArray(snap.ownedAkSkins) ? snap.ownedAkSkins : [],
-    equippedCharacterSkin:
-      snap.equippedCharacterSkin === null || typeof snap.equippedCharacterSkin === 'string'
-        ? snap.equippedCharacterSkin
-        : null,
-    equippedAkSkin: typeof snap.equippedAkSkin === 'string' ? snap.equippedAkSkin : 'default',
-  })
+  const raw = snap as Record<string, unknown>
+  const patch: ServerEconomySnapshot = { coins: snap.coins }
+  if (Array.isArray(raw.ownedCharacterSkins)) patch.ownedCharacterSkins = raw.ownedCharacterSkins as string[]
+  if (Array.isArray(raw.ownedAkSkins)) patch.ownedAkSkins = raw.ownedAkSkins as string[]
+  if (
+    'equippedCharacterSkin' in raw &&
+    (raw.equippedCharacterSkin === null || typeof raw.equippedCharacterSkin === 'string')
+  ) {
+    patch.equippedCharacterSkin = raw.equippedCharacterSkin as string | null
+  }
+  if ('equippedAkSkin' in raw && typeof raw.equippedAkSkin === 'string') {
+    patch.equippedAkSkin = raw.equippedAkSkin as string
+  }
+  applyServerEconomySnapshot(patch)
   cancelScheduledCoinPush()
+  notifyEconomyReloaded()
 }
 
 /** Same rules as server purchase; used when Worker is older than client (POST → 404). */
@@ -101,7 +115,11 @@ function purchaseAkGunSkinLocally(skinId: AkGunSkinId): boolean {
 export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrateResult> {
   const origin = getApiOrigin()
   const token = getStoredApiToken()
-  if (!origin || !token) return tryOpenLootCrate(crateId)
+  if (!origin || !token) {
+    const r = tryOpenLootCrate(crateId)
+    if (r.ok) notifyEconomyReloaded()
+    return r
+  }
 
   try {
     const res = await fetch(`${origin}/api/v1/economy/loot-crate`, {
@@ -111,20 +129,29 @@ export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrat
     })
     const data = (await res.json().catch(() => ({}))) as { error?: string } & Partial<EconomyResponse & { rewardSkinId?: string }>
     if (!res.ok) {
-      if (res.status === 404) return tryOpenLootCrate(crateId)
+      if (res.status === 404) {
+        const r = tryOpenLootCrate(crateId)
+        if (r.ok) notifyEconomyReloaded()
+        return r
+      }
       const err = data.error
       if (err === 'funds') return { ok: false, reason: 'funds' }
       if (err === 'catalog_empty') return { ok: false, reason: 'catalog_empty' }
       if (err === 'unknown_crate') return { ok: false, reason: 'unknown_crate' }
       return { ok: false, reason: 'unknown_crate' }
     }
-    if (typeof data.coins !== 'number') return tryOpenLootCrate(crateId)
+    if (typeof data.coins !== 'number') {
+      const r = tryOpenLootCrate(crateId)
+      if (r.ok) notifyEconomyReloaded()
+      return r
+    }
     applyEconomyJson(data as EconomyResponse)
     const skinId = typeof data.rewardSkinId === 'string' ? data.rewardSkinId : ''
-    if (!skinId) return { ok: false, reason: 'catalog_empty' }
     return { ok: true, skinId }
   } catch {
-    return tryOpenLootCrate(crateId)
+    const r = tryOpenLootCrate(crateId)
+    if (r.ok) notifyEconomyReloaded()
+    return r
   }
 }
 
@@ -132,7 +159,11 @@ export async function purchaseLootCrateViaApi(crateId: string): Promise<LootCrat
 export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<boolean> {
   const origin = getApiOrigin()
   const token = getStoredApiToken()
-  if (!origin || !token) return purchaseAkGunSkinLocally(skinId)
+  if (!origin || !token) {
+    const ok = purchaseAkGunSkinLocally(skinId)
+    if (ok) notifyEconomyReloaded()
+    return ok
+  }
 
   try {
     const res = await fetch(`${origin}/api/v1/economy/ak-skin`, {
@@ -142,7 +173,11 @@ export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<bool
     })
     const data = (await res.json().catch(() => ({}))) as Partial<EconomyResponse> & { error?: string }
     if (!res.ok) {
-      if (res.status === 404) return purchaseAkGunSkinLocally(skinId)
+      if (res.status === 404) {
+        const ok = purchaseAkGunSkinLocally(skinId)
+        if (ok) notifyEconomyReloaded()
+        return ok
+      }
       return false
     }
     if (typeof data.coins !== 'number') return false

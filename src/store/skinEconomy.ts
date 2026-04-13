@@ -245,19 +245,29 @@ export function setEquippedAkSkin(id: EquippedAkSkin): void {
   }
 }
 
-/** Overwrites local economy from server snapshot (D1). */
-export function applyServerEconomySnapshot(snapshot: {
+/** D1 snapshot fields can be partial; omitted `owned*` / equip fields keep current local values (avoids wiping on bad JSON). */
+export type ServerEconomySnapshot = {
   coins: number
-  ownedCharacterSkins: string[]
-  ownedAkSkins: string[]
-  equippedCharacterSkin: string | null
-  equippedAkSkin: string
-}): void {
+  ownedCharacterSkins?: string[]
+  ownedAkSkins?: string[]
+  equippedCharacterSkin?: string | null
+  equippedAkSkin?: string
+}
+
+/** Overwrites local economy from server snapshot (D1). */
+export function applyServerEconomySnapshot(snapshot: ServerEconomySnapshot): void {
   const catalogIds = new Set(SKIN_CATALOG.map((s) => s.id))
-  const chars = snapshot.ownedCharacterSkins.filter((id) => catalogIds.has(id))
-  const aks = snapshot.ownedAkSkins.filter((id): id is AkGunSkinId =>
-    (AK_GUN_SKIN_IDS as readonly string[]).includes(id)
-  )
+  const prevChars = readOwnedSkinIds().filter((id) => catalogIds.has(id))
+  const chars = Array.isArray(snapshot.ownedCharacterSkins)
+    ? snapshot.ownedCharacterSkins.filter((id) => catalogIds.has(id))
+    : prevChars
+
+  const prevAks = readOwnedAkGunSkins()
+  const aks = Array.isArray(snapshot.ownedAkSkins)
+    ? snapshot.ownedAkSkins.filter((id): id is AkGunSkinId =>
+        (AK_GUN_SKIN_IDS as readonly string[]).includes(id)
+      )
+    : prevAks
 
   setCoins(snapshot.coins, { fromServer: true })
 
@@ -269,24 +279,28 @@ export function applyServerEconomySnapshot(snapshot: {
   }
 
   try {
-    const eq = snapshot.equippedCharacterSkin
-    if (eq === null || eq.length === 0) {
-      localStorage.removeItem(EQUIPPED_CHARACTER_SKIN_KEY)
-    } else if (chars.includes(eq)) {
-      localStorage.setItem(EQUIPPED_CHARACTER_SKIN_KEY, eq)
-    } else {
-      localStorage.removeItem(EQUIPPED_CHARACTER_SKIN_KEY)
+    if ('equippedCharacterSkin' in snapshot) {
+      const eq = snapshot.equippedCharacterSkin
+      if (eq === null || eq === undefined || eq.length === 0) {
+        localStorage.removeItem(EQUIPPED_CHARACTER_SKIN_KEY)
+      } else if (chars.includes(eq)) {
+        localStorage.setItem(EQUIPPED_CHARACTER_SKIN_KEY, eq)
+      } else {
+        localStorage.removeItem(EQUIPPED_CHARACTER_SKIN_KEY)
+      }
     }
   } catch {
     /* ignore */
   }
 
-  if (snapshot.equippedAkSkin === 'default') {
-    setEquippedAkSkin('default')
-  } else {
-    const ak = snapshot.equippedAkSkin as AkGunSkinId
-    if (aks.includes(ak)) setEquippedAkSkin(ak)
-    else setEquippedAkSkin('default')
+  if ('equippedAkSkin' in snapshot && typeof snapshot.equippedAkSkin === 'string') {
+    if (snapshot.equippedAkSkin === 'default') {
+      setEquippedAkSkin('default')
+    } else {
+      const ak = snapshot.equippedAkSkin as AkGunSkinId
+      if (aks.includes(ak)) setEquippedAkSkin(ak)
+      else setEquippedAkSkin('default')
+    }
   }
 }
 

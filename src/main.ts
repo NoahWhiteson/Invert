@@ -733,7 +733,12 @@ mainMenuNameUI = new MainMenuNameInputUI(myUsername, (name) => {
   updateLeaderboard()
 })
 
-mainMenuSkinsUI = new MainMenuSkinsUI()
+mainMenuSkinsUI = new MainMenuSkinsUI({
+  onAkGunSkinEquip: (skin) => {
+    if (skin === 'default') applyDefaultAkGunLook()
+    else applyAkGunSkin(skin)
+  },
+})
 mainMenuStoreUI = new MainMenuStoreUI({
   onPurchased: () => mainMenuSkinsUI.refresh(),
   onSkinSwatchPreview: (skin) => {
