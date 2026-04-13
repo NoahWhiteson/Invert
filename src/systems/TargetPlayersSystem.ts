@@ -419,27 +419,20 @@ export class TargetPlayersSystem {
       t.model.visible = true
       t.model.scale.setScalar(1)
       t.container.visible = true
-      
-      t.model.traverse(c => {
-        if (c instanceof THREE.Mesh || (c as any).isSkinnedMesh) {
+
+      t.model.traverse((c) => {
+        if (c instanceof THREE.Mesh || (c as THREE.SkinnedMesh).isSkinnedMesh) {
           c.visible = true
-          const m = c as THREE.Mesh
-          if (m.material) {
-            const mat = m.material as THREE.MeshToonMaterial
-            if (t.flashTimer <= 0 && mat.color) {
-              mat.color.setHex(BOT_SKIN_HEX)
-            }
-          }
         }
       })
-      
+
       if (t.flashTimer > 0) {
         t.flashTimer -= dt
         const isFlashing = t.flashTimer > 0
         t.model.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            const mat = child.material as THREE.MeshToonMaterial
-            if (mat) mat.color.setHex(isFlashing ? 0xff0000 : BOT_SKIN_HEX)
+          if (child instanceof THREE.Mesh || (child as THREE.SkinnedMesh).isSkinnedMesh) {
+            const mat = (child as THREE.Mesh).material as THREE.MeshToonMaterial
+            if (mat?.color) mat.color.setHex(isFlashing ? 0xff0000 : BOT_SKIN_HEX)
           }
         })
       }

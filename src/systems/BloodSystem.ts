@@ -37,6 +37,10 @@ export class BloodSystem {
   })
   private frustum = new THREE.Frustum()
   private projScreenMatrix = new THREE.Matrix4()
+  private _gravScratch = new THREE.Vector3()
+  private _nScratch = new THREE.Vector3()
+  private _decalPosScratch = new THREE.Vector3()
+  private _spreadScratch = new THREE.Vector3()
 
   constructor(scene: THREE.Scene, sphereRadius: number) {
     this.scene = scene
@@ -78,8 +82,9 @@ export class BloodSystem {
     const size = 0.15 + Math.random() * 0.3
     decal.scale.setScalar(size / 0.3) // Scale relative to base size
     
-    const normal = position.clone().normalize()
-    decal.position.copy(normal.clone().multiplyScalar(this.sphereRadius - 0.05))
+    this._nScratch.copy(position).normalize()
+    this._decalPosScratch.copy(this._nScratch).multiplyScalar(this.sphereRadius - 0.05)
+    decal.position.copy(this._decalPosScratch)
     decal.lookAt(0, 0, 0)
     decal.rotateZ(Math.random() * Math.PI * 2)
     
@@ -108,13 +113,16 @@ export class BloodSystem {
         p.position.copy(position)
         
         const spread = 0.05
-        p.velocity.copy(direction).normalize()
+        p.velocity
+          .copy(direction)
+          .normalize()
           .multiplyScalar(0.2 + Math.random() * 0.3)
-          .add(new THREE.Vector3(
-            (Math.random() - 0.5) * spread,
-            (Math.random() - 0.5) * spread,
-            (Math.random() - 0.5) * spread
-          ))
+        this._spreadScratch.set(
+          (Math.random() - 0.5) * spread,
+          (Math.random() - 0.5) * spread,
+          (Math.random() - 0.5) * spread
+        )
+        p.velocity.add(this._spreadScratch)
         
         p.life = 0
         p.maxLife = 50 + Math.random() * 40
@@ -137,7 +145,7 @@ export class BloodSystem {
       const isVisible = this.frustum.containsPoint(d.mesh.position)
 
       let shouldRemove = false
-      
+
       // Rule 1: Disappear after 1 minute (60,000ms)
       if (ageMs > 60000) {
         shouldRemove = true
@@ -146,6 +154,8 @@ export class BloodSystem {
       else if (this.decals.length > 100 && !isVisible) {
         shouldRemove = true
       }
+
+      d.mesh.visible = isVisible
 
       if (shouldRemove) {
         this.scene.remove(d.mesh)
@@ -161,14 +171,14 @@ export class BloodSystem {
       
       p.life++
       
-      const gravityPull = p.position.clone().normalize().multiplyScalar(0.01)
+      const gravityPull = this._gravScratch.copy(p.position).normalize().multiplyScalar(0.01)
       p.velocity.add(gravityPull)
       p.velocity.multiplyScalar(0.985)
       p.position.add(p.velocity)
       
       const dist = p.position.length()
       if (dist >= this.sphereRadius - 0.1) {
-        this.createDecal(p.position.clone())
+        this.createDecal(p.position)
         this.deactivate(p)
         needsUpdate = true
         continue

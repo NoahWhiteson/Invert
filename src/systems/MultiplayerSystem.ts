@@ -7,6 +7,9 @@ import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
 const IDLE_FBX = new URL('../assets/player/animations/Idle.fbx', import.meta.url).href
 
+const _netYawAxis = new THREE.Vector3(0, 1, 0)
+const _netViewQuatScratch = new THREE.Quaternion()
+
 export type WorldState = {
   matchStartTime: number
   treeLayout: Array<{ phi: number; theta: number; scale: number }>
@@ -709,8 +712,8 @@ export class MultiplayerSystem {
       // Shortest-angle interpolation to avoid wrap spins around +/-PI
       const yawDelta = Math.atan2(Math.sin(p.targetViewYaw - p.viewYaw), Math.cos(p.targetViewYaw - p.viewYaw))
       p.viewYaw += yawDelta * 0.2
-      const viewQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.viewYaw + Math.PI)
-      p.model.quaternion.multiply(viewQuat)
+      _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw + Math.PI)
+      p.model.quaternion.multiply(_netViewQuatScratch)
 
       // Update animations
       if (p.anims) {
@@ -728,7 +731,7 @@ export class MultiplayerSystem {
         p.model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh || (child as THREE.SkinnedMesh).isSkinnedMesh) {
             const mat = (child as THREE.Mesh).material as THREE.MeshToonMaterial
-            if (mat) mat.color.setHex(isFlashing ? 0xff0000 : 0x9f9f9f)
+            if (mat?.color) mat.color.setHex(isFlashing ? 0xff0000 : 0x9f9f9f)
           }
         })
       }

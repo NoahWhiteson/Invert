@@ -804,6 +804,62 @@ const raycaster = new THREE.Raycaster()
 const muzzleDir = new THREE.Vector3()
 const _worldPos = new THREE.Vector3()
 const _shotDir = new THREE.Vector3()
+const _sphereHitPoint = new THREE.Vector3()
+const _entityRayBuffer: THREE.Object3D[] = []
+const _worldNormalScratch = new THREE.Vector3()
+
+/** `dir` must be unit length; returns distance along ray or null. */
+function raySphereNearestHitUnit(
+  origin: THREE.Vector3,
+  dir: THREE.Vector3,
+  radius: number,
+  outPoint: THREE.Vector3
+): number | null {
+  const rd = origin.dot(dir)
+  const c = origin.lengthSq() - radius * radius
+  const disc = rd * rd - c
+  if (disc < 0) return null
+  const s = Math.sqrt(disc)
+  let t = -rd - s
+  if (t < 1e-4) t = -rd + s
+  if (t < 1e-4) return null
+  outPoint.copy(origin).addScaledVector(dir, t)
+  return t
+}
+
+function pickShootIntersection(
+  origin: THREE.Vector3,
+  dir: THREE.Vector3,
+  worldMesh: THREE.Mesh,
+  sphereR: number,
+  targets: THREE.Object3D[],
+  netTargets: THREE.Object3D[]
+): THREE.Intersection | null {
+  _entityRayBuffer.length = 0
+  for (let i = 0; i < targets.length; i++) _entityRayBuffer.push(targets[i]!)
+  for (let i = 0; i < netTargets.length; i++) _entityRayBuffer.push(netTargets[i]!)
+
+  raycaster.set(origin, dir)
+  const entityHits = raycaster.intersectObjects(_entityRayBuffer, false)
+  const tWorld = raySphereNearestHitUnit(origin, dir, sphereR, _sphereHitPoint)
+
+  let best: THREE.Intersection | null = null
+  let bestT = Infinity
+
+  if (entityHits.length > 0) {
+    best = entityHits[0]!
+    bestT = best.distance
+  }
+  if (tWorld !== null && tWorld < bestT) {
+    best = {
+      distance: tWorld,
+      point: _sphereHitPoint.clone(),
+      object: worldMesh,
+    } as THREE.Intersection
+    bestT = tWorld
+  }
+  return best
+}
 const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
 let isLeftMouseDown = false
@@ -1059,17 +1115,15 @@ function shoot() {
       _shotDir.z += (Math.random() - 0.5) * cfg.spread * spreadMul
       _shotDir.normalize()
     }
-    raycaster.set(_worldPos, _shotDir)
     const targets = targetPlayers.getRaycastTargets()
     const netTargets = multiplayer.getRaycastTargets()
-    const hit = raycaster.intersectObjects([mesh, ...targets, ...netTargets], false)
+    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets)
 
-    if (hit.length > 0) {
-      const h = hit[0]!
+    if (h) {
       if (h.object === mesh) {
         const normal = h.face
-          ? h.face.normal.clone().applyQuaternion(mesh.quaternion)
-          : h.point.clone().normalize()
+          ? _worldNormalScratch.copy(h.face.normal).applyQuaternion(mesh.quaternion)
+          : _worldNormalScratch.copy(h.point).normalize()
         bulletHoles.spawn(h.point, normal)
       } else if (h.object.userData.networkPlayerId) {
         // Hit a networked player
@@ -1167,15 +1221,13 @@ function updateCrosshairEnemyHover() {
   }
   core.camera.getWorldPosition(_worldPos)
   core.camera.getWorldDirection(muzzleDir)
-  raycaster.set(_worldPos, muzzleDir)
   const targets = targetPlayers.getRaycastTargets()
   const netTargets = multiplayer.getRaycastTargets()
-  const hit = raycaster.intersectObjects([mesh, ...targets, ...netTargets], false)
-  if (hit.length === 0) {
+  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets)
+  if (!h) {
     crosshair.setEnemyHover(false)
     return
   }
-  const h = hit[0]!
   if (h.object === mesh) {
     crosshair.setEnemyHover(false)
     return
@@ -1240,6 +1292,7 @@ window.game = {
 
 let viewToggleKeyWasDown = false
 let reloadKeyWasDown = false
+let simFrame = 0
 const timer = new THREE.Timer()
 
 function animate() {
@@ -1250,6 +1303,7 @@ function animate() {
     const dt = timer.getDelta()
     const time = performance.now() / 1000
     const currentTime = performance.now()
+    simFrame++
 
     if (atMainMenu && !isDead) {
       grass.update(time)
@@ -1289,7 +1343,7 @@ function animate() {
       }
 
       blood.update(core.camera)
-      bulletHoles.update()
+      bulletHoles.update(core.camera)
       damageTexts.update(dt, core.camera)
 
       settingsUI.update(input, false)
@@ -1334,12 +1388,6 @@ function animate() {
         } else {
           grenadeCharge = 0
         }
-      }
-      wasLeftMouseDownLastFrame = isLeftMouseDown
-      wasLeftMouseDownLastFrame = isLeftMouseDown
-
-      if (!isGrenade && isLeftMouseDown && player.controls.isLocked) {
-        shoot()
       }
 
       player.update(input, sphereRadius, core.camera)
@@ -1443,7 +1491,7 @@ function animate() {
       reloadStartedAt = 0
     }
     blood.update(core.camera)
-    bulletHoles.update()
+    bulletHoles.update(core.camera)
 
     const botBrain: BotBrainContext | null = !settingsUI.isOpen
       ? {
@@ -1601,7 +1649,9 @@ function animate() {
       isDead
     )
 
-    updateCrosshairEnemyHover()
+    if ((simFrame & 1) === 0) {
+      updateCrosshairEnemyHover()
+    }
 
     if (muzzleFlashLife > 0) {
       muzzleFlashLife -= dt

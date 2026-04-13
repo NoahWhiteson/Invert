@@ -12,6 +12,8 @@ export class BulletHoleSystem {
   private readonly lifetimeMs = 90000
   private readonly inwardOffset = 0.09
   private readonly mat: THREE.SpriteMaterial
+  private readonly frustum = new THREE.Frustum()
+  private readonly projScreenMatrix = new THREE.Matrix4()
 
   constructor(scene: THREE.Scene, _sphereRadius: number) {
     this.scene = scene
@@ -89,13 +91,20 @@ export class BulletHoleSystem {
     this.holes.push({ sprite: hole, createdAt: performance.now() })
   }
 
-  public update() {
+  public update(camera: THREE.Camera) {
     const now = performance.now()
+    this.projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    this.frustum.setFromProjectionMatrix(this.projScreenMatrix)
+
     for (let i = this.holes.length - 1; i >= 0; i--) {
       const h = this.holes[i]!
       if (now - h.createdAt > this.lifetimeMs) {
         this.scene.remove(h.sprite)
         this.holes.splice(i, 1)
+        continue
+      }
+      if (this.on) {
+        h.sprite.visible = this.frustum.containsPoint(h.sprite.position)
       }
     }
   }
