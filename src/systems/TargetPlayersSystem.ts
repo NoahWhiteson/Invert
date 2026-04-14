@@ -52,11 +52,11 @@ const BOT_BODY_HALF = 0.9
 const BOT_GRAVITY = 0.0065
 const BOT_JUMP_FORCE = 0.2
 const BOT_MOVE_ACCEL = 0.02
-const BOT_WALK_SPEED = 0.11
-const BOT_SPRINT_MULT = 1.55
+const BOT_WALK_SPEED = 0.092
+const BOT_SPRINT_MULT = 1.38
 const BOT_FRICTION_GROUND = 0.1
 const BOT_MOMENTUM_AIR = 0.985
-const BOT_YAW_SMOOTH_RAD_PER_SEC = 18
+const BOT_YAW_SMOOTH_RAD_PER_SEC = 11
 const BOT_STEER_SMOOTH = 4.2
 const BOT_JUMP_INTERVAL_MIN_MS = 2800
 const BOT_JUMP_INTERVAL_MAX_MS = 6200
@@ -68,11 +68,11 @@ const WANDER_CHANCE = 0.75
 const IDLE_DURATION = 2200
 const WANDER_DURATION = 10000
 
-const VISION_MAX_DIST = 52
-/** ~116° total cone in front of the bot (dot > cos half-angle from forward). */
-const VISION_MIN_COS = Math.cos((58 * Math.PI) / 180)
+const VISION_MAX_DIST = 40
+/** Narrower cone than before (~96° total); bots spot you less from the sides. */
+const VISION_MIN_COS = Math.cos((48 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
-const BOT_AK_FIRE_INTERVAL_MS = 100
+const BOT_AK_FIRE_INTERVAL_MS = 150
 /** Eye height toward planet center from shellPoint (body center on ground). */
 const BOT_EYE_INSET = 1.12
 

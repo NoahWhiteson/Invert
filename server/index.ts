@@ -321,6 +321,9 @@ export class GameRoom extends DurableObject {
 				case "respawn":
 					this.handleRespawn(playerId);
 					break;
+				case "local_death":
+					this.handleLocalSimDeath(playerId);
+					break;
 				default:
 					return;
 			}
@@ -480,6 +483,18 @@ export class GameRoom extends DurableObject {
 			pos,
 			volume,
 		}, ws);
+	}
+
+	/**
+	 * Client-side bot damage does not go through `damage`; keep server health in sync so respawn works.
+	 */
+	private handleLocalSimDeath(playerId: string) {
+		const me = this.players.get(playerId);
+		if (!me) return;
+		if (me.health <= 0) return;
+		me.health = 0;
+		me.lastUpdate = Date.now();
+		this.players.set(playerId, me);
 	}
 
 	private handleRespawn(playerId: string) {

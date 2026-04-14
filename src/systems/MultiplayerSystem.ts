@@ -784,6 +784,11 @@ export class MultiplayerSystem {
     this.safeSend({ type: "respawn" })
   }
 
+  /** Bot kills are simulated locally; server must mark us dead before `respawn` is accepted. */
+  public sendLocalDeath() {
+    this.safeSend({ type: 'local_death' })
+  }
+
   public isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN
   }

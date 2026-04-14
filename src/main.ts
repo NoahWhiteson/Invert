@@ -159,7 +159,7 @@ let lastFirstPlaceId: string | null = null
 let isDead = false
 let deadKillerId: string | null = null
 /** After spawn / respawn, bots ignore the local player for this long (ms). */
-const LOCAL_SPAWN_BOT_GRACE_MS = 4500
+const LOCAL_SPAWN_BOT_GRACE_MS = 5500
 let localSpawnBotGraceUntilMs = 0
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 
@@ -246,6 +246,9 @@ function handleLocalDeathFromBot(botIndex: number) {
   isDead = true
   deadKillerId = `bot_${botIndex}`
   player.state.health = 0
+  if (multiplayer.isConnected()) {
+    multiplayer.sendLocalDeath()
+  }
   targetPlayers.recordBotKill(botIndex)
   updateLeaderboard()
   killFeed.push(myUsername, 'AK-47')
@@ -869,10 +872,10 @@ function pickShootIntersection(
 const _rayOc = new THREE.Vector3()
 const _botAimU = new THREE.Vector3()
 const _botAimV = new THREE.Vector3()
-const BOT_AK_DAMAGE = 22
+const BOT_AK_DAMAGE = 16
 /** Extra inaccuracy on top of tangent jitter (wider cone than player AK). */
-const BOT_AK_SPREAD = 0.068
-const BOT_AK_TANGENT_JITTER = 0.042
+const BOT_AK_SPREAD = 0.1
+const BOT_AK_TANGENT_JITTER = 0.055
 
 function applyBotAimInaccuracy(dir: THREE.Vector3, out: THREE.Vector3) {
   out.copy(dir)
