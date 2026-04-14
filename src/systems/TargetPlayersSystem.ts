@@ -75,6 +75,9 @@ const CHASE_RETARGET_MS = 1600
 const BOT_AK_FIRE_INTERVAL_MS = 210
 /** Eye height toward planet center from shellPoint (body center on ground). */
 const BOT_EYE_INSET = 1.12
+const BOT_SPAWN_MIN_SEP = 24
+const BOT_SPAWN_PLAYER_MIN_SEP = 20
+const BOT_SPAWN_ATTEMPTS = 220
 
 export class TargetPlayersSystem {
   private scene: THREE.Scene
@@ -724,26 +727,38 @@ export class TargetPlayersSystem {
   private pickSeparatedShellPoint(forIndex: number): THREE.Vector3 {
     const R = this.groundRadius()
     const out = new THREE.Vector3()
-    for (let attempt = 0; attempt < 120; attempt++) {
+    let bestScore = -Infinity
+    const best = new THREE.Vector3()
+    for (let attempt = 0; attempt < BOT_SPAWN_ATTEMPTS; attempt++) {
       out.setFromSphericalCoords(R, Math.random() * Math.PI, Math.random() * Math.PI * 2)
-      let ok = true
-      if (this.lastKnownPlayerPos.lengthSq() > 1 && out.distanceTo(this.lastKnownPlayerPos) < 13) {
-        ok = false
+      let nearestPlayer = Infinity
+      let nearestBot = Infinity
+
+      if (this.lastKnownPlayerPos.lengthSq() > 1) {
+        nearestPlayer = out.distanceTo(this.lastKnownPlayerPos)
       }
-      if (ok) {
-        for (let i = 0; i < this.targets.length; i++) {
-          if (i === forIndex) continue
-          const o = this.targets[i]
-          if (!o || o.shellPoint.lengthSq() < 1e-4) continue
-          if (out.distanceTo(o.shellPoint) < 17) {
-            ok = false
-            break
-          }
-        }
+
+      for (let i = 0; i < this.targets.length; i++) {
+        if (i === forIndex) continue
+        const o = this.targets[i]
+        if (!o || o.shellPoint.lengthSq() < 1e-4) continue
+        const d = out.distanceTo(o.shellPoint)
+        if (d < nearestBot) nearestBot = d
       }
-      if (ok) return out
+
+      if (nearestBot >= BOT_SPAWN_MIN_SEP && nearestPlayer >= BOT_SPAWN_PLAYER_MIN_SEP) {
+        return out
+      }
+
+      // Fallback: keep the best "most-separated" sample if strict constraints fail.
+      const score = Math.min(nearestBot, nearestPlayer)
+      if (score > bestScore) {
+        bestScore = score
+        best.copy(out)
+      }
     }
-    out.setFromSphericalCoords(this.groundRadius(), Math.random() * Math.PI, Math.random() * Math.PI * 2)
+    if (bestScore > -Infinity) return best
+    out.setFromSphericalCoords(R, Math.random() * Math.PI, Math.random() * Math.PI * 2)
     return out
   }
 
