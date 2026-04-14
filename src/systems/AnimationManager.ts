@@ -131,10 +131,17 @@ export class AnimationManager {
     const prev = this.missingAnimLogAt.get(key) ?? 0
     if (now - prev < 400) return
     this.missingAnimLogAt.set(key, now)
-    console.warn(`[AnimDebug:${this.debugLabel}] missing animation during ${where} (wanted "${String(wanted)}")`, {
+    console.log(`[AnimDebug:${this.debugLabel}] missing animation during ${where} (wanted "${String(wanted)}")`, {
       currentState: this.currentState,
       pendingLocomotion: this.pendingLocomotion,
       actions: this.actionDebugSnapshot(),
+    })
+  }
+
+  public logBootstrapInfo() {
+    console.log(`[AnimDebug:${this.debugLabel}] bootstrap`, {
+      states: [...this.actions.keys()],
+      snapshot: this.actionDebugSnapshot(),
     })
   }
 
@@ -453,7 +460,7 @@ export class AnimationManager {
     const dur = Math.max(firing.getClip().duration, 1 / 60)
     const done = !firing.isRunning() || firing.time + 1 / 60 >= dur * 0.995
     if (done) {
-      console.debug(`[AnimDebug:${this.debugLabel}] repairFiringStale fired`, {
+      console.log(`[AnimDebug:${this.debugLabel}] repairFiringStale fired`, {
         state: this.currentState,
         firingRunning: firing.isRunning(),
         firingTime: Number(firing.time.toFixed(3)),
@@ -477,7 +484,7 @@ export class AnimationManager {
       const now = this.nowMs()
       if (now - this.lastZeroWeightLogMs > 450) {
         this.lastZeroWeightLogMs = now
-        console.debug(`[AnimDebug:${this.debugLabel}] low total weight -> forcing idle`, {
+        console.log(`[AnimDebug:${this.debugLabel}] low total weight -> forcing idle`, {
           currentState: this.currentState,
           sumWeight: Number(sumW.toFixed(5)),
           pendingLocomotion: this.pendingLocomotion,

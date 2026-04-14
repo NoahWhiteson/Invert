@@ -675,6 +675,7 @@ export class TargetPlayersSystem {
     await anims.loadAll()
     anims.setState('idle', 0) // Initialize state immediately
     anims.hardResetToIdle()   // Ensure clean start
+    anims.logBootstrapInfo()
 
     const guns: (THREE.Group | null)[] = [null, null, null]
     await this.addThirdPersonGunsToBot(model, guns)
@@ -814,6 +815,7 @@ export class TargetPlayersSystem {
 
     if (t.anims) {
       t.anims.hardResetToIdle()
+      console.log(`[AnimDebug:bot-${String(index + 1).padStart(2, '0')}] respawn hardResetToIdle`)
     }
     t.facingYawTarget = t.model.rotation.y
 
