@@ -72,7 +72,7 @@ const VISION_MAX_DIST = 40
 /** Narrower cone than before (~96° total); bots spot you less from the sides. */
 const VISION_MIN_COS = Math.cos((48 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
-const BOT_AK_FIRE_INTERVAL_MS = 150
+const BOT_AK_FIRE_INTERVAL_MS = 210
 /** Eye height toward planet center from shellPoint (body center on ground). */
 const BOT_EYE_INSET = 1.12
 

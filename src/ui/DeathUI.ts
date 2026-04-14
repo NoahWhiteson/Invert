@@ -15,6 +15,8 @@ export class DeathUI {
   private timerId: number | null = null
   private countdownMorphTimer: number | null = null
   private onRespawnClick: (() => void) | null = null
+  /** Native `disabled` on buttons drops click events; use a flag + styling instead. */
+  private respawnReady = false
 
   constructor() {
     this.root = document.createElement('div')
@@ -22,7 +24,7 @@ export class DeathUI {
     this.root.style.position = 'fixed'
     this.root.style.inset = '0'
     this.root.style.pointerEvents = 'none'
-    this.root.style.zIndex = '500'
+    this.root.style.zIndex = '30000'
     this.root.style.display = 'none'
 
     // Add a style tag to hide cursor globally when dead
@@ -36,6 +38,7 @@ export class DeathUI {
 
     this.grayOverlay = document.createElement('div')
     this.grayOverlay.style.position = 'absolute'
+    this.grayOverlay.style.zIndex = '0'
     this.grayOverlay.style.inset = '0'
     this.grayOverlay.style.background = 'rgba(20,20,20,0.45)'
     this.grayOverlay.style.backdropFilter = 'grayscale(1) contrast(1.2)'
@@ -45,6 +48,7 @@ export class DeathUI {
 
     this.card = document.createElement('div')
     this.card.style.position = 'absolute'
+    this.card.style.zIndex = '1'
     this.card.style.left = '50%'
     this.card.style.bottom = '150px'
     this.card.style.transform = 'translateX(-50%) skewX(-10deg)'
@@ -81,6 +85,7 @@ export class DeathUI {
     this.card.appendChild(this.details)
 
     this.respawnBtn = document.createElement('button')
+    this.respawnBtn.type = 'button'
     this.respawnBtn.style.marginTop = '30px'
     this.respawnBtn.style.fontFamily = "'m6x11', monospace"
     this.respawnBtn.style.fontSize = '38px'
@@ -91,7 +96,6 @@ export class DeathUI {
     this.respawnBtn.style.textShadow = 'none'
     this.respawnBtn.style.cursor = 'none'
     this.respawnBtn.style.transition = 'transform 0.1s ease-out'
-    this.respawnBtn.disabled = true
     this.respawnBtn.style.display = 'inline-flex'
     this.respawnBtn.style.alignItems = 'center'
     this.respawnBtn.style.justifyContent = 'center'
@@ -117,7 +121,7 @@ export class DeathUI {
     this.respawnBtn.appendChild(this.respawnSuffix)
     
     this.respawnBtn.addEventListener('mouseenter', () => {
-      if (!this.respawnBtn.disabled) {
+      if (this.respawnReady) {
         this.respawnBtn.style.transform = 'scale(1.1)'
         this.respawnBtn.style.color = '#ffff00'
       }
@@ -127,14 +131,30 @@ export class DeathUI {
       this.respawnBtn.style.color = '#fff'
     })
     
-    this.respawnBtn.addEventListener('click', () => {
-      if (this.respawnBtn.disabled) return
+    this.respawnBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (!this.respawnReady) return
       this.onRespawnClick?.()
+    })
+    this.respawnBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation()
     })
     this.card.appendChild(this.respawnBtn)
     this.setCountdownInstant(10)
+    this.applyRespawnReadyStyle()
 
     document.body.appendChild(this.root)
+  }
+
+  private applyRespawnReadyStyle() {
+    if (this.respawnReady) {
+      this.respawnBtn.style.opacity = '1'
+      this.respawnBtn.style.pointerEvents = 'auto'
+    } else {
+      this.respawnBtn.style.opacity = '0.42'
+      this.respawnBtn.style.pointerEvents = 'auto'
+    }
   }
 
   private static digitArray(n: number): number[] {
@@ -258,7 +278,8 @@ export class DeathUI {
     this.details.textContent = `${killerName} killed you with ${weapon}`
     this.countdown = 10
     this.shownCountdown = 10
-    this.respawnBtn.disabled = true
+    this.respawnReady = false
+    this.applyRespawnReadyStyle()
     this.respawnPrefix.style.display = 'inline'
     this.respawnDigitsRow.style.display = 'inline-flex'
     this.respawnSuffix.style.display = 'inline'
@@ -279,7 +300,8 @@ export class DeathUI {
       if (this.countdown <= 0) {
         if (this.timerId) window.clearInterval(this.timerId)
         this.timerId = null
-        this.respawnBtn.disabled = false
+        this.respawnReady = true
+        this.applyRespawnReadyStyle()
         this.respawnPrefix.style.display = 'inline'
         this.respawnPrefix.textContent = 'Respawn'
         this.respawnDigitsRow.style.display = 'none'
@@ -295,6 +317,7 @@ export class DeathUI {
   }
 
   public hide() {
+    this.respawnReady = false
     if (this.timerId) {
       window.clearInterval(this.timerId)
       this.timerId = null

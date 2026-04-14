@@ -874,8 +874,8 @@ const _botAimU = new THREE.Vector3()
 const _botAimV = new THREE.Vector3()
 const BOT_AK_DAMAGE = 16
 /** Extra inaccuracy on top of tangent jitter (wider cone than player AK). */
-const BOT_AK_SPREAD = 0.1
-const BOT_AK_TANGENT_JITTER = 0.055
+const BOT_AK_SPREAD = 0.14
+const BOT_AK_TANGENT_JITTER = 0.082
 
 function applyBotAimInaccuracy(dir: THREE.Vector3, out: THREE.Vector3) {
   out.copy(dir)
@@ -890,6 +890,9 @@ function applyBotAimInaccuracy(dir: THREE.Vector3, out: THREE.Vector3) {
   _botAimU.crossVectors(_botAimV, out).normalize()
   out.addScaledVector(_botAimV, (Math.random() - 0.5) * 2 * BOT_AK_TANGENT_JITTER)
   out.addScaledVector(_botAimU, (Math.random() - 0.5) * 2 * BOT_AK_TANGENT_JITTER)
+  out.normalize()
+  out.addScaledVector(_botAimV, (Math.random() - 0.5) * 0.028)
+  out.addScaledVector(_botAimU, (Math.random() - 0.5) * 0.028)
   out.normalize()
 }
 
