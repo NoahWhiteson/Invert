@@ -73,6 +73,8 @@ const VISION_MAX_DIST = 52
 const VISION_MIN_COS = Math.cos((58 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
 const BOT_AK_FIRE_INTERVAL_MS = 100
+/** Eye height toward planet center from shellPoint (body center on ground). */
+const BOT_EYE_INSET = 1.12
 
 export class TargetPlayersSystem {
   private scene: THREE.Scene
@@ -447,7 +449,17 @@ export class TargetPlayersSystem {
 
     radial.copy(t.shellPoint).normalize()
     const faceTan = this._vB.copy(t.velocity).addScaledVector(radial, -t.velocity.dot(radial))
-    if (faceTan.lengthSq() > 2e-5) {
+    if (t.chasing) {
+      const aimFlat = this._vE.copy(t.lastAimWorld).sub(t.shellPoint)
+      aimFlat.addScaledVector(radial, -aimFlat.dot(radial))
+      if (aimFlat.lengthSq() > 1e-5) {
+        this.updateFacingYawTarget(t, aimFlat.normalize())
+      } else if (faceTan.lengthSq() > 2e-5) {
+        this.updateFacingYawTarget(t, faceTan.normalize())
+      } else if (t.steerDir.lengthSq() > 1e-10) {
+        this.updateFacingYawTarget(t, t.steerDir)
+      }
+    } else if (faceTan.lengthSq() > 2e-5) {
       this.updateFacingYawTarget(t, faceTan.normalize())
     } else if (t.steerDir.lengthSq() > 1e-10) {
       this.updateFacingYawTarget(t, t.steerDir)
@@ -463,21 +475,6 @@ export class TargetPlayersSystem {
     }
 
     if (t.anims && t.health > 0) {
-      if (
-        visible &&
-        ctx.nowMs - t.lastBotFireMs >= BOT_AK_FIRE_INTERVAL_MS
-      ) {
-        const radialUp = this._vA.copy(t.shellPoint).normalize()
-        this._eyeScratch.copy(radialUp).multiplyScalar(-1.55).add(t.shellPoint)
-        this._dirScratch.copy(t.lastAimWorld).sub(this._eyeScratch)
-        if (this._dirScratch.lengthSq() > 1e-6) {
-          this._dirScratch.normalize()
-          ctx.tryBotAkHit(botIndex, this._eyeScratch, this._dirScratch)
-          t.lastBotFireMs = ctx.nowMs
-          t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
-        }
-      }
-
       if (!t.onGround) {
         const distToGround = groundR - t.shellPoint.length()
         const verticalVel = t.velocity.dot(this._vD.copy(t.shellPoint).normalize())
@@ -490,6 +487,19 @@ export class TargetPlayersSystem {
       } else {
         t.anims.setState('idle', 0.18)
       }
+
+      if (visible && ctx.nowMs - t.lastBotFireMs >= BOT_AK_FIRE_INTERVAL_MS) {
+        const radialUp = this._vA.copy(t.shellPoint).normalize()
+        this._eyeScratch.copy(radialUp).multiplyScalar(-BOT_EYE_INSET).add(t.shellPoint)
+        this._dirScratch.copy(t.lastAimWorld).sub(this._eyeScratch)
+        if (this._dirScratch.lengthSq() > 1e-6) {
+          this._dirScratch.normalize()
+          ctx.tryBotAkHit(botIndex, this._eyeScratch, this._dirScratch)
+          t.lastBotFireMs = ctx.nowMs
+          t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
+        }
+      }
+
       t.anims.update(dt)
     }
   }
