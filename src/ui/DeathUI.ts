@@ -32,15 +32,18 @@ export class DeathUI {
     this.root.style.position = 'fixed'
     this.root.style.inset = '0'
     this.root.style.pointerEvents = 'none'
-    this.root.style.zIndex = '30000'
+    this.root.style.zIndex = '2147483646'
     this.root.style.display = 'none'
 
     // Add a style tag to hide cursor globally when dead
     const style = document.createElement('style')
     style.id = 'death-cursor-hide'
     style.textContent = `
-      #death-ui-root * { cursor: none !important; }
-      body.is-dead * { cursor: none !important; }
+      /* Beat global * { cursor: none } for death controls only */
+      body.is-dead #death-ui-root.death-front .death-card,
+      body.is-dead #death-ui-root.death-front .death-respawn {
+        cursor: pointer !important;
+      }
     `
     document.head.appendChild(style)
 
@@ -66,6 +69,7 @@ export class DeathUI {
     this.card.style.color = '#fff'
     this.card.style.fontFamily = "'m6x11', monospace"
     this.card.style.textAlign = 'center'
+    this.card.classList.add('death-card')
     this.card.style.pointerEvents = 'auto'
     this.card.style.opacity = '0'
     this.card.style.transition = 'opacity 350ms ease, transform 350ms cubic-bezier(0.1, 0.88, 0.16, 1)'
@@ -109,6 +113,7 @@ export class DeathUI {
     this.respawnBtn.style.justifyContent = 'center'
     this.respawnBtn.style.gap = '0'
     this.respawnBtn.style.textDecoration = 'none'
+    this.respawnBtn.classList.add('death-respawn')
 
     this.respawnPrefix = document.createElement('span')
     this.respawnPrefix.textContent = 'Respawn ('
@@ -139,17 +144,13 @@ export class DeathUI {
       this.respawnBtn.style.color = '#fff'
     })
 
-    this.respawnBtn.addEventListener(
-      'pointerdown',
-      (e) => {
-        if (e.button !== 0) return
-        e.stopPropagation()
-        if (!this.respawnReady) return
-        e.preventDefault()
-        this.onRespawnClick?.()
-      },
-      true
-    )
+    const tryRespawn = (e: Event) => {
+      if (!this.respawnReady) return
+      e.preventDefault()
+      e.stopPropagation()
+      this.onRespawnClick?.()
+    }
+    this.card.addEventListener('click', tryRespawn)
     this.card.appendChild(this.respawnBtn)
     this.setCountdownInstant(10)
     this.applyRespawnReadyStyle()
@@ -160,12 +161,10 @@ export class DeathUI {
   private applyRespawnReadyStyle() {
     if (this.respawnReady) {
       this.respawnBtn.style.opacity = '1'
-      this.respawnBtn.style.pointerEvents = 'auto'
-      this.respawnBtn.style.setProperty('cursor', 'pointer', 'important')
+      this.card.style.setProperty('cursor', 'pointer', 'important')
     } else {
       this.respawnBtn.style.opacity = '0.42'
-      this.respawnBtn.style.pointerEvents = 'auto'
-      this.respawnBtn.style.setProperty('cursor', 'not-allowed', 'important')
+      this.card.style.setProperty('cursor', 'default', 'important')
     }
   }
 
@@ -299,6 +298,7 @@ export class DeathUI {
 
     this.root.style.display = 'block'
     this.root.style.pointerEvents = 'auto'
+    this.root.classList.add('death-front')
     document.body.appendChild(this.root)
     document.body.classList.add('is-dead')
     window.addEventListener('keydown', this.boundOnKeyDown, true)
@@ -317,7 +317,7 @@ export class DeathUI {
         this.respawnReady = true
         this.applyRespawnReadyStyle()
         this.respawnPrefix.style.display = 'inline'
-        this.respawnPrefix.textContent = 'Space to respawn'
+        this.respawnPrefix.textContent = 'Click or Space to respawn'
         this.respawnDigitsRow.style.display = 'none'
         this.respawnSuffix.style.display = 'none'
         return
@@ -344,6 +344,7 @@ export class DeathUI {
     this.card.style.opacity = '0'
     this.card.style.transform = 'translateX(-50%) translateY(0px) skewX(-10deg)'
     document.body.classList.remove('is-dead')
+    this.root.classList.remove('death-front')
     window.removeEventListener('keydown', this.boundOnKeyDown, true)
     window.setTimeout(() => {
       this.root.style.display = 'none'

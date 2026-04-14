@@ -231,13 +231,13 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
 }
 
 function onDeathScreenConfirmRespawn() {
-  player.setPointerLockAllowed(true)
-  player.controls.lock()
   if (multiplayer.isConnected()) {
     multiplayer.sendRespawn()
-  } else {
-    finishLocalRespawn(100, 100, null)
+    return
   }
+  player.setPointerLockAllowed(true)
+  finishLocalRespawn(100, 100, null)
+  void player.controls.lock()
 }
 
 function handleLocalDeathFromBot(botIndex: number) {

@@ -92,7 +92,7 @@ export class SettingsUI {
     this.customCursor.style.width = '24px'
     this.customCursor.style.height = '24px'
     this.customCursor.style.pointerEvents = 'none'
-    this.customCursor.style.zIndex = '40000'
+    this.customCursor.style.zIndex = '2147483647'
     this.customCursor.style.display = 'none'
     this.customCursor.style.imageRendering = 'pixelated'
     this.customCursor.style.transformOrigin = 'center'
@@ -618,6 +618,9 @@ export class SettingsUI {
   }
 
   public update(input: InputManager, forceShow: boolean = false) {
+    const dead = document.body.classList.contains('is-dead')
+    this.button.style.pointerEvents = dead ? 'none' : 'auto'
+
     const shouldShowCursor = input.isSimulatedUnlocked || this.isOpen || !document.pointerLockElement || forceShow
 
     if (shouldShowCursor) {
