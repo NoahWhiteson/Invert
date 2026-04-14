@@ -409,13 +409,10 @@ export class AnimationManager {
   public ensureAnyActionOrIdle() {
     if (this.ragdollFrozen) return
     if (this.currentState === 'firing') return
-    let anyRunning = false
     let sumW = 0
     this.actions.forEach((a) => {
       sumW += a.getEffectiveWeight()
-      if (a.isRunning()) anyRunning = true
     })
-    if (anyRunning) return
     if (sumW < 0.05) {
       const idle = this.actions.get('idle')
       if (idle) {
