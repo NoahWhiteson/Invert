@@ -231,10 +231,17 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
 }
 
 function onDeathScreenConfirmRespawn() {
+  console.debug('[RespawnDebug] onDeathScreenConfirmRespawn fired', {
+    connected: multiplayer.isConnected(),
+    isDead,
+    health: player.state.health,
+  })
   if (multiplayer.isConnected()) {
+    console.debug('[RespawnDebug] sending respawn request to server')
     multiplayer.sendRespawn()
     return
   }
+  console.debug('[RespawnDebug] offline respawn path')
   player.setPointerLockAllowed(true)
   finishLocalRespawn(100, 100, null)
   void player.controls.lock()
@@ -441,6 +448,13 @@ void Promise.all([
   }
 
   multiplayer.onPlayerRespawn = (playerId, health, maxHealth, pos) => {
+    console.debug('[RespawnDebug] onPlayerRespawn event', {
+      playerId,
+      local: multiplayer.getLocalPlayerId(),
+      health,
+      maxHealth,
+      hasPos: !!pos,
+    })
     if (playerId !== multiplayer.getLocalPlayerId()) return
     finishLocalRespawn(health, maxHealth, pos)
   }
