@@ -18,6 +18,14 @@ export class DeathUI {
   /** Native `disabled` on buttons drops click events; use a flag + styling instead. */
   private respawnReady = false
 
+  private readonly boundOnKeyDown = (e: KeyboardEvent) => {
+    if (e.code !== 'Space' || e.repeat) return
+    if (!this.respawnReady) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.onRespawnClick?.()
+  }
+
   constructor() {
     this.root = document.createElement('div')
     this.root.id = 'death-ui-root'
@@ -293,6 +301,7 @@ export class DeathUI {
     this.root.style.pointerEvents = 'auto'
     document.body.appendChild(this.root)
     document.body.classList.add('is-dead')
+    window.addEventListener('keydown', this.boundOnKeyDown, true)
     requestAnimationFrame(() => {
       this.grayOverlay.style.opacity = '1'
       this.card.style.opacity = '1'
@@ -308,7 +317,7 @@ export class DeathUI {
         this.respawnReady = true
         this.applyRespawnReadyStyle()
         this.respawnPrefix.style.display = 'inline'
-        this.respawnPrefix.textContent = 'Respawn'
+        this.respawnPrefix.textContent = 'Space to respawn'
         this.respawnDigitsRow.style.display = 'none'
         this.respawnSuffix.style.display = 'none'
         return
@@ -335,6 +344,7 @@ export class DeathUI {
     this.card.style.opacity = '0'
     this.card.style.transform = 'translateX(-50%) translateY(0px) skewX(-10deg)'
     document.body.classList.remove('is-dead')
+    window.removeEventListener('keydown', this.boundOnKeyDown, true)
     window.setTimeout(() => {
       this.root.style.display = 'none'
       this.root.style.pointerEvents = 'none'
