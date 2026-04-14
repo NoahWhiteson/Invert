@@ -17,14 +17,12 @@ export class DeathUI {
   private onRespawnClick: (() => void) | null = null
   /** Native `disabled` on buttons drops click events; use a flag + styling instead. */
   private respawnReady = false
-  private debugLine: HTMLDivElement
   private debugEnabled = true
 
   private setDebug(message: string) {
     if (!this.debugEnabled) return
     const t = Math.round(performance.now())
     const text = `[DeathUI ${t}] ${message}`
-    this.debugLine.textContent = text
     console.debug(text)
   }
 
@@ -107,13 +105,6 @@ export class DeathUI {
     this.details.style.webkitTextStroke = '1.5px #000'
     this.details.style.paintOrder = 'stroke fill'
     this.card.appendChild(this.details)
-    this.debugLine = document.createElement('div')
-    this.debugLine.style.marginTop = '8px'
-    this.debugLine.style.fontSize = '14px'
-    this.debugLine.style.opacity = '0.9'
-    this.debugLine.style.color = '#ffff00'
-    this.debugLine.style.textShadow = thickOutline
-    this.card.appendChild(this.debugLine)
 
     this.respawnBtn = document.createElement('button')
     this.respawnBtn.type = 'button'

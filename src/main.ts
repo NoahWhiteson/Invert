@@ -162,6 +162,7 @@ let deadKillerId: string | null = null
 const LOCAL_SPAWN_BOT_GRACE_MS = 5500
 let localSpawnBotGraceUntilMs = 0
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
+let respawnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
 let atMainMenu = true
 let mainMenuPlayUI!: MainMenuPlayUI
@@ -195,6 +196,10 @@ function getRandomSpawnPos(radius: number): THREE.Vector3 {
 }
 
 function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vector3 | null) {
+  if (respawnFallbackTimer) {
+    clearTimeout(respawnFallbackTimer)
+    respawnFallbackTimer = null
+  }
   isDead = false
   deadKillerId = null
 
@@ -238,7 +243,16 @@ function onDeathScreenConfirmRespawn() {
   })
   if (multiplayer.isConnected()) {
     console.debug('[RespawnDebug] sending respawn request to server')
+    multiplayer.sendLocalDeath()
     multiplayer.sendRespawn()
+    if (respawnFallbackTimer) clearTimeout(respawnFallbackTimer)
+    respawnFallbackTimer = setTimeout(() => {
+      if (!isDead) return
+      console.debug('[RespawnDebug] fallback local respawn (server ack timeout)')
+      player.setPointerLockAllowed(true)
+      finishLocalRespawn(100, 100, null)
+      void player.controls.lock()
+    }, 1300)
     return
   }
   console.debug('[RespawnDebug] offline respawn path')
@@ -689,7 +703,7 @@ let wasMainMenuStoreView = false
 
 async function beginPlayFromMenu() {
   if (!atMainMenu || isDead) return
-  await trySyncEconomyFromApi()
+  void trySyncEconomyFromApi()
   if (!atMainMenu || isDead) return
   atMainMenu = false
   const spawnPos = getRandomSpawnPos(sphereRadius)
