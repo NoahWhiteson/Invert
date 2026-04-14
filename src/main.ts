@@ -158,6 +158,9 @@ window.addEventListener('pagehide', persistMyUsernameToLocalStorage)
 let lastFirstPlaceId: string | null = null
 let isDead = false
 let deadKillerId: string | null = null
+/** After spawn / respawn, bots ignore the local player for this long (ms). */
+const LOCAL_SPAWN_BOT_GRACE_MS = 4500
+let localSpawnBotGraceUntilMs = 0
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 
 let atMainMenu = true
@@ -223,6 +226,7 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   weaponUI.setOpacity(1)
   killFeed.setOpacity(1)
   deathUI.hide()
+  localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
 }
 
 function onDeathScreenConfirmRespawn() {
@@ -711,6 +715,7 @@ async function beginPlayFromMenu() {
   playerModel.setCharacterCastShadow(true)
   leaderboardUI.setVisible(true)
   timerUI.setVisible(true)
+  localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
 }
 
 mainMenuPlayUI = new MainMenuPlayUI()
@@ -862,8 +867,28 @@ function pickShootIntersection(
 }
 
 const _rayOc = new THREE.Vector3()
+const _botAimU = new THREE.Vector3()
+const _botAimV = new THREE.Vector3()
 const BOT_AK_DAMAGE = 22
-const BOT_AK_SPREAD = 0.03
+/** Extra inaccuracy on top of tangent jitter (wider cone than player AK). */
+const BOT_AK_SPREAD = 0.068
+const BOT_AK_TANGENT_JITTER = 0.042
+
+function applyBotAimInaccuracy(dir: THREE.Vector3, out: THREE.Vector3) {
+  out.copy(dir)
+  if (out.lengthSq() < 1e-8) {
+    out.set(0, 0, 1)
+  } else {
+    out.normalize()
+  }
+  _botAimU.set(1, 0, 0)
+  if (Math.abs(out.dot(_botAimU)) > 0.92) _botAimU.set(0, 1, 0)
+  _botAimV.crossVectors(out, _botAimU).normalize()
+  _botAimU.crossVectors(_botAimV, out).normalize()
+  out.addScaledVector(_botAimV, (Math.random() - 0.5) * 2 * BOT_AK_TANGENT_JITTER)
+  out.addScaledVector(_botAimU, (Math.random() - 0.5) * 2 * BOT_AK_TANGENT_JITTER)
+  out.normalize()
+}
 
 /** Ray vs sphere; `rd` unit; returns distance along ray or null. */
 function rayIntersectSphereDist(ro: THREE.Vector3, rd: THREE.Vector3, center: THREE.Vector3, r: number): number | null {
@@ -882,7 +907,7 @@ function rayIntersectSphereDist(ro: THREE.Vector3, rd: THREE.Vector3, center: TH
 function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   if (settingsUI.isOpen) return
 
-  _shotDir.copy(dir)
+  applyBotAimInaccuracy(dir, _shotDir)
   if (BOT_AK_SPREAD > 0) {
     _shotDir.x += (Math.random() - 0.5) * BOT_AK_SPREAD
     _shotDir.y += (Math.random() - 0.5) * BOT_AK_SPREAD
@@ -903,8 +928,9 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets)
   const hitDist = h?.distance ?? Infinity
 
+  const spawnGraceActive = performance.now() < localSpawnBotGraceUntilMs
   let tPlayer: number | null = null
-  if (!isDead) {
+  if (!isDead && !spawnGraceActive) {
     tPlayer = rayIntersectSphereDist(_worldPos, _shotDir, player.playerGroup.position, 0.72)
   }
 
@@ -1611,7 +1637,8 @@ function animate() {
           playerAlive: !isDead,
           getHumanPositionsForVision: () => {
             const out: THREE.Vector3[] = []
-            if (!isDead) out.push(player.playerGroup.position)
+            const grace = performance.now() < localSpawnBotGraceUntilMs
+            if (!isDead && !grace) out.push(player.playerGroup.position)
             for (const p of multiplayer.getAllPlayers()) {
               if (!p.ragdoll && p.health > 0) out.push(p.model.position)
             }
