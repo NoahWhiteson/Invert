@@ -68,6 +68,9 @@ export class AnimationManager {
   private actions: Map<AnimationState, THREE.AnimationAction> = new Map()
   private currentState: AnimationState = 'idle'
   private ragdollFrozen = false
+  private debugLabel = 'anim'
+  private lastZeroWeightLogMs = 0
+  private missingAnimLogAt = new Map<string, number>()
 
   private readonly JUMP_HOLD_START = 20 / 30
   private readonly JUMP_HOLD_END = 22 / 30
@@ -97,6 +100,42 @@ export class AnimationManager {
 
   constructor(model: THREE.Object3D) {
     this.mixer = new THREE.AnimationMixer(model)
+  }
+
+  public setDebugLabel(label: string) {
+    this.debugLabel = label
+  }
+
+  private nowMs() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now()
+    return Date.now()
+  }
+
+  private actionDebugSnapshot() {
+    const snap: Record<string, { running: boolean; w: number; t: number; clipDur: number; paused: boolean }> = {}
+    this.actions.forEach((a, state) => {
+      snap[state] = {
+        running: a.isRunning(),
+        w: Number(a.getEffectiveWeight().toFixed(4)),
+        t: Number(a.time.toFixed(3)),
+        clipDur: Number(a.getClip().duration.toFixed(3)),
+        paused: a.paused,
+      }
+    })
+    return snap
+  }
+
+  private logMissingAnimation(where: string, wanted: AnimationState | string) {
+    const key = `${where}|${wanted}`
+    const now = this.nowMs()
+    const prev = this.missingAnimLogAt.get(key) ?? 0
+    if (now - prev < 400) return
+    this.missingAnimLogAt.set(key, now)
+    console.warn(`[AnimDebug:${this.debugLabel}] missing animation during ${where} (wanted "${String(wanted)}")`, {
+      currentState: this.currentState,
+      pendingLocomotion: this.pendingLocomotion,
+      actions: this.actionDebugSnapshot(),
+    })
   }
 
   public static async preloadAll() {
@@ -218,6 +257,7 @@ export class AnimationManager {
     const nextAction = this.actions.get(state)
 
     if (!nextAction) {
+      this.logMissingAnimation('setState', state)
       if (state !== 'idle') {
         this.setState('idle', duration)
       }
@@ -255,6 +295,7 @@ export class AnimationManager {
         if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
         return
       }
+      this.logMissingAnimation('resumeAfterFire', 'jump')
     }
 
     const nextAction = this.actions.get(state)
@@ -270,18 +311,25 @@ export class AnimationManager {
       return
     }
 
+    this.logMissingAnimation('resumeAfterFire', state)
+
     const idle = this.actions.get('idle')
     if (idle) {
       idle.reset().fadeIn(this.FIRE_FADE_OUT).play()
       if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
       this.currentState = 'idle'
       this.pendingLocomotion = 'idle'
+    } else {
+      this.logMissingAnimation('resumeAfterFire', 'idle')
     }
   }
 
   public triggerFire(fireRateMs: number = 220) {
     const action = this.actions.get('firing')
-    if (!action) return
+    if (!action) {
+      this.logMissingAnimation('triggerFire', 'firing')
+      return
+    }
 
     const clip = action.getClip()
     const dur = Math.max(clip.duration, 1 / 60)
@@ -331,6 +379,8 @@ export class AnimationManager {
       if (jumpAction) {
         jumpAction.time = this.JUMP_HOLD_END
         jumpAction.paused = false
+      } else {
+        this.logMissingAnimation('setJumpLandingTrigger', 'jump')
       }
     }
   }
@@ -350,6 +400,8 @@ export class AnimationManager {
       if (idle) {
         idle.reset().fadeIn(0.12).play()
         this.currentState = 'idle'
+      } else {
+        this.logMissingAnimation('ragdollUnfreeze', 'idle')
       }
     }
   }
@@ -390,6 +442,7 @@ export class AnimationManager {
     if (this.currentState !== 'firing') return
     const firing = this.actions.get('firing')
     if (!firing) {
+      this.logMissingAnimation('repairFiringStale', 'firing')
       this.currentState = 'idle'
       const idle = this.actions.get('idle')
       if (idle) {
@@ -400,6 +453,13 @@ export class AnimationManager {
     const dur = Math.max(firing.getClip().duration, 1 / 60)
     const done = !firing.isRunning() || firing.time + 1 / 60 >= dur * 0.995
     if (done) {
+      console.debug(`[AnimDebug:${this.debugLabel}] repairFiringStale fired`, {
+        state: this.currentState,
+        firingRunning: firing.isRunning(),
+        firingTime: Number(firing.time.toFixed(3)),
+        firingDur: Number(dur.toFixed(3)),
+        pendingLocomotion: this.pendingLocomotion,
+      })
       this.detachFiringFinishedListener()
       this.resumeLocomotionAfterFire()
     }
@@ -414,10 +474,22 @@ export class AnimationManager {
       sumW += a.getEffectiveWeight()
     })
     if (sumW < 0.05) {
+      const now = this.nowMs()
+      if (now - this.lastZeroWeightLogMs > 450) {
+        this.lastZeroWeightLogMs = now
+        console.debug(`[AnimDebug:${this.debugLabel}] low total weight -> forcing idle`, {
+          currentState: this.currentState,
+          sumWeight: Number(sumW.toFixed(5)),
+          pendingLocomotion: this.pendingLocomotion,
+          actions: this.actionDebugSnapshot(),
+        })
+      }
       const idle = this.actions.get('idle')
       if (idle) {
         idle.reset().fadeIn(0.06).play()
         this.currentState = 'idle'
+      } else {
+        this.logMissingAnimation('ensureAnyActionOrIdle', 'idle')
       }
     }
   }
@@ -432,6 +504,8 @@ export class AnimationManager {
     const idle = this.actions.get('idle')
     if (idle) {
       idle.reset().play()
+    } else {
+      this.logMissingAnimation('hardResetToIdle', 'idle')
     }
     this.currentState = 'idle'
   }

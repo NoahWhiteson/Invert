@@ -671,6 +671,7 @@ export class TargetPlayersSystem {
 
     this.scene.add(container)
     const anims = new AnimationManager(model)
+    anims.setDebugLabel(`bot-${String(index + 1).padStart(2, '0')}`)
     await anims.loadAll()
     anims.setState('idle', 0) // Initialize state immediately
     anims.hardResetToIdle()   // Ensure clean start
