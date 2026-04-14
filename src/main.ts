@@ -251,7 +251,6 @@ function handleLocalDeathFromBot(botIndex: number) {
   }
   targetPlayers.recordBotKill(botIndex)
   updateLeaderboard()
-  killFeed.push(myUsername, 'AK-47')
 
   if (playerModel.root) {
     const impulse = player.state.velocity.clone().multiplyScalar(10)
@@ -995,12 +994,9 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     victim.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.12), h.point)
   }
   if (damageRes.killed) {
-    awardKillCoins()
     targetPlayers.recordBotKill(botIndex)
     discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
-    if (multiplayer.isConnected()) multiplayer.notifyBotKill()
     updateLeaderboard()
-    killFeed.push(damageRes.name, 'AK-47')
   }
 }
 

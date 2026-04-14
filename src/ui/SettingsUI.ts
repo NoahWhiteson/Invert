@@ -618,6 +618,11 @@ export class SettingsUI {
   }
 
   public update(input: InputManager, forceShow: boolean = false) {
+    if (document.body.classList.contains('is-dead')) {
+      this.customCursor.style.display = 'none'
+      return
+    }
+
     const shouldShowCursor = input.isSimulatedUnlocked || this.isOpen || !document.pointerLockElement || forceShow
 
     if (shouldShowCursor) {

@@ -130,16 +130,18 @@ export class DeathUI {
       this.respawnBtn.style.transform = 'scale(1.0)'
       this.respawnBtn.style.color = '#fff'
     })
-    
-    this.respawnBtn.addEventListener('click', (e) => {
-      e.preventDefault()
-      e.stopPropagation()
-      if (!this.respawnReady) return
-      this.onRespawnClick?.()
-    })
-    this.respawnBtn.addEventListener('pointerdown', (e) => {
-      e.stopPropagation()
-    })
+
+    this.respawnBtn.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.button !== 0) return
+        e.stopPropagation()
+        if (!this.respawnReady) return
+        e.preventDefault()
+        this.onRespawnClick?.()
+      },
+      true
+    )
     this.card.appendChild(this.respawnBtn)
     this.setCountdownInstant(10)
     this.applyRespawnReadyStyle()
@@ -151,9 +153,11 @@ export class DeathUI {
     if (this.respawnReady) {
       this.respawnBtn.style.opacity = '1'
       this.respawnBtn.style.pointerEvents = 'auto'
+      this.respawnBtn.style.setProperty('cursor', 'pointer', 'important')
     } else {
       this.respawnBtn.style.opacity = '0.42'
       this.respawnBtn.style.pointerEvents = 'auto'
+      this.respawnBtn.style.setProperty('cursor', 'not-allowed', 'important')
     }
   }
 
@@ -287,6 +291,7 @@ export class DeathUI {
 
     this.root.style.display = 'block'
     this.root.style.pointerEvents = 'auto'
+    document.body.appendChild(this.root)
     document.body.classList.add('is-dead')
     requestAnimationFrame(() => {
       this.grayOverlay.style.opacity = '1'
