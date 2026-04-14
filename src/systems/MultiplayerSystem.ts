@@ -58,6 +58,7 @@ export class MultiplayerSystem {
   private worldState: WorldState | null = null
   private textureLoader = new THREE.TextureLoader()
   private rankTextures: Record<number, THREE.Texture | null> = { 1: null, 2: null, 3: null }
+  private _posDeltaScratch = new THREE.Vector3()
 
   public onPlayerDamaged?: (
     targetId: string,
@@ -702,8 +703,12 @@ export class MultiplayerSystem {
         continue
       }
 
-      // Smoothly slide to target position
-      p.model.position.lerp(p.targetPos, 0.15)
+      // Distance-adaptive interpolation: preserve smoothness for normal movement,
+      // but catch up aggressively on large deltas (e.g. shotgun knockback launches).
+      const distToTarget = this._posDeltaScratch.copy(p.targetPos).sub(p.model.position).length()
+      let posBlend = THREE.MathUtils.clamp(0.14 + distToTarget * 0.22, 0.14, 0.86)
+      if (distToTarget > 4.2) posBlend = 1
+      p.model.position.lerp(p.targetPos, posBlend)
       
       // Smoothly rotate base (surface) orientation without view-yaw accumulation
       p.surfaceQuat.slerp(p.targetQuat, 0.15)
