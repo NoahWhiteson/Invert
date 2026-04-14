@@ -218,6 +218,7 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
 
   player.state.isThirdPerson = false
+  heldWeapons.setThirdPerson(false)
   player.setPointerLockAllowed(true)
   player.controls.enabled = player.controls.isLocked
   crosshair.setVisible(true)
@@ -264,6 +265,7 @@ function handleLocalDeathFromBot(botIndex: number) {
   ammoUI.setOpacity(0)
   weaponUI.setOpacity(0)
   killFeed.setOpacity(0)
+  heldWeapons.setThirdPerson(true)
   deathUI.show(botName, 'AK-47', onDeathScreenConfirmRespawn)
 }
 
@@ -416,6 +418,7 @@ void Promise.all([
       ammoUI.setOpacity(0)
       weaponUI.setOpacity(0)
       killFeed.setOpacity(0)
+      heldWeapons.setThirdPerson(true)
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
