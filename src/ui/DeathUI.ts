@@ -329,11 +329,12 @@ export class DeathUI {
         this.timerId = null
         this.respawnReady = true
         this.applyRespawnReadyStyle()
-        this.setDebug('countdown complete -> ready=true')
+        this.setDebug('countdown complete -> force respawn')
         this.respawnPrefix.style.display = 'inline'
-        this.respawnPrefix.textContent = 'Click or Space to respawn'
+        this.respawnPrefix.textContent = 'Respawning...'
         this.respawnDigitsRow.style.display = 'none'
         this.respawnSuffix.style.display = 'none'
+        this.onRespawnClick?.()
         return
       }
       this.setDebug(`countdown tick -> ${this.countdown}`)
