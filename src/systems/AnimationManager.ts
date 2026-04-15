@@ -458,18 +458,14 @@ export class AnimationManager {
       return
     }
     const dur = Math.max(firing.getClip().duration, 1 / 60)
-    const done = !firing.isRunning() || firing.time + 1 / 60 >= dur * 0.995
-    if (done) {
-      console.log(`[AnimDebug:${this.debugLabel}] repairFiringStale fired`, {
-        state: this.currentState,
-        firingRunning: firing.isRunning(),
-        firingTime: Number(firing.time.toFixed(3)),
-        firingDur: Number(dur.toFixed(3)),
-        pendingLocomotion: this.pendingLocomotion,
-      })
-      this.detachFiringFinishedListener()
-      this.resumeLocomotionAfterFire()
-    }
+    const finishedByMixer = !firing.isRunning()
+    const finishedByTime = firing.time >= dur * 0.998
+    if (!finishedByMixer && !finishedByTime) return
+
+    this.detachFiringFinishedListener()
+    firing.stopFading()
+    firing.stop()
+    this.resumeLocomotionAfterFire()
   }
 
   /** Mixers sometimes end with zero weight (load races / fades); force idle so skinned mesh never T-poses. */

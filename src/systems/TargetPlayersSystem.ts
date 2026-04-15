@@ -502,8 +502,6 @@ export class TargetPlayersSystem {
           t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
         }
       }
-
-      t.anims.update(dt)
     }
   }
 
@@ -534,7 +532,7 @@ export class TargetPlayersSystem {
       }
 
       if (t.anims && t.health > 0) {
-        // t.anims.update(dt) // Removed redundant update here, handled in updateBotBrain
+        t.anims.update(dt)
         t.anims.repairFiringStale()
         t.anims.ensureAnyActionOrIdle()
       } else if (t.anims && t.health <= 0) {
