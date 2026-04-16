@@ -862,7 +862,7 @@ mainMenuNavUI = new MainMenuNavUI({
   onHome: () => setMainMenuView('home'),
   onSkins: () => setMainMenuView('skins'),
   onStore: () => setMainMenuView('store'),
-  onSettings: () => settingsUI.openMenu(),
+  onSettings: () => settingsUI.toggleFromNav(),
 })
 
 mainMenuDevblogUI = new MainMenuDevblogUI()

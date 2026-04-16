@@ -286,26 +286,41 @@ export class SettingsUI {
     const backupRow = document.createElement('div')
     backupRow.style.display = 'flex'
     backupRow.style.flexDirection = 'row'
-    backupRow.style.gap = '12px'
-    backupRow.style.marginTop = '2px'
+    backupRow.style.gap = '16px'
+    backupRow.style.marginTop = '6px'
     backupRow.style.flexWrap = 'wrap'
     backupRow.style.justifyContent = 'center'
+    backupRow.style.alignItems = 'stretch'
 
-    const backupBtnStyle = (el: HTMLDivElement, label: string) => {
+    const makeBackupPanelButton = (label: string, variant: 'copy' | 'restore') => {
+      const el = document.createElement('div')
       el.textContent = label
-      el.style.color = 'white'
+      el.style.boxSizing = 'border-box'
+      el.style.minWidth = '156px'
+      el.style.padding = '12px 14px'
       el.style.fontFamily = "'m6x11', monospace"
-      el.style.fontSize = '20px'
-      el.style.webkitTextStroke = '4px #000'
-      el.style.paintOrder = 'stroke fill'
-      el.style.cursor = 'none'
+      el.style.fontSize = '17px'
+      el.style.lineHeight = '1.2'
       el.style.letterSpacing = '0.5px'
+      el.style.textAlign = 'center'
+      el.style.cursor = 'none'
+      el.style.userSelect = 'none'
+      el.style.flexShrink = '0'
+      el.style.border = '3px solid #000'
+      el.style.borderRadius = '2px'
+      el.style.boxShadow = '3px 3px 0 #000'
+      if (variant === 'copy') {
+        el.style.backgroundColor = '#fff'
+        el.style.color = '#000'
+      } else {
+        el.style.backgroundColor = '#d4d4d4'
+        el.style.color = '#0a0a0a'
+      }
+      return el
     }
 
-    this.copyBackupBtn = document.createElement('div')
-    backupBtnStyle(this.copyBackupBtn, 'COPY BACKUP')
-    this.restoreBackupBtn = document.createElement('div')
-    backupBtnStyle(this.restoreBackupBtn, 'RESTORE')
+    this.copyBackupBtn = makeBackupPanelButton('COPY BACKUP', 'copy')
+    this.restoreBackupBtn = makeBackupPanelButton('RESTORE', 'restore')
 
     backupRow.appendChild(this.copyBackupBtn)
     backupRow.appendChild(this.restoreBackupBtn)
@@ -519,9 +534,12 @@ export class SettingsUI {
     this.setMenuOpen(!this.isOpen, true)
   }
 
-  public openMenu() {
-    if (this.isOpen) return
-    this.setMenuOpen(true, true)
+  /**
+   * Main menu SETTINGS (nav text/icon): toggles open/closed so a second click closes.
+   * `playSound` is false here because MainMenuNavUI already plays its click SFX.
+   */
+  public toggleFromNav() {
+    this.setMenuOpen(!this.isOpen, false)
   }
 
   public registerCursorTargets(elements: HTMLElement[]) {
