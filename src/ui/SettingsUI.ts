@@ -272,15 +272,6 @@ export class SettingsUI {
     this.uuidBlock.style.pointerEvents = 'none'
     this.uuidBlock.style.zIndex = '1700'
 
-    const uuidTitle = document.createElement('div')
-    uuidTitle.textContent = 'YOUR UUID'
-    uuidTitle.style.color = 'white'
-    uuidTitle.style.fontFamily = "'m6x11', monospace"
-    uuidTitle.style.fontSize = '22px'
-    uuidTitle.style.webkitTextStroke = '5px #000'
-    uuidTitle.style.paintOrder = 'stroke fill'
-    uuidTitle.style.letterSpacing = '1.5px'
-
     this.uuidValueEl = document.createElement('span')
     this.uuidValueEl.style.color = 'white'
     this.uuidValueEl.style.fontFamily = "'m6x11', monospace"
@@ -291,18 +282,6 @@ export class SettingsUI {
     this.uuidValueEl.style.webkitTextStroke = '3px #000'
     this.uuidValueEl.style.paintOrder = 'stroke fill'
     this.uuidValueEl.style.cursor = 'none'
-
-    const backupHint = document.createElement('div')
-    backupHint.textContent =
-      'Coins live on the server. Clearing site data only removes this device login — use backup to keep the same account.'
-    backupHint.style.color = '#ddd'
-    backupHint.style.fontFamily = "'m6x11', monospace"
-    backupHint.style.fontSize = '12px'
-    backupHint.style.lineHeight = '1.35'
-    backupHint.style.textAlign = 'center'
-    backupHint.style.maxWidth = '440px'
-    backupHint.style.webkitTextStroke = '2px #000'
-    backupHint.style.paintOrder = 'stroke fill'
 
     const backupRow = document.createElement('div')
     backupRow.style.display = 'flex'
@@ -331,9 +310,7 @@ export class SettingsUI {
     backupRow.appendChild(this.copyBackupBtn)
     backupRow.appendChild(this.restoreBackupBtn)
 
-    this.uuidBlock.appendChild(uuidTitle)
     this.uuidBlock.appendChild(this.uuidValueEl)
-    this.uuidBlock.appendChild(backupHint)
     this.uuidBlock.appendChild(backupRow)
     document.body.appendChild(this.uuidBlock)
     this.refreshAccountUuidLabel()
