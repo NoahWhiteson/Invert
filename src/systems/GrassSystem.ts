@@ -4,7 +4,7 @@ export class GrassSystem {
   public grassBladeMat: THREE.ShaderMaterial
   public grassChunks: THREE.InstancedMesh[] = []
 
-  constructor(scene: THREE.Scene, sphereRadius: number, grassCount: number = 300000, _chunksCount: number = 20) {
+  constructor(scene: THREE.Scene, sphereRadius: number, grassCount: number = 200000, _chunksCount: number = 20) {
     const bladeWidth = 0.16
     const bladeHeight = 0.55
     const bladeSegments = 6

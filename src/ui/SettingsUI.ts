@@ -500,7 +500,7 @@ export class SettingsUI {
       this.menu.style.opacity = '1'
       this.menu.style.pointerEvents = 'auto'
       this.overlay.style.opacity = '1'
-      this.overlay.style.pointerEvents = 'auto'
+      this.overlay.style.pointerEvents = 'none'
       this.title.style.opacity = '1'
       this.resetBtn.style.opacity = '1'
       this.resetBtn.style.pointerEvents = 'auto'

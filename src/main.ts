@@ -83,7 +83,7 @@ function awardKillCoins() {
 const core = new SceneSetup()
 const sphereRadius = 50
 
-const geometry = new THREE.SphereGeometry(sphereRadius, 64, 64)
+const geometry = new THREE.SphereGeometry(sphereRadius, 48, 48)
 const material = new THREE.MeshToonMaterial({
   color: 0xffffff,
   side: THREE.DoubleSide,
@@ -155,6 +155,8 @@ let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 let respawnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
 let atMainMenu = true
+/** After first full `applyMainMenuView`, only cheap pose snap runs each frame (huge CPU/DOM win). */
+let mainMenuFullChromeApplied = false
 let mainMenuPlayUI!: MainMenuPlayUI
 let mainMenuNavUI!: MainMenuNavUI
 let mainMenuDevblogUI!: MainMenuDevblogUI
@@ -514,7 +516,7 @@ void Promise.all([
       killFeed.setOpacity(0)
       heldWeapons.setThirdPerson(true)
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
-    } else if (attackerId === multiplayer.getLocalPlayerId()) {
+    } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
       if (typeof killerKills === 'number') {
         myPvpKills = killerKills
@@ -590,10 +592,13 @@ const damageIndicator = new DamageIndicator()
 const weaponUI = new WeaponUI()
 const killFeed = new KillFeedUI()
 
-function applyMainMenuView() {
+const _worldUp = new THREE.Vector3(0, 1, 0)
+
+/** Cheap every-frame: keep shell pose + menu camera (no DOM, unlock only if pointer is locked). */
+function snapMainMenuPose() {
   player.playerGroup.position.copy(_mainMenuShell)
   _menuSpawnUpScratch.copy(_mainMenuShell).normalize().multiplyScalar(-1)
-  player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _menuSpawnUpScratch)
+  player.playerGroup.quaternion.setFromUnitVectors(_worldUp, _menuSpawnUpScratch)
   player.state.velocity.set(0, 0, 0)
 
   player.playerGroup.updateMatrixWorld(true)
@@ -604,12 +609,23 @@ function applyMainMenuView() {
   core.camera.lookAt(0, 0, 0)
   player.controls.enabled = false
   player.setPointerLockAllowed(false)
+  if (document.pointerLockElement) {
+    try {
+      player.controls.unlock()
+    } catch {
+      /* noop */
+    }
+  }
+  heldWeapons.setThirdPerson(true)
+}
+
+function applyMainMenuView() {
+  snapMainMenuPose()
   try {
     player.controls.unlock()
   } catch {
     /* noop */
   }
-  heldWeapons.setThirdPerson(true)
   crosshair.setVisible(false)
   healthUI.setOpacity(0)
   ammoUI.setOpacity(0)
@@ -790,6 +806,7 @@ async function beginPlayFromMenu() {
     return
   }
   atMainMenu = false
+  mainMenuFullChromeApplied = false
   player.controls.enabled = false
   player.setPointerLockAllowed(false)
   mainMenuPlayUI.getPlayButton().style.pointerEvents = 'none'
@@ -1107,7 +1124,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     playSfx(impactSfx, 1.0, 'impact')
     blood.spawn(h.point, hitDir, 4)
     multiplayer.sendBlood(h.point, hitDir, 4)
-    multiplayer.sendDamage(targetId, BOT_AK_DAMAGE, 'AK-47', _shotDir)
+    multiplayer.sendDamage(targetId, BOT_AK_DAMAGE, 'AK-47', _shotDir, { fromBot: true })
     const tp = multiplayer.getPlayerById(targetId)
     if (tp?.ragdoll) {
       tp.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.1), h.point)
@@ -1588,7 +1605,12 @@ function animate() {
       grass.update(time)
       trees.update(time)
       targetPlayers.syncPlayerSpawnHint(_mainMenuBotHint)
-      applyMainMenuView()
+      if (!mainMenuFullChromeApplied) {
+        applyMainMenuView()
+        mainMenuFullChromeApplied = true
+      } else {
+        snapMainMenuPose()
+      }
       if (!menuAkGunSkinSynced && playerModel.ready && heldWeapons.weaponsLoaded) {
         applyEquippedOwnedAkGunSkin()
         menuAkGunSkinSynced = true
@@ -1612,7 +1634,7 @@ function animate() {
       targetPlayers.update(dt, null)
 
       const frameEquivMenuNade = dt * 60
-      const stepCountMenuNade = Math.max(1, Math.min(Math.floor(frameEquivMenuNade + 1e-9), 120))
+      const stepCountMenuNade = Math.max(1, Math.min(Math.floor(frameEquivMenuNade + 1e-9), 24))
       const stepDtMenuNade = 1 / 60
       for (let s = 0; s < stepCountMenuNade; s++) {
         grenadeSystem.update(stepDtMenuNade, player.state.gravity)
@@ -1620,10 +1642,6 @@ function animate() {
       if (heldWeapons.getWeaponModel(GRENADE_SLOT)) {
         grenadeSystem.setModel(heldWeapons.getWeaponModel(GRENADE_SLOT)!)
       }
-
-      blood.update(core.camera)
-      bulletHoles.update(core.camera)
-      damageTexts.update(dt, core.camera)
 
       settingsUI.update(input, false)
       fpsCounter.update()

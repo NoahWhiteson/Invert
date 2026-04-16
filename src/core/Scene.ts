@@ -11,7 +11,12 @@ export class SceneSetup {
 
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true })
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: false,
+      powerPreference: 'high-performance',
+      stencil: false,
+      depth: true,
+    })
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     const maxDpr = 1.25 // Capped to 1.25 to prevent massive lag on high DPI screens (like MacBooks)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr))

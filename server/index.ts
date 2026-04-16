@@ -408,6 +408,8 @@ export class GameRoom extends DurableObject {
 		const target = this.players.get(targetId);
 		if (!target) return;
 
+		const fromBot = d.fromBot === true;
+
 		const prevHealth = target.health;
 		const nextHealth = Math.max(0, prevHealth - dmg);
 		target.health = nextHealth;
@@ -422,9 +424,10 @@ export class GameRoom extends DurableObject {
 			if (v) incoming = v;
 		}
 
+		const damageAttackerId = fromBot ? null : attackerId;
 		this.broadcast({
 			type: "player_damaged",
-			attackerId,
+			attackerId: damageAttackerId,
 			targetId,
 			damage: dmg,
 			health: nextHealth,
@@ -433,28 +436,41 @@ export class GameRoom extends DurableObject {
 		});
 
 		if (nextHealth <= 0 && prevHealth > 0) {
-			const killer = this.players.get(attackerId);
-			let killerKills = 0;
-			if (killer) {
-				killer.kills += 1;
-				killerKills = killer.kills;
-				killer.lastUpdate = Date.now();
-				this.players.set(attackerId, killer);
-			}
 			const weapon = target.lastDamageWeapon ?? "unknown";
-			const killerName = killer?.username ?? "Unknown";
 			const victimName = target.username ?? "Unknown";
-			this.broadcast({
-				type: "player_killed",
-				attackerId,
-				targetId,
-				killerName,
-				victimName,
-				weapon,
-				killerKills,
-				killerBotKills: killer?.botKills ?? 0,
-				...(incoming ? { deathIncoming: incoming } : {}),
-			});
+
+			if (fromBot) {
+				this.broadcast({
+					type: "player_killed",
+					attackerId: null,
+					targetId,
+					killerName: "Bot",
+					victimName,
+					weapon,
+					...(incoming ? { deathIncoming: incoming } : {}),
+				});
+			} else {
+				const killer = this.players.get(attackerId);
+				let killerKills = 0;
+				if (killer) {
+					killer.kills += 1;
+					killerKills = killer.kills;
+					killer.lastUpdate = Date.now();
+					this.players.set(attackerId, killer);
+				}
+				const killerName = killer?.username ?? "Unknown";
+				this.broadcast({
+					type: "player_killed",
+					attackerId,
+					targetId,
+					killerName,
+					victimName,
+					weapon,
+					killerKills,
+					killerBotKills: killer?.botKills ?? 0,
+					...(incoming ? { deathIncoming: incoming } : {}),
+				});
+			}
 		}
 	}
 

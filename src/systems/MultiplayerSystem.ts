@@ -63,13 +63,13 @@ export class MultiplayerSystem {
   public onPlayerDamaged?: (
     targetId: string,
     damage: number,
-    attackerId: string,
+    attackerId: string | null | undefined,
     health?: number,
     maxHealth?: number
   ) => void
   public onPlayerKilled?: (
     targetId: string,
-    attackerId: string,
+    attackerId: string | null | undefined,
     killerName?: string,
     weapon?: string,
     deathIncoming?: { x: number; y: number; z: number },
@@ -298,7 +298,13 @@ export class MultiplayerSystem {
         break
 
       case "player_damaged":
-        this.onPlayerDamaged?.(data.targetId, data.damage, data.attackerId, data.health, data.maxHealth)
+        this.onPlayerDamaged?.(
+          data.targetId,
+          data.damage,
+          data.attackerId as string | null | undefined,
+          data.health,
+          data.maxHealth
+        )
         if (data.targetId === this.localPlayerId) {
           // Local player took damage
         } else {
@@ -313,7 +319,7 @@ export class MultiplayerSystem {
         break
 
       case "player_killed": {
-        if (typeof data.attackerId === 'string') {
+        if (typeof data.attackerId === 'string' && data.attackerId.length > 0) {
           const killerP = this.players.get(data.attackerId)
           if (killerP) {
             if (typeof data.killerKills === 'number') killerP.kills = data.killerKills
@@ -322,7 +328,7 @@ export class MultiplayerSystem {
         }
         this.onPlayerKilled?.(
           data.targetId,
-          data.attackerId,
+          data.attackerId as string | null | undefined,
           data.killerName,
           data.weapon,
           data.deathIncoming,
@@ -747,7 +753,13 @@ export class MultiplayerSystem {
     }
   }
 
-  public sendDamage(targetId: string, damage: number, weapon?: string, incomingWorld?: THREE.Vector3) {
+  public sendDamage(
+    targetId: string,
+    damage: number,
+    weapon?: string,
+    incomingWorld?: THREE.Vector3,
+    opts?: { fromBot?: boolean }
+  ) {
     this.safeSend({
       type: "damage",
       targetId,
@@ -756,6 +768,7 @@ export class MultiplayerSystem {
       incoming: incomingWorld
         ? { x: incomingWorld.x, y: incomingWorld.y, z: incomingWorld.z }
         : undefined,
+      ...(opts?.fromBot ? { fromBot: true } : {}),
     })
   }
 
