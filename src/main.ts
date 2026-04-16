@@ -185,13 +185,32 @@ const _mainMenuShell = new THREE.Vector3(0, 0, -sphereRadius)
 const _menuSpawnUpScratch = new THREE.Vector3()
 const _menuCamWorldTarget = new THREE.Vector3()
 const _mainMenuBotHint = new THREE.Vector3(0, -38, 0)
-const PLAY_MENU_TRANSITION_MS = 760
+const PLAY_MENU_TRANSITION_MS = 880
 const _playCamEndPos = new THREE.Vector3(0, 0, 0)
 const _playCamEndQuat = new THREE.Quaternion()
 
 function smoothStep01(t: number): number {
   const x = THREE.MathUtils.clamp(t, 0, 1)
   return x * x * (3 - 2 * x)
+}
+
+/** Stronger ease for opacity (keeps edges soft, middle responsive). */
+function smootherStep01(t: number): number {
+  const x = THREE.MathUtils.clamp(t, 0, 1)
+  return x * x * x * (x * (x * 6 - 15) + 10)
+}
+
+/**
+ * Overlapping crossfade: menu lingers while HUD rises in, then menu finishes out.
+ * Alphas are independent so the middle of the timeline has both partially visible.
+ */
+function playTransitionMenuGameUiOpacities(linearT: number): { menu: number; game: number } {
+  const t = THREE.MathUtils.clamp(linearT, 0, 1)
+  const menuPhaseEnd = 0.58
+  const gamePhaseStart = 0.2
+  const menuOut = smootherStep01(t / menuPhaseEnd)
+  const gameIn = smootherStep01((t - gamePhaseStart) / (1 - gamePhaseStart))
+  return { menu: 1 - menuOut, game: gameIn }
 }
 
 function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number) {
@@ -224,12 +243,14 @@ function playMenuToGameTransition(
   return new Promise((resolve) => {
     const tick = (nowMs: number) => {
       const t = (nowMs - transitionStartMs) / PLAY_MENU_TRANSITION_MS
-      const eased = smoothStep01(t)
+      const tClamped = Math.min(1, t)
+      const eased = smoothStep01(tClamped)
       player.playerGroup.position.lerpVectors(fromPos, toPos, eased)
       player.playerGroup.quaternion.copy(fromQuat).slerp(toQuat, eased)
       core.camera.position.lerpVectors(fromCamPos, _playCamEndPos, eased)
       core.camera.quaternion.copy(fromCamQuat).slerp(_playCamEndQuat, eased)
-      applyPlayTransitionUiCrossfade(1 - eased, eased)
+      const ui = playTransitionMenuGameUiOpacities(tClamped)
+      applyPlayTransitionUiCrossfade(ui.menu, ui.game)
       if (t >= 1) {
         player.playerGroup.position.copy(toPos)
         player.playerGroup.quaternion.copy(toQuat)
