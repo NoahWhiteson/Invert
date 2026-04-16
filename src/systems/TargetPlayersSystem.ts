@@ -81,9 +81,12 @@ const BOT_SPAWN_ATTEMPTS = 220
 
 const BOT_HAND_TPOSE_TRACE_INDEX = 0
 const BOT_HAND_TRACE_HEARTBEAT_MS = 2800
-const BOT_HAND_TPOSE_LATERAL_WARN = 0.34
+/** Hand–hip horizontal separation in container space; Mixamo locomotion often exceeds 0.35 — only flag with low mixer sum below. */
+const BOT_HAND_TPOSE_LATERAL_WARN = 0.4
 const BOT_HAND_TPOSE_DELTA_SPIKE = 0.1
 const BOT_HAND_LOW_WEIGHT_WARN = 0.068
+/** If lateral is wide *and* total effective weight is below this, skin may be falling back toward bind / T-pose. */
+const BOT_HAND_WIDE_ARM_MAX_SUMW = 0.14
 
 export class TargetPlayersSystem {
   private scene: THREE.Scene
@@ -700,8 +703,12 @@ export class TargetPlayersSystem {
     const sumW = anims.getTotalEffectiveWeight()
     const reasons: string[] = []
     if (sumW < BOT_HAND_LOW_WEIGHT_WARN) reasons.push('low_mixer_total_weight')
-    if (lateral > BOT_HAND_TPOSE_LATERAL_WARN) reasons.push('wide_hand_lateral_vs_hips_bind_pose_like')
-    if (lateralDelta > BOT_HAND_TPOSE_DELTA_SPIKE) reasons.push('lateral_spike_same_frame')
+    if (lateral > BOT_HAND_TPOSE_LATERAL_WARN && sumW < BOT_HAND_WIDE_ARM_MAX_SUMW) {
+      reasons.push('wide_hand_with_low_mixer_weight_bind_suspect')
+    }
+    if (lateralDelta > BOT_HAND_TPOSE_DELTA_SPIKE && sumW < BOT_HAND_WIDE_ARM_MAX_SUMW) {
+      reasons.push('lateral_spike_with_low_mixer_weight')
+    }
 
     const heartbeat = nowMs - this.handTraceLastHeartbeatMs >= BOT_HAND_TRACE_HEARTBEAT_MS
     const anomaly = reasons.length > 0
