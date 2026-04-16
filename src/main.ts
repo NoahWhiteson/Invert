@@ -179,11 +179,43 @@ let mainMenuNameUI!: MainMenuNameInputUI
 let mainMenuSkinsUI!: MainMenuSkinsUI
 let mainMenuStoreUI!: MainMenuStoreUI
 let mainMenuView: 'home' | 'skins' | 'store' = 'home'
+let isPlayTransitioning = false
 /** Player on inner shell during menu; camera target stays strictly inside the sphere (camera is child of playerGroup). */
 const _mainMenuShell = new THREE.Vector3(0, 0, -sphereRadius)
 const _menuSpawnUpScratch = new THREE.Vector3()
 const _menuCamWorldTarget = new THREE.Vector3()
 const _mainMenuBotHint = new THREE.Vector3(0, -38, 0)
+const PLAY_MENU_TRANSITION_MS = 620
+
+function smoothStep01(t: number): number {
+  const x = THREE.MathUtils.clamp(t, 0, 1)
+  return x * x * (3 - 2 * x)
+}
+
+function playMenuToGameTransition(
+  fromPos: THREE.Vector3,
+  fromQuat: THREE.Quaternion,
+  toPos: THREE.Vector3,
+  toQuat: THREE.Quaternion
+): Promise<void> {
+  const transitionStartMs = performance.now()
+  return new Promise((resolve) => {
+    const tick = (nowMs: number) => {
+      const t = (nowMs - transitionStartMs) / PLAY_MENU_TRANSITION_MS
+      const eased = smoothStep01(t)
+      player.playerGroup.position.lerpVectors(fromPos, toPos, eased)
+      player.playerGroup.quaternion.copy(fromQuat).slerp(toQuat, eased)
+      if (t >= 1) {
+        player.playerGroup.position.copy(toPos)
+        player.playerGroup.quaternion.copy(toQuat)
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+}
 
 window.addEventListener(
   'keydown',
@@ -709,22 +741,31 @@ let menuAkGunSkinSynced = false
 let wasMainMenuStoreView = false
 
 async function beginPlayFromMenu() {
-  if (!atMainMenu || isDead) return
+  if (!atMainMenu || isDead || isPlayTransitioning) return
+  isPlayTransitioning = true
   void trySyncEconomyFromApi()
-  if (!atMainMenu || isDead) return
+  if (!atMainMenu || isDead) {
+    isPlayTransitioning = false
+    return
+  }
   atMainMenu = false
+  player.controls.enabled = false
+  player.setPointerLockAllowed(false)
+
+  const startPos = player.playerGroup.position.clone()
+  const startQuat = player.playerGroup.quaternion.clone()
   const spawnPos = getRandomSpawnPos(sphereRadius)
-  player.playerGroup.position.copy(spawnPos)
+  const spawnUp =
+    spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
+  const endQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
+  await playMenuToGameTransition(startPos, startQuat, spawnPos, endQuat)
   player.state.velocity.set(0, 0, 0)
 
   core.camera.up.set(0, 1, 0)
   core.camera.quaternion.identity()
   core.camera.rotation.set(0, 0, 0)
   core.camera.position.set(0, 0, 0)
-
-  const spawnUp =
-    spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
-  player.playerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
+  player.playerGroup.quaternion.copy(endQuat)
 
   player.state.isThirdPerson = false
   heldWeapons.setThirdPerson(false)
@@ -757,6 +798,7 @@ async function beginPlayFromMenu() {
   timerUI.setVisible(true)
   coinsHUD.setPlayMode(true)
   localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
+  isPlayTransitioning = false
 }
 
 mainMenuPlayUI = new MainMenuPlayUI()
