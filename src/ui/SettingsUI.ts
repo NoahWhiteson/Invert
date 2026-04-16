@@ -38,7 +38,7 @@ export class SettingsUI {
   // Volume state
   public volumes: Record<SoundType, number> = {
     master: 1.0,
-    gun: 1.0,
+    gun: 0.75,
     impact: 1.0,
     explosion: 1.0
   }
@@ -430,32 +430,32 @@ export class SettingsUI {
 
   private load() {
     const stored = localStorage.getItem('invert_settings')
-    if (!stored) return
-    try {
-      const data = JSON.parse(stored)
-      if (typeof data.fovPercent === 'number') this.fovPercent = data.fovPercent
-      if (data.volumes) {
-        for (const k in data.volumes) {
-          const val = data.volumes[k]
-          if (typeof val === 'number') (this.volumes as any)[k] = val
+    if (stored) {
+      try {
+        const data = JSON.parse(stored)
+        if (typeof data.fovPercent === 'number') this.fovPercent = data.fovPercent
+        if (data.volumes) {
+          for (const k in data.volumes) {
+            const val = data.volumes[k]
+            if (typeof val === 'number') (this.volumes as any)[k] = val
+          }
         }
-      }
-      if (data.graphics) {
-        for (const k in data.graphics) {
-          const val = data.graphics[k]
-          if (typeof val === 'boolean') (this.graphics as any)[k] = val
+        if (data.graphics) {
+          for (const k in data.graphics) {
+            const val = data.graphics[k]
+            if (typeof val === 'boolean') (this.graphics as any)[k] = val
+          }
         }
+        if (data.crosshairStyle === 'circle' || data.crosshairStyle === 'plus') {
+          this.currentCrosshairStyle = data.crosshairStyle
+        }
+      } catch (e) {
+        console.warn('Failed to load settings', e)
       }
-      if (data.crosshairStyle === 'circle' || data.crosshairStyle === 'plus') {
-        this.currentCrosshairStyle = data.crosshairStyle
-      }
-
-      this.fovNotch.style.left = `${this.fovPercent * 100}%`
-      for (const key of ['master', 'gun', 'impact', 'explosion'] as SoundType[]) {
-        this.volumeNotches[key]!.style.left = `${this.volumes[key] * 100}%`
-      }
-    } catch (e) {
-      console.warn('Failed to load settings', e)
+    }
+    this.fovNotch.style.left = `${this.fovPercent * 100}%`
+    for (const key of ['master', 'gun', 'impact', 'explosion'] as SoundType[]) {
+      this.volumeNotches[key]!.style.left = `${this.volumes[key] * 100}%`
     }
   }
 

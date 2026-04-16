@@ -74,29 +74,6 @@ function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
 }
 
-function requireTemporarySitePassword() {
-  const expected =
-    ((import.meta.env.VITE_PASSWORD as string | undefined) ??
-      (import.meta.env.VITE_SITE_PASSWORD as string | undefined) ??
-      '').trim()
-
-  // Gate only when a password is configured.
-  if (!expected) return
-
-  let attempts = 0
-  while (attempts < 3) {
-    const entered = window.prompt('Enter site password')
-    if (entered === null) break
-    if (entered.trim() === expected) return
-    attempts++
-  }
-
-  document.body.innerHTML = '<div style="display:flex;min-height:100vh;align-items:center;justify-content:center;font-family:monospace;font-size:20px;color:#fff;background:#000">Access denied</div>'
-  throw new Error('Temporary password gate blocked access')
-}
-
-requireTemporarySitePassword()
-
 const core = new SceneSetup()
 const sphereRadius = 50
 
