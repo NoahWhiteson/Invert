@@ -113,6 +113,12 @@ export class MultiplayerSystem {
     }
   }
 
+  private _hitboxGeo1 = new THREE.BoxGeometry(0.4, 0.7, 0.3)
+  private _hitboxGeo2 = new THREE.BoxGeometry(0.45, 0.7, 0.35)
+  private _hitboxGeo3 = new THREE.BoxGeometry(0.55, 0.8, 0.4)
+  private _headGeo = new THREE.SphereGeometry(0.2, 8, 8)
+  private _hitboxMat = new THREE.MeshBasicMaterial({ visible: false })
+
   constructor(scene: THREE.Scene) {
     this.scene = scene
   }
@@ -479,9 +485,8 @@ export class MultiplayerSystem {
     this.addThirdPersonGunsToRemote(model, thirdPersonGuns)
 
     const hitboxes: THREE.Mesh[] = []
-    const addBox = (w: number, h: number, d: number, x: number, y: number, z: number) => {
-      const geo = new THREE.BoxGeometry(w, h, d)
-      const hb = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ visible: false }))
+    const addBox = (geo: THREE.BoxGeometry, x: number, y: number, z: number) => {
+      const hb = new THREE.Mesh(geo, this._hitboxMat)
       hb.position.set(x, y, z)
       hb.userData.networkPlayerId = id
       model.add(hb)
@@ -491,12 +496,11 @@ export class MultiplayerSystem {
 
     // Use same hitbox rig as TargetPlayersSystem
     const floor = this.bindMinY
-    addBox(0.4, 0.7, 0.3, 0, floor + 0.4, 0)    // Lower legs
-    addBox(0.45, 0.7, 0.35, 0, floor + 1.0, 0)   // Upper legs
-    addBox(0.55, 0.8, 0.4, 0, floor + 1.5, 0)   // Torso
+    addBox(this._hitboxGeo1, 0, floor + 0.4, 0)    // Lower legs
+    addBox(this._hitboxGeo2, 0, floor + 1.0, 0)   // Upper legs
+    addBox(this._hitboxGeo3, 0, floor + 1.5, 0)   // Torso
     
-    const headGeo = new THREE.SphereGeometry(0.2, 8, 8)
-    const head = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({ visible: false }))
+    const head = new THREE.Mesh(this._headGeo, this._hitboxMat)
     head.position.set(0, floor + 1.85, 0)
     head.userData.networkPlayerId = id
     model.add(head)

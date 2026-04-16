@@ -125,6 +125,21 @@ export class TargetPlayersSystem {
   private _handPoseE = new THREE.Euler()
   public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
+  // Shared geometry & materials for performance
+  private _hitboxGeo1 = new THREE.BoxGeometry(0.4, 0.7, 0.3)
+  private _hitboxGeo2 = new THREE.BoxGeometry(0.45, 0.7, 0.35)
+  private _hitboxGeo3 = new THREE.BoxGeometry(0.55, 0.8, 0.4)
+  private _headGeo = new THREE.SphereGeometry(0.2, 8, 8)
+  private _hitboxMat = new THREE.MeshBasicMaterial({ visible: false })
+  private _botSkinMat = new THREE.MeshToonMaterial({
+    color: BOT_SKIN_HEX,
+    side: THREE.DoubleSide,
+  })
+  private _botSkinFlashMat = new THREE.MeshToonMaterial({
+    color: 0xff0000,
+    side: THREE.DoubleSide,
+  })
+
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
     this.scene = scene
     this.sphereRadius = sphereRadius
@@ -581,8 +596,7 @@ export class TargetPlayersSystem {
         const isFlashing = t.flashTimer > 0
         t.model.traverse((child) => {
           if (child instanceof THREE.Mesh || (child as THREE.SkinnedMesh).isSkinnedMesh) {
-            const mat = (child as THREE.Mesh).material as THREE.MeshToonMaterial
-            if (mat?.color) mat.color.setHex(isFlashing ? 0xff0000 : BOT_SKIN_HEX)
+            ;(child as THREE.Mesh).material = isFlashing ? this._botSkinFlashMat : this._botSkinMat
           }
         })
       }
@@ -769,10 +783,7 @@ export class TargetPlayersSystem {
       if (c instanceof THREE.Mesh || (c as any).isSkinnedMesh) {
         const m = c as THREE.Mesh
         m.frustumCulled = false
-        m.material = new THREE.MeshToonMaterial({
-          color: BOT_SKIN_HEX,
-          side: THREE.DoubleSide,
-        })
+        m.material = this._botSkinMat
       }
     })
     container.add(model)
@@ -784,8 +795,8 @@ export class TargetPlayersSystem {
       this.setupHandPoseTraceRig(model)
     }
 
-    const addBox = (w: number, h: number, d: number, x: number, y: number, z: number): THREE.Mesh => {
-      const hb = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ visible: false }))
+    const addBox = (geo: THREE.BoxGeometry, x: number, y: number, z: number): THREE.Mesh => {
+      const hb = new THREE.Mesh(geo, this._hitboxMat)
       hb.position.set(x, y, z)
       hb.userData.targetIdx = index
       container.add(hb)
@@ -795,12 +806,11 @@ export class TargetPlayersSystem {
 
     const floor = this.bindMinY
     const hitboxes: THREE.Mesh[] = [
-      addBox(0.4, 0.7, 0.3, 0, floor + 0.4, 0),
-      addBox(0.45, 0.7, 0.35, 0, floor + 1.0, 0),
-      addBox(0.55, 0.8, 0.4, 0, floor + 1.5, 0)
+      addBox(this._hitboxGeo1, 0, floor + 0.4, 0),
+      addBox(this._hitboxGeo2, 0, floor + 1.0, 0),
+      addBox(this._hitboxGeo3, 0, floor + 1.5, 0)
     ]
-    const headGeo = new THREE.SphereGeometry(0.2, 8, 8)
-    const head = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({ visible: false }))
+    const head = new THREE.Mesh(this._headGeo, this._hitboxMat)
     head.position.set(0, floor + 1.85, 0)
     head.userData.targetIdx = index
     container.add(head)

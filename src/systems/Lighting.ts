@@ -11,7 +11,7 @@ export class LightingSystem {
     this.directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
     this.directionalLight.position.set(20, 20, 20)
     this.directionalLight.castShadow = true
-    this.directionalLight.shadow.mapSize.set(2048, 2048)
+    this.directionalLight.shadow.mapSize.set(1024, 1024)
     this.directionalLight.shadow.camera.left = -sphereRadius
     this.directionalLight.shadow.camera.right = sphereRadius
     this.directionalLight.shadow.camera.top = sphereRadius
