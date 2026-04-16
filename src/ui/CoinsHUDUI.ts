@@ -51,6 +51,16 @@ export class CoinsHUDUI {
     window.addEventListener(COINS_CHANGED_EVENT, () => this.sync())
   }
 
+  public setPlayMode(playing: boolean) {
+    if (playing) {
+      this.root.style.left = 'auto'
+      this.root.style.right = '90px'
+    } else {
+      this.root.style.right = 'auto'
+      this.root.style.left = '24px'
+    }
+  }
+
   private sync() {
     this.valueEl.textContent = String(getCoins())
   }

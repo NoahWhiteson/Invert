@@ -519,7 +519,7 @@ settingsUI.onGraphicsChange = (key, on) => {
 }
 settingsUI.syncSystems()
 const healthUI = new HealthUI()
-void new CoinsHUDUI()
+const coinsHUD = new CoinsHUDUI()
 const damageIndicator = new DamageIndicator()
 const weaponUI = new WeaponUI()
 const killFeed = new KillFeedUI()
@@ -755,6 +755,7 @@ async function beginPlayFromMenu() {
   playerModel.setCharacterCastShadow(true)
   leaderboardUI.setVisible(true)
   timerUI.setVisible(true)
+  coinsHUD.setPlayMode(true)
   localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
 }
 
