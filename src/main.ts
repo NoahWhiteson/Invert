@@ -53,6 +53,13 @@ import {
 } from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
 
+// Force browsers (especially Safari/Mac) to load the custom font before we draw it to any canvas sprites
+try {
+  await document.fonts.load("12px 'm6x11'")
+} catch (e) {
+  console.warn('Font force-load failed', e)
+}
+
 void loadProfanityList()
 
 window.addEventListener(COINS_CHANGED_EVENT, (ev) => {

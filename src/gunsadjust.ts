@@ -77,7 +77,7 @@ async function init() {
 
   renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25))
   document.body.appendChild(renderer.domElement)
 
   controls = new OrbitControls(camera, renderer.domElement)

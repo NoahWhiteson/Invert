@@ -322,12 +322,23 @@ export class AnimationManager {
       duration,
       jumpPhase: state === 'jump' ? this.jumpPhase : undefined,
     })
+    let totalFadeFromW = 0
     this.actions.forEach((action) => {
-      if (action !== nextAction && action.isRunning()) {
-        action.fadeOut(duration)
+      if (action !== nextAction) {
+        const w = action.getEffectiveWeight()
+        if (w > 0 && action.isRunning()) {
+          totalFadeFromW += w
+          action.fadeOut(duration)
+        }
       }
     })
-    nextAction.reset().fadeIn(duration).play()
+    nextAction.reset()
+    if (totalFadeFromW > 0.05) {
+      nextAction.fadeIn(duration)
+    } else {
+      nextAction.setEffectiveWeight(1)
+    }
+    nextAction.play()
     nextAction.paused = false
     this.currentState = state
   }
@@ -343,19 +354,29 @@ export class AnimationManager {
   private resumeLocomotionAfterFire() {
     const firingAction = this.actions.get('firing')
     const state = this.pendingLocomotion
+    const firingW = firingAction ? firingAction.getEffectiveWeight() : 0
+    const fadeDur = (firingW > 0.05 && firingAction && firingAction.isRunning()) ? this.FIRE_FADE_OUT : 0
+
     this.trace('resumeLocomotionAfterFire:enter', {
       pendingLocomotion: state,
       hadFiringAction: !!firingAction,
+      firingWeight: Number(firingW.toFixed(4)),
+      fadeDur,
       mixerStateBefore: this.currentState,
     })
+
     if (state === 'jump') {
       const jumpAction = this.actions.get('jump')
       if (jumpAction) {
         this.jumpPhase = 'rising'
-        jumpAction.reset().fadeIn(this.FIRE_FADE_OUT).play()
+        jumpAction.reset()
+        if (fadeDur > 0) jumpAction.fadeIn(fadeDur)
+        else jumpAction.setEffectiveWeight(1)
+        jumpAction.play()
         jumpAction.paused = false
         this.currentState = 'jump'
-        if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+        if (firingAction && fadeDur > 0) firingAction.fadeOut(fadeDur)
+        else if (firingAction) firingAction.stop()
         this.trace('resumeLocomotionAfterFire:branch_jump', { currentStateAfter: this.currentState })
         return
       }
@@ -369,8 +390,14 @@ export class AnimationManager {
       if (!preservePhase) {
         nextAction.reset()
       }
-      nextAction.setEffectiveTimeScale(1).fadeIn(this.FIRE_FADE_OUT).play()
-      if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+      nextAction.setEffectiveTimeScale(1)
+      if (fadeDur > 0) nextAction.fadeIn(fadeDur)
+      else nextAction.setEffectiveWeight(1)
+      nextAction.play()
+      
+      if (firingAction && fadeDur > 0) firingAction.fadeOut(fadeDur)
+      else if (firingAction) firingAction.stop()
+
       this.currentState = state
       this.trace('resumeLocomotionAfterFire:branch_locomotion', { resumedTo: state })
       return
@@ -380,8 +407,14 @@ export class AnimationManager {
 
     const idle = this.actions.get('idle')
     if (idle) {
-      idle.reset().fadeIn(this.FIRE_FADE_OUT).play()
-      if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+      idle.reset()
+      if (fadeDur > 0) idle.fadeIn(fadeDur)
+      else idle.setEffectiveWeight(1)
+      idle.play()
+
+      if (firingAction && fadeDur > 0) firingAction.fadeOut(fadeDur)
+      else if (firingAction) firingAction.stop()
+
       this.currentState = 'idle'
       this.pendingLocomotion = 'idle'
       this.trace('resumeLocomotionAfterFire:branch_idle_fallback', {})
@@ -447,9 +480,17 @@ export class AnimationManager {
     action.clampWhenFinished = true
 
     const currentAction = this.actions.get(this.currentState)
-    action.reset().fadeIn(this.FIRE_FADE_IN).play()
+    const currentW = currentAction ? currentAction.getEffectiveWeight() : 0
+    const fadeDur = (currentW > 0.05 && currentAction && currentAction.isRunning()) ? this.FIRE_FADE_IN : 0
+
+    action.reset()
+    if (fadeDur > 0) action.fadeIn(fadeDur)
+    else action.setEffectiveWeight(1)
+    action.play()
+
     if (currentAction && this.currentState !== 'firing') {
-      currentAction.fadeOut(this.FIRE_FADE_IN)
+      if (fadeDur > 0) currentAction.fadeOut(fadeDur)
+      else currentAction.stop()
     }
 
     this.currentState = 'firing'
@@ -580,7 +621,8 @@ export class AnimationManager {
       }
       const idle = this.actions.get('idle')
       if (idle) {
-        idle.reset().fadeIn(0.06).play()
+        this.mixer.stopAllAction()
+        idle.reset().setEffectiveWeight(1).play()
         this.currentState = 'idle'
       } else {
         this.logMissingAnimation('ensureAnyActionOrIdle', 'idle')
@@ -598,11 +640,12 @@ export class AnimationManager {
     this.pendingLocomotion = 'idle'
     const idle = this.actions.get('idle')
     if (idle) {
-      idle.reset().play()
+      idle.reset().setEffectiveWeight(1).play()
     } else {
       this.logMissingAnimation('hardResetToIdle', 'idle')
     }
     this.currentState = 'idle'
+    this.mixer.update(0)
     this.trace('hardResetToIdle:done', {})
   }
 

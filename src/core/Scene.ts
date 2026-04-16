@@ -13,7 +13,7 @@ export class SceneSetup {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setSize(window.innerWidth, window.innerHeight)
-    const maxDpr = 2
+    const maxDpr = 1.25 // Capped to 1.25 to prevent massive lag on high DPI screens (like MacBooks)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr))
     this.renderer.sortObjects = false
     this.renderer.shadowMap.enabled = true
@@ -26,7 +26,7 @@ export class SceneSetup {
   private onResize() {
     this.camera.aspect = window.innerWidth / window.innerHeight
     this.camera.updateProjectionMatrix()
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
   }
 
