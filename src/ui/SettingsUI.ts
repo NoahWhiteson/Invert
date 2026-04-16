@@ -286,41 +286,31 @@ export class SettingsUI {
     const backupRow = document.createElement('div')
     backupRow.style.display = 'flex'
     backupRow.style.flexDirection = 'row'
-    backupRow.style.gap = '16px'
-    backupRow.style.marginTop = '6px'
+    backupRow.style.gap = '22px'
+    backupRow.style.marginTop = '4px'
     backupRow.style.flexWrap = 'wrap'
     backupRow.style.justifyContent = 'center'
-    backupRow.style.alignItems = 'stretch'
+    backupRow.style.alignItems = 'center'
 
-    const makeBackupPanelButton = (label: string, variant: 'copy' | 'restore') => {
+    const makeBackupTextButton = (label: string, variant: 'copy' | 'restore') => {
       const el = document.createElement('div')
       el.textContent = label
-      el.style.boxSizing = 'border-box'
-      el.style.minWidth = '156px'
-      el.style.padding = '12px 14px'
       el.style.fontFamily = "'m6x11', monospace"
-      el.style.fontSize = '17px'
+      el.style.fontSize = '18px'
       el.style.lineHeight = '1.2'
       el.style.letterSpacing = '0.5px'
       el.style.textAlign = 'center'
       el.style.cursor = 'none'
       el.style.userSelect = 'none'
-      el.style.flexShrink = '0'
-      el.style.border = '3px solid #000'
-      el.style.borderRadius = '2px'
-      el.style.boxShadow = '3px 3px 0 #000'
-      if (variant === 'copy') {
-        el.style.backgroundColor = '#fff'
-        el.style.color = '#000'
-      } else {
-        el.style.backgroundColor = '#d4d4d4'
-        el.style.color = '#0a0a0a'
-      }
+      el.style.padding = '4px 6px'
+      el.style.webkitTextStroke = '3px #000'
+      el.style.paintOrder = 'stroke fill'
+      el.style.color = variant === 'copy' ? '#bfe0ff' : '#ffd8c4'
       return el
     }
 
-    this.copyBackupBtn = makeBackupPanelButton('COPY BACKUP', 'copy')
-    this.restoreBackupBtn = makeBackupPanelButton('RESTORE', 'restore')
+    this.copyBackupBtn = makeBackupTextButton('COPY BACKUP', 'copy')
+    this.restoreBackupBtn = makeBackupTextButton('RESTORE', 'restore')
 
     backupRow.appendChild(this.copyBackupBtn)
     backupRow.appendChild(this.restoreBackupBtn)
