@@ -218,6 +218,11 @@ export class LeaderboardUI {
     this.container.style.opacity = visible ? '1' : '0'
   }
 
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.container.style.opacity = String(a)
+  }
+
   public update(topEntries: LeaderboardEntry[], myEntry?: LeaderboardEntry) {
     const visibleEntries = [...topEntries]
     if (myEntry && !visibleEntries.find(e => e.id === myEntry.id)) {

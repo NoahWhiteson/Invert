@@ -185,18 +185,40 @@ const _mainMenuShell = new THREE.Vector3(0, 0, -sphereRadius)
 const _menuSpawnUpScratch = new THREE.Vector3()
 const _menuCamWorldTarget = new THREE.Vector3()
 const _mainMenuBotHint = new THREE.Vector3(0, -38, 0)
-const PLAY_MENU_TRANSITION_MS = 620
+const PLAY_MENU_TRANSITION_MS = 760
+const _playCamEndPos = new THREE.Vector3(0, 0, 0)
+const _playCamEndQuat = new THREE.Quaternion()
 
 function smoothStep01(t: number): number {
   const x = THREE.MathUtils.clamp(t, 0, 1)
   return x * x * (3 - 2 * x)
 }
 
+function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number) {
+  const m = THREE.MathUtils.clamp(menuOpacity, 0, 1)
+  const g = THREE.MathUtils.clamp(gameOpacity, 0, 1)
+  mainMenuPlayUI.setOpacity(m)
+  mainMenuNavUI.setOpacity(m)
+  mainMenuDevblogUI.setOpacity(m)
+  mainMenuNameUI.setOpacity(m)
+  mainMenuSkinsUI.setOpacity(m)
+  mainMenuStoreUI.setOpacity(m)
+  leaderboardUI.setOpacity(g)
+  timerUI.setOpacity(g)
+  healthUI.setOpacity(g)
+  ammoUI.setOpacity(g)
+  weaponUI.setOpacity(g)
+  killFeed.setOpacity(g)
+  crosshair.setOpacity(g)
+}
+
 function playMenuToGameTransition(
   fromPos: THREE.Vector3,
   fromQuat: THREE.Quaternion,
   toPos: THREE.Vector3,
-  toQuat: THREE.Quaternion
+  toQuat: THREE.Quaternion,
+  fromCamPos: THREE.Vector3,
+  fromCamQuat: THREE.Quaternion
 ): Promise<void> {
   const transitionStartMs = performance.now()
   return new Promise((resolve) => {
@@ -205,9 +227,17 @@ function playMenuToGameTransition(
       const eased = smoothStep01(t)
       player.playerGroup.position.lerpVectors(fromPos, toPos, eased)
       player.playerGroup.quaternion.copy(fromQuat).slerp(toQuat, eased)
+      core.camera.position.lerpVectors(fromCamPos, _playCamEndPos, eased)
+      core.camera.quaternion.copy(fromCamQuat).slerp(_playCamEndQuat, eased)
+      applyPlayTransitionUiCrossfade(1 - eased, eased)
       if (t >= 1) {
         player.playerGroup.position.copy(toPos)
         player.playerGroup.quaternion.copy(toQuat)
+        core.camera.position.set(0, 0, 0)
+        core.camera.quaternion.identity()
+        core.camera.rotation.set(0, 0, 0)
+        core.camera.up.set(0, 1, 0)
+        applyPlayTransitionUiCrossfade(0, 1)
         resolve()
         return
       }
@@ -585,6 +615,13 @@ function applyMainMenuView() {
   mainMenuPlayUI.setVisible(true)
   mainMenuNavUI.setVisible(true)
   syncMainMenuPanelChrome()
+  mainMenuPlayUI.getPlayButton().style.pointerEvents = 'auto'
+  mainMenuPlayUI.setOpacity(1)
+  mainMenuNavUI.setOpacity(1)
+  mainMenuDevblogUI.setOpacity(1)
+  mainMenuNameUI.setOpacity(1)
+  mainMenuSkinsUI.setOpacity(1)
+  mainMenuStoreUI.setOpacity(1)
   leaderboardUI.setVisible(false)
   timerUI.setVisible(false)
 }
@@ -751,20 +788,30 @@ async function beginPlayFromMenu() {
   atMainMenu = false
   player.controls.enabled = false
   player.setPointerLockAllowed(false)
+  mainMenuPlayUI.getPlayButton().style.pointerEvents = 'none'
 
   const startPos = player.playerGroup.position.clone()
   const startQuat = player.playerGroup.quaternion.clone()
+  const startCamPos = core.camera.position.clone()
+  const startCamQuat = core.camera.quaternion.clone()
   const spawnPos = getRandomSpawnPos(sphereRadius)
   const spawnUp =
     spawnPos.lengthSq() < 1e-8 ? new THREE.Vector3(0, 1, 0) : spawnPos.clone().normalize().multiplyScalar(-1)
   const endQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), spawnUp)
-  await playMenuToGameTransition(startPos, startQuat, spawnPos, endQuat)
+
+  leaderboardUI.setVisible(true)
+  leaderboardUI.setOpacity(0)
+  timerUI.setVisible(true)
+  timerUI.setOpacity(0)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  crosshair.setOpacity(0)
+
+  await playMenuToGameTransition(startPos, startQuat, spawnPos, endQuat, startCamPos, startCamQuat)
   player.state.velocity.set(0, 0, 0)
 
-  core.camera.up.set(0, 1, 0)
-  core.camera.quaternion.identity()
-  core.camera.rotation.set(0, 0, 0)
-  core.camera.position.set(0, 0, 0)
   player.playerGroup.quaternion.copy(endQuat)
 
   player.state.isThirdPerson = false
@@ -774,11 +821,6 @@ async function beginPlayFromMenu() {
   player.setPointerLockAllowed(true)
   player.controls.enabled = true
 
-  crosshair.setVisible(true)
-  healthUI.setOpacity(1)
-  ammoUI.setOpacity(1)
-  weaponUI.setOpacity(1)
-  killFeed.setOpacity(1)
   staminaUI.setSuppressForMenu(false)
   mainMenuPlayUI.setVisible(false)
   mainMenuNavUI.setVisible(false)
@@ -786,6 +828,12 @@ async function beginPlayFromMenu() {
   mainMenuNameUI.setVisible(false)
   mainMenuSkinsUI.setVisible(false)
   mainMenuStoreUI.setVisible(false)
+  mainMenuPlayUI.setOpacity(1)
+  mainMenuNavUI.setOpacity(1)
+  mainMenuDevblogUI.setOpacity(1)
+  mainMenuNameUI.setOpacity(1)
+  mainMenuSkinsUI.setOpacity(1)
+  mainMenuStoreUI.setOpacity(1)
   mainMenuView = 'home'
   menuCharacterHolder.position.copy(MENU_CHAR_LOCAL_POS)
   menuCharacterHolder.visible = true
@@ -794,9 +842,15 @@ async function beginPlayFromMenu() {
   }
   playerModel.setOutlineVisible(true)
   playerModel.setCharacterCastShadow(true)
-  leaderboardUI.setVisible(true)
-  timerUI.setVisible(true)
+  leaderboardUI.setOpacity(1)
+  timerUI.setOpacity(1)
+  healthUI.setOpacity(1)
+  ammoUI.setOpacity(1)
+  weaponUI.setOpacity(1)
+  killFeed.setOpacity(1)
+  crosshair.setVisible(true)
   coinsHUD.setPlayMode(true)
+  coinsHUD.setOpacity(1)
   localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
   isPlayTransitioning = false
 }

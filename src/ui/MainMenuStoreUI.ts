@@ -741,6 +741,8 @@ export class MainMenuStoreUI {
     if (visible) {
       const opening = this.root.style.display === 'none'
       this.root.style.display = 'block'
+      this.root.style.opacity = '1'
+      this.buyWrap.style.opacity = '1'
       if (opening) {
         this.storePreviewSkin = null
         this.refresh()
@@ -749,6 +751,12 @@ export class MainMenuStoreUI {
       this.root.style.display = 'none'
       this.buyWrap.style.display = 'none'
     }
+  }
+
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.root.style.opacity = String(a)
+    this.buyWrap.style.opacity = String(a)
   }
 
   public getPointerTargets(): HTMLElement[] {

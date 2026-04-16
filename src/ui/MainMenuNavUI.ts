@@ -170,5 +170,11 @@ export class MainMenuNavUI {
 
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'flex' : 'none'
+    if (visible) this.wrap.style.opacity = '1'
+  }
+
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.wrap.style.opacity = String(a)
   }
 }

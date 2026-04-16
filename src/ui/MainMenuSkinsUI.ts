@@ -578,7 +578,15 @@ export class MainMenuSkinsUI {
 
   public setVisible(visible: boolean) {
     this.root.style.display = visible ? 'block' : 'none'
-    if (visible) this.refresh()
+    if (visible) {
+      this.root.style.opacity = '1'
+      this.refresh()
+    }
+  }
+
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.root.style.opacity = String(a)
   }
 
   public getPointerTargets(): HTMLElement[] {

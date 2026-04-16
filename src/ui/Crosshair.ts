@@ -195,7 +195,14 @@ export class Crosshair {
     this.updateColors()
   }
 
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.element.style.display = 'flex'
+    this.element.style.opacity = String(a)
+  }
+
   public setVisible(on: boolean) {
     this.element.style.display = on ? 'flex' : 'none'
+    this.element.style.opacity = on ? '1' : '0'
   }
 }

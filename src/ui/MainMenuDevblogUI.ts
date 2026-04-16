@@ -60,9 +60,15 @@ export class MainMenuDevblogUI {
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'block' : 'none'
     if (visible) {
+      this.wrap.style.opacity = '1'
       void this.video.play().catch(() => {})
     } else {
       this.video.pause()
     }
+  }
+
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.wrap.style.opacity = String(a)
   }
 }

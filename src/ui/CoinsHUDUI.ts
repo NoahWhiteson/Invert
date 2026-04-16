@@ -61,6 +61,11 @@ export class CoinsHUDUI {
     }
   }
 
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.root.style.opacity = String(a)
+  }
+
   private sync() {
     this.valueEl.textContent = String(getCoins())
   }

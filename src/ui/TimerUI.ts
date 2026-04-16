@@ -117,6 +117,11 @@ export class TimerUI {
     this.element.style.opacity = visible ? '1' : '0'
   }
 
+  public setOpacity(alpha: number) {
+    const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.element.style.opacity = String(a)
+  }
+
   public setStartTime(startTimeMs: number) {
     if (!Number.isFinite(startTimeMs) || startTimeMs <= 0) return
     const elapsed = Date.now() - startTimeMs
