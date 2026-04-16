@@ -79,6 +79,12 @@ const BOT_SPAWN_MIN_SEP = 24
 const BOT_SPAWN_PLAYER_MIN_SEP = 20
 const BOT_SPAWN_ATTEMPTS = 220
 
+const BOT_HAND_TPOSE_TRACE_INDEX = 0
+const BOT_HAND_TRACE_HEARTBEAT_MS = 2800
+const BOT_HAND_TPOSE_LATERAL_WARN = 0.34
+const BOT_HAND_TPOSE_DELTA_SPIKE = 0.1
+const BOT_HAND_LOW_WEIGHT_WARN = 0.068
+
 export class TargetPlayersSystem {
   private scene: THREE.Scene
   private sphereRadius: number
@@ -101,6 +107,19 @@ export class TargetPlayersSystem {
   private _aimWorldScratch = new THREE.Vector3()
   private _eyeScratch = new THREE.Vector3()
   private _dirScratch = new THREE.Vector3()
+  private handTraceRightHand: unknown = null
+  private handTraceHips: unknown = null
+  private handTraceRightArm: unknown = null
+  private handTracePrevLateral = 0
+  private handTraceLastHeartbeatMs = 0
+  private handTraceLastAnomalyMs = 0
+  private handTraceWarnedMissingBones = false
+  private _handPoseW = new THREE.Vector3()
+  private _handPoseH = new THREE.Vector3()
+  private _handPoseLw = new THREE.Vector3()
+  private _handPoseLh = new THREE.Vector3()
+  private _handPoseQ = new THREE.Quaternion()
+  private _handPoseE = new THREE.Euler()
   public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
@@ -518,6 +537,7 @@ export class TargetPlayersSystem {
   }
 
   public update(dt: number, brain?: BotBrainContext | null) {
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     for (let ti = 0; ti < this.targets.length; ti++) {
       const t = this.targets[ti]
       if (!t) continue
@@ -537,6 +557,10 @@ export class TargetPlayersSystem {
         t.anims.ensureAnyActionOrIdle()
       } else if (t.anims && t.health <= 0) {
         t.anims.update(0)
+      }
+
+      if (ti === BOT_HAND_TPOSE_TRACE_INDEX && t.anims && t.health > 0) {
+        this.sampleHandPoseTrace(t, nowMs)
       }
 
       t.model.visible = true
@@ -610,6 +634,126 @@ export class TargetPlayersSystem {
     }
   }
 
+  private setupHandPoseTraceRig(model: THREE.Group) {
+    this.handTracePrevLateral = 0
+    let rh: THREE.Object3D | null = null
+    let hips: THREE.Object3D | null = null
+    let rarm: THREE.Object3D | null = null
+    model.traverse((c) => {
+      const o = c as THREE.Object3D
+      const n = (o.name ?? '').toLowerCase()
+      if (!n) return
+      if (!rh && n.includes('righthand') && !n.includes('index') && !n.includes('thumb')) {
+        rh = o
+      }
+      if (!hips && n.includes('hips') && !n.includes('thumb')) {
+        hips = o
+      }
+      if (!rarm && (n.includes('rightarm') || n.includes('rightupperarm')) && !n.includes('fore') && !n.includes('roll')) {
+        rarm = o
+      }
+    })
+    this.handTraceRightHand = rh
+    this.handTraceHips = hips
+    this.handTraceRightArm = rarm
+    const rhN = rh ? (rh as THREE.Object3D).name : null
+    const hipsN = hips ? (hips as THREE.Object3D).name : null
+    const rarmN = rarm ? (rarm as THREE.Object3D).name : null
+    console.log('[BotHandTposeTrace] setup bones', {
+      modelRoot: model.name || '(unnamed)',
+      rightHand: rhN,
+      hips: hipsN,
+      rightArm: rarmN,
+    })
+  }
+
+  private sampleHandPoseTrace(t: TargetState, nowMs: number) {
+    const anims = t.anims
+    if (!anims) return
+    const hand = this.handTraceRightHand as THREE.Object3D | null
+    const hip = this.handTraceHips as THREE.Object3D | null
+    if (!hand || !hip) {
+      if (!this.handTraceWarnedMissingBones) {
+        this.handTraceWarnedMissingBones = true
+        console.log('[BotHandTposeTrace] sample skipped: missing hand/hip bones (see setup log)')
+      }
+      return
+    }
+
+    t.container.updateMatrixWorld(true)
+
+    this._handPoseW.setFromMatrixPosition(hand.matrixWorld)
+    this._handPoseH.setFromMatrixPosition(hip.matrixWorld)
+
+    this._handPoseLw.copy(this._handPoseW)
+    this._handPoseLh.copy(this._handPoseH)
+    t.container.worldToLocal(this._handPoseLw)
+    t.container.worldToLocal(this._handPoseLh)
+
+    const dx = this._handPoseLw.x - this._handPoseLh.x
+    const dy = this._handPoseLw.y - this._handPoseLh.y
+    const dz = this._handPoseLw.z - this._handPoseLh.z
+    const lateral = Math.sqrt(dx * dx + dz * dz)
+    const lateralDelta = lateral - this.handTracePrevLateral
+    this.handTracePrevLateral = lateral
+
+    const sumW = anims.getTotalEffectiveWeight()
+    const reasons: string[] = []
+    if (sumW < BOT_HAND_LOW_WEIGHT_WARN) reasons.push('low_mixer_total_weight')
+    if (lateral > BOT_HAND_TPOSE_LATERAL_WARN) reasons.push('wide_hand_lateral_vs_hips_bind_pose_like')
+    if (lateralDelta > BOT_HAND_TPOSE_DELTA_SPIKE) reasons.push('lateral_spike_same_frame')
+
+    const heartbeat = nowMs - this.handTraceLastHeartbeatMs >= BOT_HAND_TRACE_HEARTBEAT_MS
+    const anomaly = reasons.length > 0
+    const anomalyCooldown = nowMs - this.handTraceLastAnomalyMs > 320
+
+    if (heartbeat) {
+      this.handTraceLastHeartbeatMs = nowMs
+      console.log('[BotHandTposeTrace] heartbeat', {
+        lateral: Number(lateral.toFixed(4)),
+        dy: Number(dy.toFixed(4)),
+        lateralDelta: Number(lateralDelta.toFixed(4)),
+        sumEffectiveWeight: Number(sumW.toFixed(4)),
+        animState: anims.getCurrentState(),
+        locoIntent: t.locoIntent,
+        chasing: t.chasing,
+        onGround: t.onGround,
+        handWorld: [Number(this._handPoseW.x.toFixed(3)), Number(this._handPoseW.y.toFixed(3)), Number(this._handPoseW.z.toFixed(3))],
+        hipWorld: [Number(this._handPoseH.x.toFixed(3)), Number(this._handPoseH.y.toFixed(3)), Number(this._handPoseH.z.toFixed(3))],
+      })
+    }
+
+    if (anomaly && anomalyCooldown) {
+      this.handTraceLastAnomalyMs = nowMs
+      const arm = this.handTraceRightArm as THREE.Object3D | null
+      let armEuler: { x: number; y: number; z: number } | null = null
+      if (arm) {
+        arm.getWorldQuaternion(this._handPoseQ)
+        this._handPoseE.setFromQuaternion(this._handPoseQ, 'YXZ')
+        armEuler = {
+          x: Number(((this._handPoseE.x * 180) / Math.PI).toFixed(1)),
+          y: Number(((this._handPoseE.y * 180) / Math.PI).toFixed(1)),
+          z: Number(((this._handPoseE.z * 180) / Math.PI).toFixed(1)),
+        }
+      }
+      console.log('[BotHandTposeTrace] ANOMALY', {
+        reasons,
+        lateral: Number(lateral.toFixed(4)),
+        dy: Number(dy.toFixed(4)),
+        lateralDelta: Number(lateralDelta.toFixed(4)),
+        sumEffectiveWeight: Number(sumW.toFixed(4)),
+        containerLocalHandMinusHip: { dx: Number(dx.toFixed(4)), dy: Number(dy.toFixed(4)), dz: Number(dz.toFixed(4)) },
+        rightArmBone: arm?.name ?? null,
+        rightArmWorldEulerDeg: armEuler,
+        anim: anims.exportHandPoseDebugContext(),
+        locoIntent: t.locoIntent,
+        chasing: t.chasing,
+        onGround: t.onGround,
+        lastBotFireAgeMs: nowMs - t.lastBotFireMs,
+      })
+    }
+  }
+
   private async spawnTarget(index: number) {
     if (!this.template) return
     const container = new THREE.Group()
@@ -628,6 +772,10 @@ export class TargetPlayersSystem {
     model.visible = true
     model.position.set(0, 0, 0)
     model.scale.setScalar(1)
+
+    if (index === BOT_HAND_TPOSE_TRACE_INDEX) {
+      this.setupHandPoseTraceRig(model)
+    }
 
     const addBox = (w: number, h: number, d: number, x: number, y: number, z: number): THREE.Mesh => {
       const hb = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ visible: false }))
@@ -780,10 +928,16 @@ export class TargetPlayersSystem {
     const t = this.targets[index]
     if (!t) return
     t.model.visible = true
+    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
+      t.anims.ingestExternalTrace('respawn:before_skeleton_pose_pass1', { index })
+    }
     if (t.model.traverse) {
       t.model.traverse(c => {
         if (c instanceof THREE.SkinnedMesh) c.skeleton.pose()
       })
+    }
+    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
+      t.anims.ingestExternalTrace('respawn:after_skeleton_pose_pass1', { index })
     }
     setRagdollOutlinesVisible(t.model, true)
 
@@ -805,15 +959,28 @@ export class TargetPlayersSystem {
     t.model.quaternion.identity()
     t.model.scale.setScalar(1)
 
+    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
+      t.anims.ingestExternalTrace('respawn:before_skeleton_pose_pass2', { index })
+    }
     t.model.traverse(c => {
       if ((c as any).isSkinnedMesh) {
         (c as THREE.SkinnedMesh).skeleton.pose()
       }
     })
+    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
+      t.anims.ingestExternalTrace('respawn:after_skeleton_pose_pass2', { index })
+    }
 
     if (t.anims) {
+      if (index === BOT_HAND_TPOSE_TRACE_INDEX) {
+        t.anims.ingestExternalTrace('respawn:before_hardResetToIdle', { index })
+        this.handTracePrevLateral = 0
+      }
       t.anims.hardResetToIdle()
       console.log(`[AnimDebug:bot-${String(index + 1).padStart(2, '0')}] respawn hardResetToIdle`)
+      if (index === BOT_HAND_TPOSE_TRACE_INDEX) {
+        t.anims.ingestExternalTrace('respawn:after_hardResetToIdle', { index })
+      }
     }
     t.facingYawTarget = t.model.rotation.y
 

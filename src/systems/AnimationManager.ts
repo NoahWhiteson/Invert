@@ -59,6 +59,8 @@ function flattenHipsQuaternionToFirstFrame(clip: THREE.AnimationClip) {
   }
 }
 
+export type AnimOpEntry = { t: number; op: string; detail?: Record<string, unknown> }
+
 export class AnimationManager {
   private static clipCache: Map<AnimationState, THREE.AnimationClip> = new Map()
   private static riflePoseTracks: Map<string, THREE.KeyframeTrack> = new Map()
@@ -71,6 +73,8 @@ export class AnimationManager {
   private debugLabel = 'anim'
   private lastZeroWeightLogMs = 0
   private missingAnimLogAt = new Map<string, number>()
+  private animOpRing: AnimOpEntry[] = []
+  private readonly ANIM_OP_RING_CAP = 56
 
   private readonly JUMP_HOLD_START = 20 / 30
   private readonly JUMP_HOLD_END = 22 / 30
@@ -104,6 +108,43 @@ export class AnimationManager {
 
   public setDebugLabel(label: string) {
     this.debugLabel = label
+  }
+
+  private trace(op: string, detail?: Record<string, unknown>) {
+    if (this.debugLabel !== 'bot-01') return
+    this.animOpRing.push({ t: this.nowMs(), op, detail })
+    if (this.animOpRing.length > this.ANIM_OP_RING_CAP) {
+      this.animOpRing.splice(0, this.animOpRing.length - this.ANIM_OP_RING_CAP)
+    }
+  }
+
+  public ingestExternalTrace(op: string, detail?: Record<string, unknown>) {
+    this.trace(op, detail)
+  }
+
+  public getAnimOpRing(): ReadonlyArray<AnimOpEntry> {
+    return this.animOpRing
+  }
+
+  public getTotalEffectiveWeight(): number {
+    let s = 0
+    this.actions.forEach((a) => {
+      s += a.getEffectiveWeight()
+    })
+    return s
+  }
+
+  public exportHandPoseDebugContext() {
+    return {
+      label: this.debugLabel,
+      currentState: this.currentState,
+      pendingLocomotion: this.pendingLocomotion,
+      ragdollFrozen: this.ragdollFrozen,
+      jumpPhase: this.jumpPhase,
+      sumEffectiveWeight: Number(this.getTotalEffectiveWeight().toFixed(5)),
+      actions: this.actionDebugSnapshot(),
+      recentOps: this.debugLabel === 'bot-01' ? this.animOpRing.slice(-24) : [],
+    }
   }
 
   private nowMs() {
@@ -242,13 +283,16 @@ export class AnimationManager {
     if (idle) {
       idle.play()
     }
+    this.trace('loadAll:complete', { actionCount: this.actions.size })
   }
 
   public setState(state: AnimationState, duration: number = 0.2) {
     if (this.currentState === state) return
 
+    const from = this.currentState
     if (this.currentState === 'firing' && state !== 'firing') {
       this.pendingLocomotion = state
+      this.trace('setState:defer_while_firing', { from, requested: state, pendingLocomotion: this.pendingLocomotion })
       return
     }
 
@@ -264,6 +308,7 @@ export class AnimationManager {
     const nextAction = this.actions.get(state)
 
     if (!nextAction) {
+      this.trace('setState:missing_action', { from, requested: state })
       this.logMissingAnimation('setState', state)
       if (state !== 'idle') {
         this.setState('idle', duration)
@@ -271,6 +316,12 @@ export class AnimationManager {
       return
     }
 
+    this.trace('setState:apply', {
+      from,
+      to: state,
+      duration,
+      jumpPhase: state === 'jump' ? this.jumpPhase : undefined,
+    })
     this.actions.forEach((action) => {
       if (action !== nextAction && action.isRunning()) {
         action.fadeOut(duration)
@@ -292,6 +343,11 @@ export class AnimationManager {
   private resumeLocomotionAfterFire() {
     const firingAction = this.actions.get('firing')
     const state = this.pendingLocomotion
+    this.trace('resumeLocomotionAfterFire:enter', {
+      pendingLocomotion: state,
+      hadFiringAction: !!firingAction,
+      mixerStateBefore: this.currentState,
+    })
     if (state === 'jump') {
       const jumpAction = this.actions.get('jump')
       if (jumpAction) {
@@ -300,6 +356,7 @@ export class AnimationManager {
         jumpAction.paused = false
         this.currentState = 'jump'
         if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
+        this.trace('resumeLocomotionAfterFire:branch_jump', { currentStateAfter: this.currentState })
         return
       }
       this.logMissingAnimation('resumeAfterFire', 'jump')
@@ -315,6 +372,7 @@ export class AnimationManager {
       nextAction.setEffectiveTimeScale(1).fadeIn(this.FIRE_FADE_OUT).play()
       if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
       this.currentState = state
+      this.trace('resumeLocomotionAfterFire:branch_locomotion', { resumedTo: state })
       return
     }
 
@@ -326,6 +384,7 @@ export class AnimationManager {
       if (firingAction) firingAction.fadeOut(this.FIRE_FADE_OUT)
       this.currentState = 'idle'
       this.pendingLocomotion = 'idle'
+      this.trace('resumeLocomotionAfterFire:branch_idle_fallback', {})
     } else {
       this.logMissingAnimation('resumeAfterFire', 'idle')
     }
@@ -333,6 +392,13 @@ export class AnimationManager {
 
   public triggerFire(fireRateMs: number = 220) {
     const action = this.actions.get('firing')
+    this.trace('triggerFire:enter', {
+      fireRateMs,
+      currentState: this.currentState,
+      pendingLocomotion: this.pendingLocomotion,
+      firingRunning: action ? action.isRunning() : false,
+      firingTime: action ? Number(action.time.toFixed(4)) : null,
+    })
     if (!action) {
       this.logMissingAnimation('triggerFire', 'firing')
       return
@@ -346,6 +412,10 @@ export class AnimationManager {
       action.time < dur * 0.92
 
     if (canContinueBurst) {
+      this.trace('triggerFire:burst_continue', {
+        firingTime: Number(action.time.toFixed(4)),
+        dur: Number(dur.toFixed(4)),
+      })
       return
     }
 
@@ -355,8 +425,14 @@ export class AnimationManager {
       this.pendingLocomotion = this.currentState
     }
 
+    this.trace('triggerFire:start_new_shot', {
+      pendingLocomotion: this.pendingLocomotion,
+      priorNonFiringState: this.currentState,
+    })
+
     const onDone = (e: { action: THREE.AnimationAction }) => {
       if (e.action !== action) return
+      this.trace('mixer:firing_finished_event', { actionClip: action.getClip().name })
       this.detachFiringFinishedListener()
       this.resumeLocomotionAfterFire()
     }
@@ -377,10 +453,12 @@ export class AnimationManager {
     }
 
     this.currentState = 'firing'
+    this.trace('triggerFire:now_firing', {})
   }
 
   public setJumpLandingTrigger() {
     if (this.currentState === 'jump' && this.jumpPhase === 'midair') {
+      this.trace('setJumpLandingTrigger:midair_to_landing', {})
       this.jumpPhase = 'landing'
       const jumpAction = this.actions.get('jump')
       if (jumpAction) {
@@ -393,6 +471,7 @@ export class AnimationManager {
   }
 
   public setRagdollFrozen(frozen: boolean) {
+    this.trace('setRagdollFrozen', { frozen, priorState: this.currentState })
     if (frozen) {
       this.detachFiringFinishedListener()
       this.actions.forEach((a) => {
@@ -462,6 +541,13 @@ export class AnimationManager {
     const finishedByTime = firing.time >= dur * 0.998
     if (!finishedByMixer && !finishedByTime) return
 
+    this.trace('repairFiringStale:recover', {
+      finishedByMixer,
+      finishedByTime,
+      firingTime: Number(firing.time.toFixed(4)),
+      dur: Number(dur.toFixed(4)),
+      pendingLocomotion: this.pendingLocomotion,
+    })
     this.detachFiringFinishedListener()
     firing.stopFading()
     firing.stop()
@@ -477,6 +563,11 @@ export class AnimationManager {
       sumW += a.getEffectiveWeight()
     })
     if (sumW < 0.05) {
+      this.trace('ensureAnyActionOrIdle:low_weight_recover', {
+        sumWeight: Number(sumW.toFixed(5)),
+        currentState: this.currentState,
+        pendingLocomotion: this.pendingLocomotion,
+      })
       const now = this.nowMs()
       if (now - this.lastZeroWeightLogMs > 450) {
         this.lastZeroWeightLogMs = now
@@ -499,6 +590,7 @@ export class AnimationManager {
 
   /** After ragdoll / bad mixer state: single clean idle baseline. */
   public hardResetToIdle() {
+    this.trace('hardResetToIdle:enter', { priorState: this.currentState, pendingLocomotion: this.pendingLocomotion })
     this.detachFiringFinishedListener()
     this.ragdollFrozen = false
     this.mixer.timeScale = 1
@@ -511,6 +603,7 @@ export class AnimationManager {
       this.logMissingAnimation('hardResetToIdle', 'idle')
     }
     this.currentState = 'idle'
+    this.trace('hardResetToIdle:done', {})
   }
 
   public getCurrentState(): AnimationState {
