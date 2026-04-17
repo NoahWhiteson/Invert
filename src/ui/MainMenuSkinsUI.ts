@@ -1,8 +1,4 @@
-const THICK_OUTLINE =
-  '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000'
-const LABEL_SHADOW =
-  '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
-
+import { ringTextShadow } from './textOutline'
 import { patchEconomyEquipment } from '../net/invertEconomySync'
 import {
   readOwnedAkGunSkins,
@@ -13,6 +9,9 @@ import {
   type AkGunSkinId,
   type EquippedAkSkin,
 } from '../store/skinEconomy'
+
+const LABEL_SHADOW =
+  '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
 
 export const EQUIPPED_SKIN_KEY = 'invert_equipped_skin'
 
@@ -140,9 +139,7 @@ export class MainMenuSkinsUI {
     this.titleEl.style.fontFamily = "'m6x11', monospace"
     this.titleEl.style.fontSize = '64px'
     this.titleEl.style.color = '#fff'
-    this.titleEl.style.webkitTextFillColor = '#fff'
-    this.titleEl.style.textShadow = THICK_OUTLINE
-    this.titleEl.style.webkitTextStroke = '4px #000'
+    this.titleEl.style.textShadow = ringTextShadow(4)
     this.titleEl.style.lineHeight = '1'
     this.titleEl.style.pointerEvents = 'none'
 

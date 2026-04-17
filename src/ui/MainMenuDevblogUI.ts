@@ -1,5 +1,4 @@
-const THICK_OUTLINE =
-  '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000'
+import { ringTextShadow } from './textOutline'
 
 const trailerSrc = `${import.meta.env.BASE_URL ?? '/'}trailer.mp4`.replace(/\/{2,}/g, '/')
 
@@ -23,9 +22,7 @@ export class MainMenuDevblogUI {
     title.style.fontFamily = "'m6x11', monospace"
     title.style.fontSize = '28px'
     title.style.color = '#fff'
-    title.style.webkitTextFillColor = '#fff'
-    title.style.textShadow = THICK_OUTLINE
-    title.style.webkitTextStroke = '4px #000'
+    title.style.textShadow = ringTextShadow(4)
     title.style.marginBottom = '12px'
     title.style.textAlign = 'right'
 

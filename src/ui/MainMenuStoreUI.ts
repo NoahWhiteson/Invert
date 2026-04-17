@@ -1,3 +1,4 @@
+import { ringTextShadow } from './textOutline'
 import {
   purchaseAkGunSkinViaApi,
   purchaseLootCrateViaApi,
@@ -14,8 +15,6 @@ import {
   SKIN_CATALOG,
 } from '../store/skinEconomy'
 
-const THICK_OUTLINE =
-  '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000'
 const LABEL_SHADOW =
   '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
 
@@ -145,9 +144,7 @@ export class MainMenuStoreUI {
     this.titleEl.style.fontFamily = "'m6x11', monospace"
     this.titleEl.style.fontSize = '64px'
     this.titleEl.style.color = '#fff'
-    this.titleEl.style.webkitTextFillColor = '#fff'
-    this.titleEl.style.textShadow = THICK_OUTLINE
-    this.titleEl.style.webkitTextStroke = '4px #000'
+    this.titleEl.style.textShadow = ringTextShadow(4)
     this.titleEl.style.lineHeight = '1'
     this.titleEl.style.pointerEvents = 'none'
 
@@ -229,9 +226,7 @@ export class MainMenuStoreUI {
     this.buyBtn.style.fontFamily = "'m6x11', monospace"
     this.buyBtn.style.fontSize = '26px'
     this.buyBtn.style.color = '#fff'
-    this.buyBtn.style.webkitTextFillColor = '#fff'
-    this.buyBtn.style.textShadow = THICK_OUTLINE
-    this.buyBtn.style.webkitTextStroke = '2px #000'
+    this.buyBtn.style.textShadow = ringTextShadow(2)
     this.buyBtn.style.pointerEvents = 'auto'
 
     this.buyCoin = document.createElement('img')
@@ -255,7 +250,6 @@ export class MainMenuStoreUI {
       const price = AK_GUN_SKIN_PRICE[sid]
       if (getCoins() < price) return
       this.buyLabel.style.color = '#ffff00'
-      this.buyLabel.style.webkitTextFillColor = '#ffff00'
       this.buyCoin.style.filter = ICON_HOVER_FILTER
     })
     this.buyBtn.addEventListener('mouseleave', () => {
@@ -299,9 +293,8 @@ export class MainMenuStoreUI {
     this.buyBtn.disabled = false
     this.buyBtn.style.opacity = canBuy ? '1' : '0.5'
     this.buyLabel.textContent = `Buy ${name} · ${price}`
-    const buyLabColor = canBuy ? '#fff' : MUTED
-    this.buyLabel.style.color = buyLabColor
-    this.buyLabel.style.webkitTextFillColor = buyLabColor
+    this.buyLabel.style.color = canBuy ? '#fff' : MUTED
+    this.buyLabel.style.textShadow = ringTextShadow(2)
     this.buyCoin.style.filter = ICON_BASE_FILTER
   }
 
@@ -554,10 +547,6 @@ export class MainMenuStoreUI {
   95.83333333333334% { color: hsl(345, 88%, 70%); }
   100% { color: hsl(360, 88%, 70%); }
 }`
-    st.textContent = st.textContent.replace(
-      /color:\s*(hsl\([^)]+\));/g,
-      'color: $1; -webkit-text-fill-color: $1;'
-    )
     document.head.appendChild(st)
   }
 
@@ -586,8 +575,7 @@ export class MainMenuStoreUI {
     lab.style.lineHeight = '1'
     lab.style.whiteSpace = 'nowrap'
     lab.style.flexShrink = '0'
-    lab.style.webkitTextStroke = '4px #000'
-    lab.style.webkitTextFillColor = 'currentColor'
+    lab.style.textShadow = ringTextShadow(4)
 
     if (text === 'Mythic') {
       lab.style.color = 'hsl(0, 88%, 70%)'

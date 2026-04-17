@@ -1,3 +1,5 @@
+import { ringTextShadow } from './textOutline'
+
 export class HealthUI {
   private container: HTMLDivElement
   private digitsRow: HTMLDivElement
@@ -19,8 +21,6 @@ export class HealthUI {
   private static readonly EASE = 'cubic-bezier(0.1, 0.88, 0.16, 1)'
   private static readonly COLAPSE_MS = 320
   private static readonly EXPAND_MS = 320
-  private static readonly DIGIT_TEXT_OUTLINE =
-    '-2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000'
   private lastDmgTime = 0
 
   constructor() {
@@ -53,14 +53,12 @@ export class HealthUI {
     this.digitsRow.style.alignItems = 'center'
     this.digitsRow.style.height = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.color = 'white'
-    this.digitsRow.style.webkitTextFillColor = 'white'
     this.digitsRow.style.fontFamily = "'m6x11', monospace"
     this.digitsRow.style.fontSize = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.lineHeight = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.fontStyle = 'normal'
     this.digitsRow.style.transform = 'skewX(-10deg) translateY(10px)'
-    this.digitsRow.style.webkitTextStroke = '2px #000'
-    this.digitsRow.style.textShadow = HealthUI.DIGIT_TEXT_OUTLINE
+    this.digitsRow.style.textShadow = ringTextShadow(2)
     this.digitsRow.style.fontVariantNumeric = 'tabular-nums'
     this.container.appendChild(this.digitsRow)
 
@@ -112,9 +110,7 @@ export class HealthUI {
         row.style.alignItems = 'center'
         row.style.justifyContent = 'center'
         row.style.lineHeight = `${HealthUI.DIGIT_H}px`
-        row.style.webkitTextStroke = '2px #000'
-        row.style.webkitTextFillColor = 'currentColor'
-        row.style.textShadow = HealthUI.DIGIT_TEXT_OUTLINE
+        row.style.textShadow = ringTextShadow(2)
         strip.appendChild(row)
       }
       clip.appendChild(strip)
@@ -269,9 +265,7 @@ export class HealthUI {
       this.heartIcon.style.animation = `heartBeat ${beatDuration}s cubic-bezier(0.45, 0.02, 0.25, 1) infinite`
     }
 
-    const digitColor = healthPercent < 25 ? '#ff4444' : 'white'
-    this.digitsRow.style.color = digitColor
-    this.digitsRow.style.webkitTextFillColor = digitColor
+    this.digitsRow.style.color = healthPercent < 25 ? '#ff4444' : 'white'
 
     if (healthPercent > 25) {
       this.heartIcon.style.filter = 'none'

@@ -1,3 +1,5 @@
+import { ringTextShadow } from './textOutline'
+
 const SKULL_SRC = new URL('../assets/icons/skull.png', import.meta.url).href
 
 const DISPLAY_MS = 3000
@@ -69,8 +71,7 @@ export class KillFeedUI {
     text.style.fontSize = '18px'
     text.style.lineHeight = '24px'
     text.style.color = '#ff4444'
-    text.style.webkitTextFillColor = '#ff4444'
-    text.style.webkitTextStroke = '2.5px #000'
+    text.style.textShadow = ringTextShadow(3)
     text.style.letterSpacing = '1px'
     text.style.whiteSpace = 'nowrap'
 

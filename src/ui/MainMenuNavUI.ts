@@ -1,12 +1,11 @@
-const THICK_OUTLINE =
-  '-4px -4px 0 #000, 4px -4px 0 #000, -4px 4px 0 #000, 4px 4px 0 #000, -4px 0 0 #000, 4px 0 0 #000, 0 -4px 0 #000, 0 4px 0 #000'
+import { ringTextShadow } from './textOutline'
 
 /** Fixed slot + 4-way cardinal drop-shadow so mixed PNG canvas sizes read the same and pop on bright BG. */
 const ICON_SLOT_PX = 52
 const SKINS_ICON_SLOT_PX = 68
 
 const NAV_LABEL_FONT_PX = 40
-const NAV_LABEL_STROKE_PX = 5
+const NAV_LABEL_OUTLINE_R = 5
 const ICON_BASE_FILTER =
   'drop-shadow(2px 0 0 #000) drop-shadow(-2px 0 0 #000) drop-shadow(0 2px 0 #000) drop-shadow(0 -2px 0 #000) ' +
   'contrast(1.25) brightness(1.08)'
@@ -134,21 +133,17 @@ export class MainMenuNavUI {
       span.style.fontSize = `${NAV_LABEL_FONT_PX}px`
       span.style.letterSpacing = 'normal'
       span.style.color = '#fff'
-      span.style.webkitTextFillColor = '#fff'
-      span.style.textShadow = THICK_OUTLINE
-      span.style.webkitTextStroke = `${NAV_LABEL_STROKE_PX}px #000`
+      span.style.textShadow = ringTextShadow(NAV_LABEL_OUTLINE_R)
       span.style.transition = 'color 0.1s ease-out'
 
       btn.appendChild(iconSlot)
       btn.appendChild(span)
       btn.addEventListener('mouseenter', () => {
         span.style.color = '#ffff00'
-        span.style.webkitTextFillColor = '#ffff00'
         img.style.filter = ICON_HOVER_FILTER
       })
       btn.addEventListener('mouseleave', () => {
         span.style.color = '#fff'
-        span.style.webkitTextFillColor = '#fff'
         img.style.filter = ICON_BASE_FILTER
       })
       btn.addEventListener('click', (e) => {

@@ -1,14 +1,6 @@
 import './style.css'
 import m6x11FontUrl from './assets/m6x11.ttf?url'
 import * as THREE from 'three'
-
-const _fontPreload = document.createElement('link')
-_fontPreload.rel = 'preload'
-_fontPreload.as = 'font'
-_fontPreload.type = 'font/ttf'
-_fontPreload.href = m6x11FontUrl
-_fontPreload.crossOrigin = 'anonymous'
-document.head.appendChild(_fontPreload)
 import { SceneSetup } from './core/Scene'
 import { InputManager } from './core/Input'
 import { LightingSystem } from './systems/Lighting'
@@ -62,10 +54,20 @@ import {
 } from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
 
-// Load font without blocking the rest of bootstrap (canvas may use fallback for a frame)
-void document.fonts.load("12px 'm6x11'").catch((e) => {
-  console.warn('Font force-load failed', e)
-})
+void (async () => {
+  try {
+    const face = new FontFace('m6x11', `url(${m6x11FontUrl})`, { weight: '400', style: 'normal' })
+    await face.load()
+    document.fonts.add(face)
+  } catch (e) {
+    console.warn('[font] m6x11 FontFace failed', e)
+  }
+  try {
+    await document.fonts.load("16px 'm6x11'")
+  } catch {
+    /* ignore */
+  }
+})()
 
 function scheduleProfanityListLoad() {
   const run = () => void loadProfanityList()

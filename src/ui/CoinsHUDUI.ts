@@ -1,9 +1,7 @@
 import { COINS_CHANGED_EVENT, getCoins } from '../store/skinEconomy'
+import { ringTextShadow } from './textOutline'
 
 const COIN_ICON = new URL('../assets/icons/coin.png', import.meta.url).href
-
-const DIGIT_OUTLINE =
-  '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
 
 export class CoinsHUDUI {
   private root: HTMLDivElement
@@ -37,10 +35,8 @@ export class CoinsHUDUI {
     this.valueEl.style.fontFamily = "'m6x11', monospace"
     this.valueEl.style.fontSize = '28px'
     this.valueEl.style.color = '#fff'
-    this.valueEl.style.webkitTextFillColor = '#fff'
     this.valueEl.style.lineHeight = '1'
-    this.valueEl.style.webkitTextStroke = '3px #000'
-    this.valueEl.style.textShadow = DIGIT_OUTLINE
+    this.valueEl.style.textShadow = ringTextShadow(3)
 
     this.root.appendChild(icon)
     this.root.appendChild(this.valueEl)

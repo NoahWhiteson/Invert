@@ -1,3 +1,5 @@
+import { ringTextShadow } from './textOutline'
+
 export class DeathUI {
   private root: HTMLDivElement
   private grayOverlay: HTMLDivElement
@@ -90,9 +92,7 @@ export class DeathUI {
     this.title = document.createElement('div')
     this.title.style.fontSize = '84px'
     this.title.style.color = '#ff0000'
-    this.title.style.webkitTextFillColor = '#ff0000'
     this.title.style.textShadow = thickOutline
-    this.title.style.webkitTextStroke = '2px #000'
     this.title.style.letterSpacing = '2px'
     this.title.style.marginBottom = '5px'
     this.title.textContent = 'YOU DIED'
@@ -101,9 +101,7 @@ export class DeathUI {
     this.details = document.createElement('div')
     this.details.style.fontSize = '32px'
     this.details.style.color = '#fff'
-    this.details.style.webkitTextFillColor = '#fff'
     this.details.style.textShadow = thickOutline
-    this.details.style.webkitTextStroke = '1.5px #000'
     this.card.appendChild(this.details)
 
     this.respawnBtn = document.createElement('button')
@@ -114,7 +112,6 @@ export class DeathUI {
     this.respawnBtn.style.padding = '5px 20px'
     this.respawnBtn.style.background = 'transparent'
     this.respawnBtn.style.color = '#fff'
-    this.respawnBtn.style.webkitTextFillColor = '#fff'
     this.respawnBtn.style.border = 'none'
     this.respawnBtn.style.textShadow = 'none'
     this.respawnBtn.style.cursor = 'none'
@@ -148,13 +145,11 @@ export class DeathUI {
       if (this.respawnReady) {
         this.respawnBtn.style.transform = 'scale(1.1)'
         this.respawnBtn.style.color = '#ffff00'
-        this.respawnBtn.style.webkitTextFillColor = '#ffff00'
       }
     })
     this.respawnBtn.addEventListener('mouseleave', () => {
       this.respawnBtn.style.transform = 'scale(1.0)'
       this.respawnBtn.style.color = '#fff'
-      this.respawnBtn.style.webkitTextFillColor = '#fff'
     })
 
     const tryRespawn = (e: Event) => {
@@ -220,9 +215,7 @@ export class DeathUI {
         row.style.height = '1em'
         row.style.lineHeight = '1em'
         row.style.textAlign = 'center'
-        row.style.textShadow = 'none'
-        row.style.webkitTextStroke = '4px #000'
-        row.style.webkitTextFillColor = 'currentColor'
+        row.style.textShadow = ringTextShadow(4)
         row.style.textDecoration = 'none'
         strip.appendChild(row)
       }

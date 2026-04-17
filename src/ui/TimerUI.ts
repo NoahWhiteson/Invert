@@ -1,3 +1,5 @@
+import { ringTextShadow } from './textOutline'
+
 const WAITING_FOR_PLAYERS_TEXT = 'Waiting for 1 More Player'
 
 export class TimerUI {
@@ -19,11 +21,10 @@ export class TimerUI {
     this.element.style.left = '50%'
     this.element.style.transform = 'translateX(-50%)'
     this.element.style.color = 'white'
-    this.element.style.webkitTextFillColor = 'white'
     this.element.style.fontFamily = "'m6x11', monospace"
     this.element.style.fontSize = '32px'
     this.element.style.letterSpacing = '4px'
-    this.element.style.webkitTextStroke = '4px black'
+    this.element.style.textShadow = ringTextShadow(4)
     this.element.style.pointerEvents = 'none'
     this.element.style.zIndex = '100'
     document.body.appendChild(this.element)
@@ -37,13 +38,11 @@ export class TimerUI {
     this.element.style.fontSize = '24px'
     this.element.style.letterSpacing = '2px'
     this.element.style.color = 'white'
-    this.element.style.webkitTextFillColor = 'white'
   }
 
   private applyCountdownStyle() {
     this.element.style.fontSize = '32px'
     this.element.style.letterSpacing = '4px'
-    this.element.style.webkitTextFillColor = 'white'
   }
 
   /** Call each frame before update(). Countdown runs only when true (2+ human players). */
@@ -95,20 +94,17 @@ export class TimerUI {
       const seconds = Math.floor(remaining / 1000)
       const ms = Math.floor((remaining % 1000) / 10)
       timeString = `${seconds}.${ms.toString().padStart(2, '0')}`
-      this.element.style.color = '#ffaa44'
-      this.element.style.webkitTextFillColor = '#ffaa44'
+      this.element.style.color = '#ffaa44' // Optional: orange warning color for final minute
     } else if (remaining <= 0) {
       // End: Show 0.00
       timeString = '0.00'
       this.element.style.color = '#ff4444'
-      this.element.style.webkitTextFillColor = '#ff4444'
     } else {
       // Normal: Show MM:SS
       const minutes = Math.floor(remaining / 60000)
       const seconds = Math.floor((remaining % 60000) / 1000)
       timeString = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
       this.element.style.color = 'white'
-      this.element.style.webkitTextFillColor = 'white'
     }
 
     if (this.element.innerText !== timeString) {

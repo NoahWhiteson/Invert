@@ -1,3 +1,5 @@
+import { ringTextShadow } from './textOutline'
+
 export class AnnouncementUI {
   private container: HTMLDivElement
   private banner: HTMLDivElement
@@ -36,9 +38,8 @@ export class AnnouncementUI {
     this.textElement.style.fontFamily = "'m6x11', monospace"
     this.textElement.style.fontSize = '64px'
     this.textElement.style.color = '#ffff00'
-    this.textElement.style.webkitTextFillColor = '#ffff00'
     this.textElement.style.textAlign = 'center'
-    this.textElement.style.webkitTextStroke = '6px #000'
+    this.textElement.style.textShadow = ringTextShadow(6)
     this.textElement.style.letterSpacing = '8px'
     this.banner.appendChild(this.textElement)
   }

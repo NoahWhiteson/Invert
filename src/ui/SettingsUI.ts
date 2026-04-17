@@ -2,6 +2,7 @@ import { InputManager } from '../core/Input'
 import { applyAccountBackupJson, API_ACCOUNT_ID_KEY, getAccountBackupJson } from '../store/skinEconomy'
 import { ECONOMY_RELOADED_EVENT, trySyncEconomyFromApi } from '../net/invertEconomySync'
 import { Crosshair } from './Crosshair'
+import { ringTextShadow } from './textOutline'
 
 export type SoundType = 'master' | 'gun' | 'impact' | 'explosion'
 export type GraphicOption = 'grass' | 'blood' | 'bulletHoles'
@@ -229,10 +230,9 @@ export class SettingsUI {
     this.title.style.left = '50%'
     this.title.style.transform = 'translate(-50%, -50%) skewX(-10deg)'
     this.title.style.color = 'white'
-    this.title.style.webkitTextFillColor = 'white'
     this.title.style.fontFamily = "'m6x11', monospace"
     this.title.style.fontSize = '62px'
-    this.title.style.webkitTextStroke = '10px #000'
+    this.title.style.textShadow = ringTextShadow(8)
     this.title.style.opacity = '0'
     this.title.style.zIndex = '1700'
     this.title.style.letterSpacing = '3px'
@@ -247,10 +247,9 @@ export class SettingsUI {
     this.resetBtn.style.left = '50%'
     this.resetBtn.style.transform = 'translate(-50%, -50%)'
     this.resetBtn.style.color = 'white'
-    this.resetBtn.style.webkitTextFillColor = 'white'
     this.resetBtn.style.fontFamily = "'m6x11', monospace"
     this.resetBtn.style.fontSize = '32px'
-    this.resetBtn.style.webkitTextStroke = '7px #000'
+    this.resetBtn.style.textShadow = ringTextShadow(7)
     this.resetBtn.style.opacity = '0'
     this.resetBtn.style.zIndex = '1700'
     this.resetBtn.style.letterSpacing = '1.5px'
@@ -274,13 +273,12 @@ export class SettingsUI {
 
     this.uuidValueEl = document.createElement('span')
     this.uuidValueEl.style.color = 'white'
-    this.uuidValueEl.style.webkitTextFillColor = 'white'
     this.uuidValueEl.style.fontFamily = "'m6x11', monospace"
     this.uuidValueEl.style.fontSize = '16px'
     this.uuidValueEl.style.lineHeight = '1.25'
     this.uuidValueEl.style.textAlign = 'center'
     this.uuidValueEl.style.wordBreak = 'break-all'
-    this.uuidValueEl.style.webkitTextStroke = '3px #000'
+    this.uuidValueEl.style.textShadow = ringTextShadow(3)
     this.uuidValueEl.style.cursor = 'none'
 
     const backupRow = document.createElement('div')
@@ -303,9 +301,8 @@ export class SettingsUI {
       el.style.cursor = 'none'
       el.style.userSelect = 'none'
       el.style.padding = '4px 6px'
-      el.style.webkitTextStroke = '3px #000'
+      el.style.textShadow = ringTextShadow(3)
       el.style.color = variant === 'copy' ? '#bfe0ff' : '#ffd8c4'
-      el.style.webkitTextFillColor = variant === 'copy' ? '#bfe0ff' : '#ffd8c4'
       return el
     }
 
