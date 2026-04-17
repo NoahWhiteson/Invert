@@ -10,8 +10,9 @@ export class CoinsHUDUI {
   constructor() {
     this.root = document.createElement('div')
     this.root.style.position = 'fixed'
-    this.root.style.top = '20px'
-    this.root.style.left = '24px'
+    this.root.style.bottom = '28px'
+    this.root.style.left = '50%'
+    this.root.style.transform = 'translateX(-50%)'
     this.root.style.display = 'flex'
     this.root.style.flexDirection = 'row'
     this.root.style.alignItems = 'center'
@@ -48,13 +49,7 @@ export class CoinsHUDUI {
   }
 
   public setPlayMode(playing: boolean) {
-    if (playing) {
-      this.root.style.left = 'auto'
-      this.root.style.right = '90px'
-    } else {
-      this.root.style.right = 'auto'
-      this.root.style.left = '24px'
-    }
+    void playing
   }
 
   public setOpacity(alpha: number) {
