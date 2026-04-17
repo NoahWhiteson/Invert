@@ -1,13 +1,19 @@
+import type { Group } from 'three'
 import { ringTextShadow } from './textOutline'
+import type { LeaderboardEntry } from './LeaderboardUI'
+import { MatchEndPortraitRig } from './MatchEndPortraitRig'
 
 export class MatchEndUI {
   private root: HTMLDivElement
   private backdrop: HTMLDivElement
   private card: HTMLDivElement
+  private portraitMount: HTMLDivElement
+  private portraitRig: MatchEndPortraitRig
   private title: HTMLDivElement
   private subtitle: HTMLDivElement
   private nameLine: HTMLDivElement
   private killsLine: HTMLDivElement
+  private showing = false
   private thickOutline =
     '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -3px 0 0 #000, 3px 0 0 #000, 0 -3px 0 #000, 0 3px 0 #000'
 
@@ -41,6 +47,7 @@ export class MatchEndUI {
     this.card.style.pointerEvents = 'auto'
     this.card.style.opacity = '0'
     this.card.style.transition = 'opacity 320ms ease, transform 320ms cubic-bezier(0.1, 0.88, 0.16, 1)'
+    this.card.style.minWidth = 'min(94vw, 620px)'
     this.root.appendChild(this.card)
 
     this.title = document.createElement('div')
@@ -60,8 +67,20 @@ export class MatchEndUI {
     this.subtitle.style.textShadow = this.thickOutline
     this.card.appendChild(this.subtitle)
 
+    this.portraitMount = document.createElement('div')
+    this.portraitMount.style.width = 'min(90vw, 540px)'
+    this.portraitMount.style.height = '168px'
+    this.portraitMount.style.margin = '18px auto 0'
+    this.portraitMount.style.borderRadius = '6px'
+    this.portraitMount.style.overflow = 'hidden'
+    this.portraitMount.style.background = 'rgba(6, 8, 12, 0.45)'
+    this.portraitMount.style.border = '1px solid rgba(255,255,255,0.08)'
+    this.card.appendChild(this.portraitMount)
+
+    this.portraitRig = new MatchEndPortraitRig(this.portraitMount)
+
     this.nameLine = document.createElement('div')
-    this.nameLine.style.marginTop = '28px'
+    this.nameLine.style.marginTop = '16px'
     this.nameLine.style.fontSize = '44px'
     this.nameLine.style.letterSpacing = '2px'
     this.nameLine.style.textShadow = `${this.thickOutline}, ${ringTextShadow(3)}`
@@ -77,7 +96,24 @@ export class MatchEndUI {
     document.body.appendChild(this.root)
   }
 
-  public show(username: string, kills: number) {
+  public setPortraitResolver(fn: (id: string) => Group | null) {
+    this.portraitRig.setResolver(fn)
+  }
+
+  public bustPortraitCache() {
+    this.portraitRig.bustCache()
+  }
+
+  public renderPortraits(active: boolean) {
+    if (!this.showing) return
+    this.portraitRig.render(active)
+  }
+
+  public show(topThree: LeaderboardEntry[]) {
+    const top = topThree[0]
+    const username = top?.discovered ? top.username : top ? '???' : '—'
+    const kills = top?.kills ?? 0
+
     document.body.classList.add('match-ended')
     this.nameLine.textContent = username
     if (kills <= 0) {
@@ -85,6 +121,10 @@ export class MatchEndUI {
     } else {
       this.killsLine.textContent = `${kills} kill${kills === 1 ? '' : 's'}`
     }
+
+    this.portraitRig.sync(topThree.slice(0, 3))
+    this.showing = true
+
     this.root.style.display = 'block'
     this.root.style.pointerEvents = 'auto'
     requestAnimationFrame(() => {
@@ -96,6 +136,8 @@ export class MatchEndUI {
 
   public hide() {
     document.body.classList.remove('match-ended')
+    this.showing = false
+    this.portraitRig.clearSlots()
     this.backdrop.style.opacity = '0'
     this.card.style.opacity = '0'
     this.card.style.transform = 'translate(-50%, -48%) skewX(-8deg) scale(0.98)'

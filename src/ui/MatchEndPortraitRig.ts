@@ -22,8 +22,8 @@ function placeOnGround(model: THREE.Object3D) {
   model.position.y -= box.min.y
 }
 
-/** Offscreen-rendered clones of leaderboard players for the HUD (separate scene, transparent bg). */
-export class LeaderboardPortraitRig {
+/** Match-end overlay: three cloned player silhouettes (separate scene, transparent). */
+export class MatchEndPortraitRig {
   private mount: HTMLElement
   private renderer: THREE.WebGLRenderer
   private scene = new THREE.Scene()
@@ -144,8 +144,8 @@ export class LeaderboardPortraitRig {
     this.renderer.render(this.scene, this.camera)
   }
 
-  public dispose() {
-    this.resizeObserver.disconnect()
+  public clearSlots() {
+    this.lastIds = [null, null, null]
     for (let i = 0; i < 3; i++) {
       const slot = this.slots[i]!
       while (slot.children.length) {
@@ -154,11 +154,15 @@ export class LeaderboardPortraitRig {
         disposeGroup(ch)
       }
     }
-    this.renderer.dispose()
   }
 
-  /** Next sync rebuilds all slots (e.g. player mesh finished loading). */
   public bustCache() {
     this.lastIds = [null, null, null]
+  }
+
+  public dispose() {
+    this.resizeObserver.disconnect()
+    this.clearSlots()
+    this.renderer.dispose()
   }
 }

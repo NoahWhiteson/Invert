@@ -37,7 +37,6 @@ import { BulletHoleSystem } from './systems/BulletHoleSystem'
 import { TargetPlayersSystem, type BotBrainContext } from './systems/TargetPlayersSystem'
 import { DamageTextSystem } from './systems/DamageTextSystem'
 import { LeaderboardUI, type LeaderboardEntry } from './ui/LeaderboardUI'
-import { LeaderboardPortraitRig } from './ui/LeaderboardPortraitRig'
 import { AnnouncementUI } from './ui/AnnouncementUI'
 import { MultiplayerSystem } from './systems/MultiplayerSystem'
 import { type AnimationState } from './systems/AnimationManager'
@@ -125,7 +124,6 @@ const targetPlayers = new TargetPlayersSystem(core.scene, sphereRadius, 4)
 const multiplayer = new MultiplayerSystem(core.scene)
 const damageTexts = new DamageTextSystem(core.scene)
 const leaderboardUI = new LeaderboardUI()
-const leaderboardPortraitRig = new LeaderboardPortraitRig(leaderboardUI.portraitMount)
 const announcementUI = new AnnouncementUI()
 const deathUI = new DeathUI()
 const matchEndUI = new MatchEndUI()
@@ -455,7 +453,6 @@ function updateLeaderboard() {
   const top3 = allEntries.slice(0, 3)
   const myFinalEntry = allEntries.find((e) => e.isMe)!
   leaderboardUI.update(top3, myFinalEntry)
-  leaderboardPortraitRig.sync(top3)
   multiplayer.setLeaderboardRanks(allEntries.map((e) => ({ id: e.id, rank: e.rank })))
 }
 
@@ -587,7 +584,7 @@ void Promise.all([
   }
 })
 const playerModel = new PlayerModel()
-function resolveLeaderboardPortraitSource(id: string): THREE.Group | null {
+function resolveMatchEndPortraitSource(id: string): THREE.Group | null {
   if (id === 'me') {
     return playerModel.root ?? null
   }
@@ -598,9 +595,10 @@ function resolveLeaderboardPortraitSource(id: string): THREE.Group | null {
   const p = multiplayer.getPlayerById(id)
   return p?.model ?? null
 }
-leaderboardPortraitRig.setResolver(resolveLeaderboardPortraitSource)
+matchEndUI.setPortraitResolver(resolveMatchEndPortraitSource)
+
 void playerModel.init(core.scene).then(() => {
-  leaderboardPortraitRig.bustCache()
+  matchEndUI.bustPortraitCache()
 })
 
 player.onDamage = (_amount, hitDirection) => {
@@ -1613,7 +1611,6 @@ window.game = {
   },
   updateLeaderboard(data: LeaderboardEntry[], myRank?: LeaderboardEntry) {
     leaderboardUI.update(data, myRank)
-    leaderboardPortraitRig.sync(data.slice(0, 3))
     return 'Leaderboard updated'
   },
   setUsername(name: string) {
@@ -1755,8 +1752,7 @@ function animate() {
           heldWeapons.setAiming(false)
           crosshair.setVisible(false)
           const entries = buildSortedLeaderboardEntries()
-          const top = entries[0]
-          matchEndUI.show(top?.username ?? '—', top?.kills ?? 0)
+          matchEndUI.show(entries.slice(0, 3))
         }
       } else if (matchEndedFreeze) {
         matchEndedFreeze = false
@@ -2157,9 +2153,7 @@ function animate() {
   }
 
   core.render()
-  leaderboardPortraitRig.render(
-    !atMainMenu && !isFrozen && leaderboardUI.getOpacity() > 0.02
-  )
+  matchEndUI.renderPortraits(matchEndedFreeze && !atMainMenu && !isFrozen)
 }
 
 animate()
