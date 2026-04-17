@@ -1940,7 +1940,10 @@ function animate() {
     }
 
     settingsUI.update(input, isDead)
-    timerUI.setCountdownActive(multiplayer.getHumanPlayerCount() >= 2)
+    const humanPlayerCount = multiplayer.getHumanPlayerCount()
+    const pvpOnlyMode = humanPlayerCount >= 2
+    targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
+    timerUI.setCountdownActive(pvpOnlyMode)
     timerUI.update()
     fpsCounter.update()
     {

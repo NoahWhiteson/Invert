@@ -34,6 +34,7 @@ type TargetState = {
   lookPhase: number
   lastBotFireMs: number
   lastAimWorld: THREE.Vector3
+  despawnedForPvP: boolean
 }
 
 /** Simplified context for basic wandering. */
@@ -139,6 +140,8 @@ export class TargetPlayersSystem {
     color: 0xff0000,
     side: THREE.DoubleSide,
   })
+  private suppressBotsForPvP = false
+  private readonly botPvPSinkSpeed = 9.5
 
   constructor(scene: THREE.Scene, sphereRadius: number, count: number = 4) {
     this.scene = scene
@@ -189,18 +192,20 @@ export class TargetPlayersSystem {
   }
 
   public getRaycastTargets(): THREE.Object3D[] {
+    if (this.suppressBotsForPvP) return []
     return this.allHitboxes.filter((hb) => {
       const idx = hb.userData.targetIdx
       if (typeof idx !== 'number') return true
       const t = this.targets[idx]
-      return t && !t.ragdoll && t.health > 0
+      return t && !t.despawnedForPvP && !t.ragdoll && t.health > 0
     })
   }
 
   public getCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {
+    if (this.suppressBotsForPvP) return []
     const out: Array<{ position: THREE.Vector3; radius: number }> = []
     for (const t of this.targets) {
-      if (!t || t.ragdoll || t.health <= 0) continue
+      if (!t || t.despawnedForPvP || t.ragdoll || t.health <= 0) continue
       out.push({ position: t.container.position, radius: 0.65 })
     }
     return out
@@ -211,9 +216,11 @@ export class TargetPlayersSystem {
     damage: number,
     incomingBulletWorld?: THREE.Vector3
   ): { damaged: boolean; targetIdx: number; pos: THREE.Vector3; killed: boolean; name: string } | null {
+    if (this.suppressBotsForPvP) return null
     const idx = obj.userData.targetIdx
     if (typeof idx !== 'number') return null
     const t = this.targets[idx]!
+    if (t.despawnedForPvP) return null
     const prevHealth = t.health
     t.health -= damage
     t.flashTimer = 0.15
@@ -555,10 +562,15 @@ export class TargetPlayersSystem {
   }
 
   public update(dt: number, brain?: BotBrainContext | null) {
+    if (this.suppressBotsForPvP) {
+      this.updateSuppressedBots(dt)
+      return
+    }
     const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now()
     for (let ti = 0; ti < this.targets.length; ti++) {
       const t = this.targets[ti]
       if (!t) continue
+      if (t.despawnedForPvP) continue
       if (t.ragdoll) {
         t.ragdoll.update(dt, this.sphereRadius)
         continue
@@ -599,6 +611,56 @@ export class TargetPlayersSystem {
             ;(child as THREE.Mesh).material = isFlashing ? this._botSkinFlashMat : this._botSkinMat
           }
         })
+      }
+    }
+  }
+
+  /** 2+ humans alive in room => sink/remove bots; <=1 => restore bots. */
+  public setSuppressedByRealPlayers(suppress: boolean) {
+    if (this.suppressBotsForPvP === suppress) return
+    this.suppressBotsForPvP = suppress
+
+    if (suppress) {
+      for (const t of this.targets) {
+        if (!t) continue
+        t.chasing = false
+        t.velocity.set(0, 0, 0)
+        t.steerDir.set(0, 0, 0)
+      }
+      return
+    }
+
+    for (let i = 0; i < this.targets.length; i++) {
+      const t = this.targets[i]
+      if (!t) continue
+      t.despawnedForPvP = false
+      if (t.container.parent !== this.scene) this.scene.add(t.container)
+      t.container.visible = true
+      t.model.visible = true
+      this.respawnTarget(i)
+    }
+  }
+
+  private updateSuppressedBots(dt: number) {
+    for (const t of this.targets) {
+      if (!t || t.despawnedForPvP) continue
+      t.chasing = false
+      t.velocity.set(0, 0, 0)
+      t.steerDir.set(0, 0, 0)
+      if (t.anims) t.anims.update(0)
+
+      // Sink in gravity direction, then remove from scene.
+      this._vA.copy(t.container.position)
+      if (this._vA.lengthSq() > 1e-8) {
+        this._vA.normalize()
+        t.container.position.addScaledVector(this._vA, this.botPvPSinkSpeed * dt)
+      }
+
+      if (t.container.position.length() >= this.sphereRadius + 6) {
+        if (t.container.parent === this.scene) this.scene.remove(t.container)
+        t.container.visible = false
+        t.despawnedForPvP = true
+        t.health = t.maxHealth
       }
     }
   }
@@ -881,6 +943,7 @@ export class TargetPlayersSystem {
       lookPhase: Math.random() * Math.PI * 2,
       lastBotFireMs: 0,
       lastAimWorld: new THREE.Vector3(),
+      despawnedForPvP: false,
     }
     this.respawnTarget(index)
   }
