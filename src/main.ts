@@ -47,6 +47,7 @@ import { AmmoSystem, DEFAULT_WEAPON_AMMO_SPECS } from './systems/AmmoSystem'
 import { AmmoUI } from './ui/AmmoUI'
 import { DeathUI } from './ui/DeathUI'
 import { MatchEndUI } from './ui/MatchEndUI'
+import { MatchEndSceneShowcase } from './ui/MatchEndSceneShowcase'
 import { CoinsHUDUI } from './ui/CoinsHUDUI'
 import {
   ECONOMY_RELOADED_EVENT,
@@ -162,6 +163,7 @@ let lastFirstPlaceId: string | null = null
 let isDead = false
 /** PvP match timer hit zero: blur overlay, no move/shoot/look until humans drop below 2. */
 let matchEndedFreeze = false
+let matchEndTopThreeCache: LeaderboardEntry[] | null = null
 /** When true, hold end screen even if the match clock is not running (e.g. `game.fireEndRound()` solo). */
 let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
@@ -595,10 +597,15 @@ function resolveMatchEndPortraitSource(id: string): THREE.Group | null {
   const p = multiplayer.getPlayerById(id)
   return p?.model ?? null
 }
-matchEndUI.setPortraitResolver(resolveMatchEndPortraitSource)
+
+const matchEndShowcase = new MatchEndSceneShowcase(core.camera)
+matchEndShowcase.setResolver(resolveMatchEndPortraitSource)
 
 void playerModel.init(core.scene).then(() => {
-  matchEndUI.bustPortraitCache()
+  matchEndShowcase.bustCache()
+  if (matchEndTopThreeCache) {
+    matchEndShowcase.syncFromEntries(matchEndTopThreeCache)
+  }
 })
 
 player.onDamage = (_amount, hitDirection) => {
@@ -1630,6 +1637,8 @@ window.game = {
     if (matchEndedFreeze && matchEndedByDebug) {
       matchEndedByDebug = false
       matchEndedFreeze = false
+      matchEndTopThreeCache = null
+      matchEndShowcase.clear()
       matchEndUI.hide()
       if (!isDead) {
         player.setPointerLockAllowed(true)
@@ -1651,9 +1660,11 @@ const timer = new THREE.Timer()
 function animate() {
   requestAnimationFrame(animate)
 
+  let lastFrameDt = 0
   if (!isFrozen) {
     timer.update()
     const dt = timer.getDelta()
+    lastFrameDt = dt
     const time = performance.now() / 1000
     const currentTime = performance.now()
     simFrame++
@@ -1752,11 +1763,15 @@ function animate() {
           heldWeapons.setAiming(false)
           crosshair.setVisible(false)
           const entries = buildSortedLeaderboardEntries()
-          matchEndUI.show(entries.slice(0, 3))
+          matchEndTopThreeCache = entries.slice(0, 3)
+          matchEndUI.show(matchEndTopThreeCache)
+          matchEndShowcase.syncFromEntries(matchEndTopThreeCache)
         }
       } else if (matchEndedFreeze) {
         matchEndedFreeze = false
         matchEndedByDebug = false
+        matchEndTopThreeCache = null
+        matchEndShowcase.clear()
         matchEndUI.hide()
         if (!isDead) {
           player.setPointerLockAllowed(true)
@@ -2153,7 +2168,7 @@ function animate() {
   }
 
   core.render()
-  matchEndUI.renderPortraits(matchEndedFreeze && !atMainMenu && !isFrozen)
+  matchEndShowcase.update(lastFrameDt, matchEndedFreeze && !atMainMenu && !isFrozen)
 }
 
 animate()
