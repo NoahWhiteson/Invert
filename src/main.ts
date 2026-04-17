@@ -129,6 +129,12 @@ const announcementUI = new AnnouncementUI()
 const deathUI = new DeathUI()
 const matchEndUI = new MatchEndUI()
 const discoveredPlayers = new Set<string>()
+
+function registerBotKill(killerBotIndex: number) {
+  targetPlayers.recordBotKill(killerBotIndex)
+  discoveredPlayers.add(`bot_${killerBotIndex}`)
+}
+
 let myBotKills = 0
 /** PvP kills — set from server `killerKills` on each kill (authoritative). */
 let myPvpKills = 0
@@ -366,7 +372,7 @@ function handleLocalDeathFromBot(botIndex: number) {
   if (multiplayer.isConnected()) {
     multiplayer.sendLocalDeath()
   }
-  targetPlayers.recordBotKill(botIndex)
+  registerBotKill(botIndex)
   updateLeaderboard()
 
   if (playerModel.root) {
@@ -1195,7 +1201,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     victim.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.12), h.point)
   }
   if (damageRes.killed) {
-    targetPlayers.recordBotKill(botIndex)
+    registerBotKill(botIndex)
     discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
     updateLeaderboard()
   }
