@@ -134,19 +134,21 @@ export class MainMenuNavUI {
       span.style.fontSize = `${NAV_LABEL_FONT_PX}px`
       span.style.letterSpacing = 'normal'
       span.style.color = '#fff'
+      span.style.webkitTextFillColor = '#fff'
       span.style.textShadow = THICK_OUTLINE
       span.style.webkitTextStroke = `${NAV_LABEL_STROKE_PX}px #000`
-      span.style.paintOrder = 'stroke fill'
       span.style.transition = 'color 0.1s ease-out'
 
       btn.appendChild(iconSlot)
       btn.appendChild(span)
       btn.addEventListener('mouseenter', () => {
         span.style.color = '#ffff00'
+        span.style.webkitTextFillColor = '#ffff00'
         img.style.filter = ICON_HOVER_FILTER
       })
       btn.addEventListener('mouseleave', () => {
         span.style.color = '#fff'
+        span.style.webkitTextFillColor = '#fff'
         img.style.filter = ICON_BASE_FILTER
       })
       btn.addEventListener('click', (e) => {

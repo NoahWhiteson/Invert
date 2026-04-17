@@ -26,10 +26,10 @@ class RollingKills {
     this.element.style.display = 'flex'
     this.element.style.height = `${RollingKills.DIGIT_H}px`
     this.element.style.color = '#ff4444'
+    this.element.style.webkitTextFillColor = '#ff4444'
     this.element.style.fontFamily = "'m6x11', monospace"
     this.element.style.fontSize = '24px'
     this.element.style.webkitTextStroke = '4px #000'
-    this.element.style.paintOrder = 'stroke fill'
     this.element.style.textDecoration = 'none' // Ensure no underlines
     this.buildReels(1)
     this.applyInstantValue(0)
@@ -54,6 +54,7 @@ class RollingKills {
         row.style.display = 'flex'
         row.style.alignItems = 'center'
         row.style.justifyContent = 'center'
+        row.style.webkitTextFillColor = 'currentColor'
         strip.appendChild(row)
       }
       clip.appendChild(strip)
@@ -140,7 +141,6 @@ class LeaderboardRow {
     this.name.style.minWidth = '100px'
     this.name.style.paddingLeft = '6px'
     this.name.style.webkitTextStroke = '4px #000'
-    this.name.style.paintOrder = 'stroke fill'
     this.name.style.textDecoration = 'none'
     this.element.appendChild(this.name)
 
@@ -164,11 +164,11 @@ class LeaderboardRow {
       const span = document.createElement('span')
       span.style.fontFamily = "'m6x11', monospace"
       span.style.fontSize = '18px'
-      span.style.color = '#aaaaaa'
       span.style.width = '32px'
       span.style.textAlign = 'center'
+      span.style.color = '#aaaaaa'
+      span.style.webkitTextFillColor = '#aaaaaa'
       span.style.webkitTextStroke = '4px #000'
-      span.style.paintOrder = 'stroke fill'
       return span
     }
   }
@@ -189,7 +189,9 @@ class LeaderboardRow {
 
     // Update Name
     this.name.textContent = entry.discovered ? entry.username : '???'
-    this.name.style.color = entry.isMe ? '#ffff00' : 'white'
+    const nameColor = entry.isMe ? '#ffff00' : 'white'
+    this.name.style.color = nameColor
+    this.name.style.webkitTextFillColor = nameColor
 
     // Update Kills
     this.kills.setValue(entry.kills, animate)

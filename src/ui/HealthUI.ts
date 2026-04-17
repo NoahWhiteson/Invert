@@ -53,13 +53,13 @@ export class HealthUI {
     this.digitsRow.style.alignItems = 'center'
     this.digitsRow.style.height = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.color = 'white'
+    this.digitsRow.style.webkitTextFillColor = 'white'
     this.digitsRow.style.fontFamily = "'m6x11', monospace"
     this.digitsRow.style.fontSize = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.lineHeight = `${HealthUI.DIGIT_H}px`
     this.digitsRow.style.fontStyle = 'normal'
     this.digitsRow.style.transform = 'skewX(-10deg) translateY(10px)'
     this.digitsRow.style.webkitTextStroke = '2px #000'
-    this.digitsRow.style.paintOrder = 'stroke fill'
     this.digitsRow.style.textShadow = HealthUI.DIGIT_TEXT_OUTLINE
     this.digitsRow.style.fontVariantNumeric = 'tabular-nums'
     this.container.appendChild(this.digitsRow)
@@ -113,7 +113,7 @@ export class HealthUI {
         row.style.justifyContent = 'center'
         row.style.lineHeight = `${HealthUI.DIGIT_H}px`
         row.style.webkitTextStroke = '2px #000'
-        row.style.paintOrder = 'stroke fill'
+        row.style.webkitTextFillColor = 'currentColor'
         row.style.textShadow = HealthUI.DIGIT_TEXT_OUTLINE
         strip.appendChild(row)
       }
@@ -269,7 +269,9 @@ export class HealthUI {
       this.heartIcon.style.animation = `heartBeat ${beatDuration}s cubic-bezier(0.45, 0.02, 0.25, 1) infinite`
     }
 
-    this.digitsRow.style.color = healthPercent < 25 ? '#ff4444' : 'white'
+    const digitColor = healthPercent < 25 ? '#ff4444' : 'white'
+    this.digitsRow.style.color = digitColor
+    this.digitsRow.style.webkitTextFillColor = digitColor
 
     if (healthPercent > 25) {
       this.heartIcon.style.filter = 'none'

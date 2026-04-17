@@ -45,9 +45,9 @@ export class MainMenuPlayUI {
     label.style.fontSize = '48px'
     label.style.letterSpacing = 'normal'
     label.style.color = '#fff'
+    label.style.webkitTextFillColor = '#fff'
     label.style.textShadow = THICK_OUTLINE
     label.style.webkitTextStroke = '4px #000'
-    label.style.paintOrder = 'stroke fill'
     label.style.transition = 'color 0.1s ease-out'
 
     this.btn.appendChild(icon)
@@ -55,9 +55,11 @@ export class MainMenuPlayUI {
 
     this.btn.addEventListener('mouseenter', () => {
       label.style.color = '#ffff00'
+      label.style.webkitTextFillColor = '#ffff00'
     })
     this.btn.addEventListener('mouseleave', () => {
       label.style.color = '#fff'
+      label.style.webkitTextFillColor = '#fff'
     })
     this.btn.addEventListener('click', (e) => {
       e.stopPropagation()

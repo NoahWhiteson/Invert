@@ -1,5 +1,14 @@
 import './style.css'
+import m6x11FontUrl from './assets/m6x11.ttf?url'
 import * as THREE from 'three'
+
+const _fontPreload = document.createElement('link')
+_fontPreload.rel = 'preload'
+_fontPreload.as = 'font'
+_fontPreload.type = 'font/ttf'
+_fontPreload.href = m6x11FontUrl
+_fontPreload.crossOrigin = 'anonymous'
+document.head.appendChild(_fontPreload)
 import { SceneSetup } from './core/Scene'
 import { InputManager } from './core/Input'
 import { LightingSystem } from './systems/Lighting'

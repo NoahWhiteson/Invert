@@ -36,9 +36,9 @@ export class AnnouncementUI {
     this.textElement.style.fontFamily = "'m6x11', monospace"
     this.textElement.style.fontSize = '64px'
     this.textElement.style.color = '#ffff00'
+    this.textElement.style.webkitTextFillColor = '#ffff00'
     this.textElement.style.textAlign = 'center'
     this.textElement.style.webkitTextStroke = '6px #000'
-    this.textElement.style.paintOrder = 'stroke fill'
     this.textElement.style.letterSpacing = '8px'
     this.banner.appendChild(this.textElement)
   }

@@ -69,8 +69,8 @@ export class KillFeedUI {
     text.style.fontSize = '18px'
     text.style.lineHeight = '24px'
     text.style.color = '#ff4444'
+    text.style.webkitTextFillColor = '#ff4444'
     text.style.webkitTextStroke = '2.5px #000'
-    text.style.paintOrder = 'stroke fill'
     text.style.letterSpacing = '1px'
     text.style.whiteSpace = 'nowrap'
 

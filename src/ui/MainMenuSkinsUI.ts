@@ -140,9 +140,9 @@ export class MainMenuSkinsUI {
     this.titleEl.style.fontFamily = "'m6x11', monospace"
     this.titleEl.style.fontSize = '64px'
     this.titleEl.style.color = '#fff'
+    this.titleEl.style.webkitTextFillColor = '#fff'
     this.titleEl.style.textShadow = THICK_OUTLINE
     this.titleEl.style.webkitTextStroke = '4px #000'
-    this.titleEl.style.paintOrder = 'stroke fill'
     this.titleEl.style.lineHeight = '1'
     this.titleEl.style.pointerEvents = 'none'
 

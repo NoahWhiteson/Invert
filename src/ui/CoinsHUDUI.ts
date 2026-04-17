@@ -37,9 +37,9 @@ export class CoinsHUDUI {
     this.valueEl.style.fontFamily = "'m6x11', monospace"
     this.valueEl.style.fontSize = '28px'
     this.valueEl.style.color = '#fff'
+    this.valueEl.style.webkitTextFillColor = '#fff'
     this.valueEl.style.lineHeight = '1'
     this.valueEl.style.webkitTextStroke = '3px #000'
-    this.valueEl.style.paintOrder = 'stroke fill'
     this.valueEl.style.textShadow = DIGIT_OUTLINE
 
     this.root.appendChild(icon)

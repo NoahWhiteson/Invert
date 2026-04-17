@@ -229,10 +229,10 @@ export class SettingsUI {
     this.title.style.left = '50%'
     this.title.style.transform = 'translate(-50%, -50%) skewX(-10deg)'
     this.title.style.color = 'white'
+    this.title.style.webkitTextFillColor = 'white'
     this.title.style.fontFamily = "'m6x11', monospace"
     this.title.style.fontSize = '62px'
     this.title.style.webkitTextStroke = '10px #000'
-    this.title.style.paintOrder = 'stroke fill'
     this.title.style.opacity = '0'
     this.title.style.zIndex = '1700'
     this.title.style.letterSpacing = '3px'
@@ -247,10 +247,10 @@ export class SettingsUI {
     this.resetBtn.style.left = '50%'
     this.resetBtn.style.transform = 'translate(-50%, -50%)'
     this.resetBtn.style.color = 'white'
+    this.resetBtn.style.webkitTextFillColor = 'white'
     this.resetBtn.style.fontFamily = "'m6x11', monospace"
     this.resetBtn.style.fontSize = '32px'
     this.resetBtn.style.webkitTextStroke = '7px #000'
-    this.resetBtn.style.paintOrder = 'stroke fill'
     this.resetBtn.style.opacity = '0'
     this.resetBtn.style.zIndex = '1700'
     this.resetBtn.style.letterSpacing = '1.5px'
@@ -274,13 +274,13 @@ export class SettingsUI {
 
     this.uuidValueEl = document.createElement('span')
     this.uuidValueEl.style.color = 'white'
+    this.uuidValueEl.style.webkitTextFillColor = 'white'
     this.uuidValueEl.style.fontFamily = "'m6x11', monospace"
     this.uuidValueEl.style.fontSize = '16px'
     this.uuidValueEl.style.lineHeight = '1.25'
     this.uuidValueEl.style.textAlign = 'center'
     this.uuidValueEl.style.wordBreak = 'break-all'
     this.uuidValueEl.style.webkitTextStroke = '3px #000'
-    this.uuidValueEl.style.paintOrder = 'stroke fill'
     this.uuidValueEl.style.cursor = 'none'
 
     const backupRow = document.createElement('div')
@@ -304,8 +304,8 @@ export class SettingsUI {
       el.style.userSelect = 'none'
       el.style.padding = '4px 6px'
       el.style.webkitTextStroke = '3px #000'
-      el.style.paintOrder = 'stroke fill'
       el.style.color = variant === 'copy' ? '#bfe0ff' : '#ffd8c4'
+      el.style.webkitTextFillColor = variant === 'copy' ? '#bfe0ff' : '#ffd8c4'
       return el
     }
 

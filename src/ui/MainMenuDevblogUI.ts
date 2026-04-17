@@ -23,9 +23,9 @@ export class MainMenuDevblogUI {
     title.style.fontFamily = "'m6x11', monospace"
     title.style.fontSize = '28px'
     title.style.color = '#fff'
+    title.style.webkitTextFillColor = '#fff'
     title.style.textShadow = THICK_OUTLINE
     title.style.webkitTextStroke = '4px #000'
-    title.style.paintOrder = 'stroke fill'
     title.style.marginBottom = '12px'
     title.style.textAlign = 'right'
 
