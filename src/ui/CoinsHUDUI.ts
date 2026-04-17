@@ -10,9 +10,8 @@ export class CoinsHUDUI {
   constructor() {
     this.root = document.createElement('div')
     this.root.style.position = 'fixed'
-    this.root.style.bottom = '28px'
-    this.root.style.left = '50%'
-    this.root.style.transform = 'translateX(-50%)'
+    this.root.style.top = '20px'
+    this.root.style.right = '24px'
     this.root.style.display = 'flex'
     this.root.style.flexDirection = 'row'
     this.root.style.alignItems = 'center'

@@ -12,6 +12,7 @@ declare global {
       debugTargets: (on: boolean) => string
       updateLeaderboard: (data: LeaderboardEntry[], myRank?: LeaderboardEntry) => string
       setUsername: (name: string) => string
+      fireEndRound: () => string
     }
   }
 }

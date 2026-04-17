@@ -65,6 +65,17 @@ export class TimerUI {
     }
   }
 
+  private computeRemainingMs(): number {
+    if (!this.countdownActive) return -1
+    const elapsed = Date.now() - this.startTime
+    return Math.max(0, this.duration - elapsed)
+  }
+
+  /** True when the 2-player match clock has reached zero (same frame as UI shows 0.00). */
+  public hasCountdownExpired(): boolean {
+    return this.countdownActive && this.computeRemainingMs() <= 0
+  }
+
   public update() {
     if (!this.countdownActive) {
       this.lastRemainingMs = -1
@@ -75,8 +86,7 @@ export class TimerUI {
       return
     }
 
-    const elapsed = Date.now() - this.startTime
-    const remaining = Math.max(0, this.duration - elapsed)
+    const remaining = this.computeRemainingMs()
 
     if (
       remaining > 0 &&

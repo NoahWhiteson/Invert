@@ -46,6 +46,7 @@ import { HeldWeapons } from './systems/HeldWeapons'
 import { AmmoSystem, DEFAULT_WEAPON_AMMO_SPECS } from './systems/AmmoSystem'
 import { AmmoUI } from './ui/AmmoUI'
 import { DeathUI } from './ui/DeathUI'
+import { MatchEndUI } from './ui/MatchEndUI'
 import { CoinsHUDUI } from './ui/CoinsHUDUI'
 import {
   ECONOMY_RELOADED_EVENT,
@@ -125,6 +126,7 @@ const damageTexts = new DamageTextSystem(core.scene)
 const leaderboardUI = new LeaderboardUI()
 const announcementUI = new AnnouncementUI()
 const deathUI = new DeathUI()
+const matchEndUI = new MatchEndUI()
 const discoveredPlayers = new Set<string>()
 let myBotKills = 0
 /** PvP kills — set from server `killerKills` on each kill (authoritative). */
@@ -158,6 +160,11 @@ window.addEventListener('pagehide', persistMyUsernameToLocalStorage)
 
 let lastFirstPlaceId: string | null = null
 let isDead = false
+/** PvP match timer hit zero: blur overlay, no move/shoot/look until humans drop below 2. */
+let matchEndedFreeze = false
+/** When true, hold end screen even if the match clock is not running (e.g. `game.fireEndRound()` solo). */
+let matchEndedByDebug = false
+let pendingDebugMatchEnd = false
 let deadKillerId: string | null = null
 /** After spawn / respawn, bots ignore the local player for this long (ms). */
 const LOCAL_SPAWN_BOT_GRACE_MS = 5500
@@ -389,7 +396,7 @@ function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius:
   return out
 }
 
-function updateLeaderboard() {
+function buildSortedLeaderboardEntries(): LeaderboardEntry[] {
   const bots = targetPlayers.getTargetList()
   const netPlayers = multiplayer.getAllPlayers()
 
@@ -407,7 +414,7 @@ function updateLeaderboard() {
       kills: p.kills + p.botKills,
       rank: 0,
       discovered: true,
-    }))
+    })),
   ]
 
   const myEntry: LeaderboardEntry = {
@@ -420,16 +427,21 @@ function updateLeaderboard() {
   }
   allEntries.push(myEntry)
 
-  // Sort by kills (with tie-breaker for stability)
   allEntries.sort((a, b) => {
     if (b.kills !== a.kills) return b.kills - a.kills
     return a.id.localeCompare(b.id)
   })
 
+  allEntries.forEach((e, idx) => (e.rank = idx + 1))
+  return allEntries
+}
+
+function updateLeaderboard() {
+  const allEntries = buildSortedLeaderboardEntries()
+
   const topOne = allEntries[0]
   if (topOne && topOne.kills > 0) {
     if (lastFirstPlaceId !== topOne.id) {
-      // Immediate announcement and sound (removed 1000/2000 delay)
       playSfx(newKillLeaderSfx, 1.0, 'master')
       announcementUI.show('NEW KILL LEADER')
     }
@@ -437,8 +449,6 @@ function updateLeaderboard() {
   } else {
     lastFirstPlaceId = null
   }
-
-  allEntries.forEach((e, idx) => (e.rank = idx + 1))
 
   const top3 = allEntries.slice(0, 3)
   const myFinalEntry = allEntries.find((e) => e.isMe)!
@@ -817,6 +827,8 @@ async function beginPlayFromMenu() {
     return
   }
   atMainMenu = false
+  pendingDebugMatchEnd = false
+  matchEndedByDebug = false
   mainMenuFullChromeApplied = false
   player.controls.enabled = false
   player.setPointerLockAllowed(false)
@@ -1359,6 +1371,7 @@ function updateHeartbeatByHealth(health: number, maxHealth: number) {
 
 function shoot() {
   if (isDead) return
+  if (matchEndedFreeze) return
   if (settingsUI.isOpen || input.isSimulatedUnlocked) return
 
   const cfg = heldWeapons.currentConfig
@@ -1595,6 +1608,24 @@ window.game = {
     mainMenuNameUI?.syncValue(u)
     return `Username set to ${u}`
   },
+  fireEndRound() {
+    if (atMainMenu) {
+      return 'Not in game (main menu)'
+    }
+    if (matchEndedFreeze && matchEndedByDebug) {
+      matchEndedByDebug = false
+      matchEndedFreeze = false
+      matchEndUI.hide()
+      if (!isDead) {
+        player.setPointerLockAllowed(true)
+        player.controls.enabled = player.controls.isLocked
+        crosshair.setVisible(true)
+      }
+      return 'Debug match end cleared'
+    }
+    pendingDebugMatchEnd = true
+    return 'Match end on next frame (call game.fireEndRound() again to clear while held by debug)'
+  },
 }
 
 let viewToggleKeyWasDown = false
@@ -1670,7 +1701,53 @@ function animate() {
     grass.update(time)
     trees.update(time)
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
-    if (!isDead) {
+
+    const humanPlayerCount = multiplayer.getHumanPlayerCount()
+    const pvpOnlyMode = humanPlayerCount >= 2
+    targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
+    timerUI.setCountdownActive(pvpOnlyMode)
+    timerUI.update()
+
+    if (!atMainMenu) {
+      if (pendingDebugMatchEnd) {
+        pendingDebugMatchEnd = false
+        matchEndedByDebug = true
+      }
+      const naturalEnd = pvpOnlyMode && timerUI.hasCountdownExpired()
+      const shouldHoldMatchEnd = naturalEnd || matchEndedByDebug
+      if (shouldHoldMatchEnd) {
+        if (!matchEndedFreeze) {
+          if (naturalEnd) {
+            matchEndedByDebug = false
+          }
+          matchEndedFreeze = true
+          player.setPointerLockAllowed(false)
+          try {
+            player.controls.unlock()
+          } catch {
+            /* noop */
+          }
+          player.controls.enabled = false
+          player.state.isAiming = false
+          heldWeapons.setAiming(false)
+          crosshair.setVisible(false)
+          const entries = buildSortedLeaderboardEntries()
+          const top = entries[0]
+          matchEndUI.show(top?.username ?? '—', top?.kills ?? 0)
+        }
+      } else if (matchEndedFreeze) {
+        matchEndedFreeze = false
+        matchEndedByDebug = false
+        matchEndUI.hide()
+        if (!isDead) {
+          player.setPointerLockAllowed(true)
+          player.controls.enabled = player.controls.isLocked
+          crosshair.setVisible(true)
+        }
+      }
+    }
+
+    if (!isDead && !matchEndedFreeze) {
       const activeSlot = heldWeapons.getActiveSlot()
       const isGrenade = activeSlot === GRENADE_SLOT
 
@@ -1699,7 +1776,7 @@ function animate() {
       }
 
       player.update(input, sphereRadius, core.camera)
-    } else {
+    } else if (isDead && !matchEndedFreeze) {
       player.state.isAiming = false
       heldWeapons.setAiming(false)
       player.state.isThirdPerson = true
@@ -1745,8 +1822,15 @@ function animate() {
         const lookTarget = bodyPos.clone().add(gravityUp.clone().multiplyScalar(1.2))
         core.camera.lookAt(lookTarget)
       }
+    } else if (matchEndedFreeze) {
+      player.state.isAiming = false
+      heldWeapons.setAiming(false)
+      player.controls.enabled = false
+      if (isDead) {
+        player.state.isThirdPerson = true
+      }
     }
-    if (!isDead) {
+    if (!isDead && !matchEndedFreeze) {
       // Prevent phasing through target players (simple sphere-vs-sphere resolution).
       const myPos = player.playerGroup.position
       const myRadius = Math.max(0.55, player.state.currentHeight * 0.34)
@@ -1801,7 +1885,7 @@ function animate() {
     blood.update(core.camera)
     bulletHoles.update(core.camera)
 
-    const botBrain: BotBrainContext | null = !settingsUI.isOpen
+    const botBrain: BotBrainContext | null = !settingsUI.isOpen && !matchEndedFreeze
       ? {
           playerPosition: player.playerGroup.position,
           playerAlive: !isDead,
@@ -1846,7 +1930,7 @@ function animate() {
     wasLeftMouseDownLastFrame = isLeftMouseDown
 
     const vDown = input.isKeyDown('KeyV')
-    if (!isDead && vDown && !viewToggleKeyWasDown) {
+    if (!isDead && !matchEndedFreeze && vDown && !viewToggleKeyWasDown) {
       player.toggleThirdPerson()
       heldWeapons.setThirdPerson(player.state.isThirdPerson)
     }
@@ -1888,6 +1972,10 @@ function animate() {
       currentAnim = 'idle'
     }
 
+    if (matchEndedFreeze && !isDead) {
+      currentAnim = 'idle'
+    }
+
     if (!isDead) {
       if (playerModel.anims) {
         playerModel.anims.setState(currentAnim)
@@ -1911,6 +1999,7 @@ function animate() {
     let animForNet: AnimationState = currentAnim
     if (
       !isDead &&
+      !matchEndedFreeze &&
       heldWeapons.getActiveSlot() !== GRENADE_SLOT &&
       performance.now() - heldWeapons.lastFireTime < ANIM_FIRE_NET_MS
     ) {
@@ -1939,12 +2028,7 @@ function animate() {
       }
     }
 
-    settingsUI.update(input, isDead)
-    const humanPlayerCount = multiplayer.getHumanPlayerCount()
-    const pvpOnlyMode = humanPlayerCount >= 2
-    targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
-    timerUI.setCountdownActive(pvpOnlyMode)
-    timerUI.update()
+    settingsUI.update(input, isDead || matchEndedFreeze)
     fpsCounter.update()
     {
       const slot = heldWeapons.getActiveSlot()
@@ -1974,28 +2058,28 @@ function animate() {
 
     damageIndicator.setLowHealth(player.state.health <= 20)
 
-    if (!isDead && input.isKeyDown('Digit1')) {
+    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit1')) {
       weaponUI.updateActiveSlot(0)
       heldWeapons.setActiveSlot(0)
     }
-    if (!isDead && input.isKeyDown('Digit2')) {
+    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit2')) {
       weaponUI.updateActiveSlot(1)
       heldWeapons.setActiveSlot(1)
     }
-    if (!isDead && input.isKeyDown('Digit3')) {
+    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit3')) {
       weaponUI.updateActiveSlot(2)
       heldWeapons.setActiveSlot(2)
       // Check if we should show the grenade
       const st = ammoSystem.getState(2)
       heldWeapons.setModelVisibility(2, (st?.mag ?? 0) > 0)
     }
-    if (!isDead && input.isKeyDown('Digit4')) {
+    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit4')) {
       weaponUI.updateActiveSlot(3)
       heldWeapons.setActiveSlot(3)
     }
 
     const reloadDown = input.isKeyDown('KeyR')
-    if (!isDead && reloadDown && !reloadKeyWasDown && player.controls.isLocked && !isReloading) {
+    if (!isDead && !matchEndedFreeze && reloadDown && !reloadKeyWasDown && player.controls.isLocked && !isReloading) {
       const s = heldWeapons.getActiveSlot()
       if (s < 3 && ammoSystem.canReload(s)) {
         isReloading = true
