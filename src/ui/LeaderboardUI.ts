@@ -137,7 +137,7 @@ export class LeaderboardUI {
   readonly portraitMount: HTMLDivElement
 
   private container: HTMLDivElement
-  private currentOpacity = 1
+  private currentOpacity = 0
 
   private rankSlots: (HTMLImageElement | HTMLSpanElement)[] = []
   private nameSlots: HTMLSpanElement[] = []
@@ -148,33 +148,49 @@ export class LeaderboardUI {
     this.container = document.createElement('div')
     this.container.id = 'leaderboard-ui'
     this.container.style.position = 'fixed'
-    this.container.style.top = '68px'
+    this.container.style.top = '74px'
     this.container.style.left = '50%'
     this.container.style.transform = 'translateX(-50%)'
-    this.container.style.width = 'min(92vw, 880px)'
+    this.container.style.width = 'min(90vw, 720px)'
     this.container.style.zIndex = '100'
     this.container.style.pointerEvents = 'none'
     this.container.style.display = 'flex'
     this.container.style.flexDirection = 'column'
     this.container.style.alignItems = 'stretch'
-    this.container.style.gap = '10px'
+    this.container.style.boxSizing = 'border-box'
+    this.container.style.padding = '12px 14px 14px'
+    this.container.style.borderRadius = '10px'
+    this.container.style.border = '1px solid rgba(255,255,255,0.09)'
+    this.container.style.background = 'rgba(8, 10, 14, 0.88)'
+    this.container.style.boxShadow = '0 12px 40px rgba(0,0,0,0.45)'
+    this.container.style.setProperty('-webkit-backdrop-filter', 'blur(10px)')
+    this.container.style.backdropFilter = 'blur(10px)'
+    this.container.style.opacity = '0'
+    this.container.style.visibility = 'hidden'
+
+    const panelInner = document.createElement('div')
+    panelInner.style.display = 'flex'
+    panelInner.style.flexDirection = 'column'
+    panelInner.style.gap = '12px'
 
     this.portraitMount = document.createElement('div')
     this.portraitMount.style.width = '100%'
-    this.portraitMount.style.height = 'min(28vh, 280px)'
-    this.portraitMount.style.minHeight = '200px'
-    this.portraitMount.style.borderRadius = '4px'
+    this.portraitMount.style.height = 'clamp(130px, 18vh, 210px)'
+    this.portraitMount.style.minHeight = '120px'
+    this.portraitMount.style.borderRadius = '6px'
     this.portraitMount.style.overflow = 'hidden'
-    this.portraitMount.style.background = 'linear-gradient(180deg, rgba(10,12,16,0.35) 0%, rgba(10,12,16,0.12) 100%)'
-    this.container.appendChild(this.portraitMount)
+    this.portraitMount.style.background = 'rgba(4, 6, 10, 0.65)'
+    this.portraitMount.style.border = '1px solid rgba(255,255,255,0.06)'
+    panelInner.appendChild(this.portraitMount)
 
     const statsRow = document.createElement('div')
     statsRow.style.display = 'flex'
     statsRow.style.flexDirection = 'row'
     statsRow.style.justifyContent = 'space-between'
     statsRow.style.alignItems = 'flex-start'
-    statsRow.style.gap = '12px'
-    statsRow.style.padding = '4px 8px 0'
+    statsRow.style.gap = '10px'
+    statsRow.style.paddingTop = '4px'
+    statsRow.style.borderTop = '1px solid rgba(255,255,255,0.06)'
 
     const thick = ringTextShadow(4)
 
@@ -217,7 +233,7 @@ export class LeaderboardUI {
     this.meRow.style.fontSize = '18px'
     this.meRow.style.textAlign = 'center'
     this.meRow.style.textShadow = thick
-    this.meRow.style.color = '#ffff88'
+    this.meRow.style.color = '#dcd8a8'
     this.meRow.style.display = 'none'
     this.container.appendChild(this.meRow)
 
@@ -231,6 +247,7 @@ export class LeaderboardUI {
   public setVisible(visible: boolean) {
     this.currentOpacity = visible ? 1 : 0
     this.container.style.opacity = visible ? '1' : '0'
+    this.container.style.visibility = visible ? 'visible' : 'hidden'
   }
 
   public setOpacity(alpha: number) {

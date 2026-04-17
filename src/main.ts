@@ -1661,6 +1661,11 @@ function animate() {
     const currentTime = performance.now()
     simFrame++
 
+    if (atMainMenu) {
+      leaderboardUI.setVisible(false)
+      timerUI.setVisible(false)
+    }
+
     if (atMainMenu && !isDead) {
       grass.update(time)
       trees.update(time)
