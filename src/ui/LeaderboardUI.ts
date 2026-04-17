@@ -16,7 +16,7 @@ class RollingKills {
   private shownValue = 0
   private rollToken = 0
 
-  private static readonly DIGIT_H = 34 // Increased height to prevent stroke clipping
+  private static readonly DIGIT_H = 34
   private static readonly CLIP_W = '0.62em'
   private static readonly MS_PER_STEP = 90
   private static readonly BASE_ROLL_MS = 240
@@ -31,7 +31,8 @@ class RollingKills {
     this.element.style.fontFamily = "'m6x11', monospace"
     this.element.style.fontSize = '24px'
     this.element.style.textShadow = ringTextShadow(4)
-    this.element.style.textDecoration = 'none' // Ensure no underlines
+    this.element.style.textDecoration = 'none'
+    this.element.style.justifyContent = 'center'
     this.buildReels(1)
     this.applyInstantValue(0)
   }
@@ -112,159 +113,155 @@ class RollingKills {
   }
 }
 
-class LeaderboardRow {
-  public element: HTMLDivElement
-  private icon: HTMLImageElement | HTMLSpanElement
-  private name: HTMLSpanElement
-  private kills: RollingKills
-  public id: string
-
-  constructor(entry: LeaderboardEntry, initialRank: number) {
-    this.id = entry.id
-    this.element = document.createElement('div')
-    this.element.style.position = 'absolute'
-    this.element.style.display = 'flex'
-    this.element.style.alignItems = 'center'
-    this.element.style.gap = '8px'
-    this.element.style.padding = '2px 6px'
-    this.element.style.transition = 'transform 0.4s cubic-bezier(0.1, 0.88, 0.16, 1)'
-    this.element.style.width = '300px'
-
-    // Icon or Rank
-    this.icon = this.createIcon(initialRank)
-    this.element.appendChild(this.icon)
-
-    // Name
-    this.name = document.createElement('span')
-    this.name.style.fontFamily = "'m6x11', monospace"
-    this.name.style.fontSize = '24px'
-    this.name.style.minWidth = '100px'
-    this.name.style.paddingLeft = '6px'
-    this.name.style.textShadow = ringTextShadow(4)
-    this.name.style.textDecoration = 'none'
-    this.element.appendChild(this.name)
-
-    // Kills
-    this.kills = new RollingKills()
-    this.element.appendChild(this.kills.element)
-
-    this.update(entry, initialRank, false)
+function rankIconEl(rank: number): HTMLImageElement | HTMLSpanElement {
+  if (rank <= 3) {
+    const img = document.createElement('img')
+    const suffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : 'rd'
+    img.src = new URL(`../assets/leaderboard/${rank}${suffix}.png`, import.meta.url).href
+    img.style.width = '36px'
+    img.style.height = '36px'
+    img.style.objectFit = 'contain'
+    img.draggable = false
+    return img
   }
-
-  private createIcon(rank: number): HTMLImageElement | HTMLSpanElement {
-    if (rank <= 3) {
-      const img = document.createElement('img')
-      const suffix = rank === 1 ? 'st' : rank === 2 ? 'nd' : 'rd'
-      img.src = new URL(`../assets/leaderboard/${rank}${suffix}.png`, import.meta.url).href
-      img.style.width = '32px'
-      img.style.height = '32px'
-      img.style.objectFit = 'contain'
-      return img
-    } else {
-      const span = document.createElement('span')
-      span.style.fontFamily = "'m6x11', monospace"
-      span.style.fontSize = '18px'
-      span.style.color = '#aaaaaa'
-      span.style.width = '32px'
-      span.style.textAlign = 'center'
-      span.style.textShadow = ringTextShadow(4)
-      return span
-    }
-  }
-
-  public update(entry: LeaderboardEntry, rank: number, animate = true) {
-    // Update Rank Icon/Number
-    const newIconNeeded = (rank <= 3 && !(this.icon instanceof HTMLImageElement)) || 
-                          (rank > 3 && !(this.icon instanceof HTMLSpanElement)) ||
-                          (rank <= 3 && this.icon instanceof HTMLImageElement && !this.icon.src.includes(`${rank}`))
-    
-    if (newIconNeeded) {
-      const nextIcon = this.createIcon(rank)
-      this.element.replaceChild(nextIcon, this.icon)
-      this.icon = nextIcon
-    } else if (this.icon instanceof HTMLSpanElement) {
-      this.icon.textContent = `#${rank}`
-    }
-
-    // Update Name
-    this.name.textContent = entry.discovered ? entry.username : '???'
-    this.name.style.color = entry.isMe ? '#ffff00' : 'white'
-
-    // Update Kills
-    this.kills.setValue(entry.kills, animate)
-
-    // Update Position (Leaderboard UI will handle vertical offset)
-  }
+  const span = document.createElement('span')
+  span.style.fontFamily = "'m6x11', monospace"
+  span.style.fontSize = '20px'
+  span.style.color = '#aaaaaa'
+  span.style.textShadow = ringTextShadow(4)
+  span.textContent = `#${rank}`
+  return span
 }
 
 export class LeaderboardUI {
+  readonly portraitMount: HTMLDivElement
+
   private container: HTMLDivElement
-  private rows: Map<string, LeaderboardRow> = new Map()
-  private rowHeight = 40
+  private currentOpacity = 1
+
+  private rankSlots: (HTMLImageElement | HTMLSpanElement)[] = []
+  private nameSlots: HTMLSpanElement[] = []
+  private killSlots: RollingKills[] = []
+  private meRow: HTMLDivElement
 
   constructor() {
     this.container = document.createElement('div')
     this.container.id = 'leaderboard-ui'
-    this.container.style.position = 'absolute'
-    this.container.style.top = '20px'
-    this.container.style.left = '20px'
+    this.container.style.position = 'fixed'
+    this.container.style.top = '68px'
+    this.container.style.left = '50%'
+    this.container.style.transform = 'translateX(-50%)'
+    this.container.style.width = 'min(92vw, 880px)'
     this.container.style.zIndex = '100'
     this.container.style.pointerEvents = 'none'
+    this.container.style.display = 'flex'
+    this.container.style.flexDirection = 'column'
+    this.container.style.alignItems = 'stretch'
+    this.container.style.gap = '10px'
+
+    this.portraitMount = document.createElement('div')
+    this.portraitMount.style.width = '100%'
+    this.portraitMount.style.height = 'min(28vh, 280px)'
+    this.portraitMount.style.minHeight = '200px'
+    this.portraitMount.style.borderRadius = '4px'
+    this.portraitMount.style.overflow = 'hidden'
+    this.portraitMount.style.background = 'linear-gradient(180deg, rgba(10,12,16,0.35) 0%, rgba(10,12,16,0.12) 100%)'
+    this.container.appendChild(this.portraitMount)
+
+    const statsRow = document.createElement('div')
+    statsRow.style.display = 'flex'
+    statsRow.style.flexDirection = 'row'
+    statsRow.style.justifyContent = 'space-between'
+    statsRow.style.alignItems = 'flex-start'
+    statsRow.style.gap = '12px'
+    statsRow.style.padding = '4px 8px 0'
+
+    const thick = ringTextShadow(4)
+
+    for (let i = 0; i < 3; i++) {
+      const col = document.createElement('div')
+      col.style.flex = '1'
+      col.style.display = 'flex'
+      col.style.flexDirection = 'column'
+      col.style.alignItems = 'center'
+      col.style.minWidth = '0'
+
+      const rk = rankIconEl(i + 1)
+      this.rankSlots.push(rk)
+      col.appendChild(rk)
+
+      const name = document.createElement('span')
+      name.style.fontFamily = "'m6x11', monospace"
+      name.style.fontSize = '22px'
+      name.style.lineHeight = '1.15'
+      name.style.textAlign = 'center'
+      name.style.wordBreak = 'break-word'
+      name.style.maxWidth = '100%'
+      name.style.textShadow = thick
+      name.style.marginTop = '6px'
+      this.nameSlots.push(name)
+      col.appendChild(name)
+
+      const rkills = new RollingKills()
+      rkills.element.style.marginTop = '6px'
+      this.killSlots.push(rkills)
+      col.appendChild(rkills.element)
+
+      statsRow.appendChild(col)
+    }
+
+    this.container.appendChild(statsRow)
+
+    this.meRow = document.createElement('div')
+    this.meRow.style.fontFamily = "'m6x11', monospace"
+    this.meRow.style.fontSize = '18px'
+    this.meRow.style.textAlign = 'center'
+    this.meRow.style.textShadow = thick
+    this.meRow.style.color = '#ffff88'
+    this.meRow.style.display = 'none'
+    this.container.appendChild(this.meRow)
+
     document.body.appendChild(this.container)
   }
 
+  public getOpacity(): number {
+    return this.currentOpacity
+  }
+
   public setVisible(visible: boolean) {
+    this.currentOpacity = visible ? 1 : 0
     this.container.style.opacity = visible ? '1' : '0'
   }
 
   public setOpacity(alpha: number) {
     const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
+    this.currentOpacity = a
     this.container.style.opacity = String(a)
   }
 
   public update(topEntries: LeaderboardEntry[], myEntry?: LeaderboardEntry) {
-    const visibleEntries = [...topEntries]
-    if (myEntry && !visibleEntries.find(e => e.id === myEntry.id)) {
-      visibleEntries.push(myEntry)
+    const top3 = topEntries.slice(0, 3)
+
+    for (let i = 0; i < 3; i++) {
+      const entry = top3[i]
+      const nameEl = this.nameSlots[i]!
+      const killsRoll = this.killSlots[i]!
+      if (!entry) {
+        nameEl.textContent = '—'
+        nameEl.style.color = '#668'
+        killsRoll.setValue(0, false)
+        continue
+      }
+      nameEl.textContent = entry.discovered ? entry.username : '???'
+      nameEl.style.color = entry.isMe ? '#ffff00' : '#ffffff'
+      killsRoll.setValue(entry.kills, true)
     }
 
-    // Sort visible entries for display order (top 3, then potentially Me)
-    visibleEntries.sort((a, b) => {
-      if (a.rank <= 3 && b.rank <= 3) return a.rank - b.rank
-      if (a.rank <= 3) return -1
-      if (b.rank <= 3) return 1
-      return 0
-    })
-
-    // Update or create rows
-    const activeIds = new Set<string>()
-    visibleEntries.forEach((entry, idx) => {
-      const rank = entry.rank
-      let row = this.rows.get(entry.id)
-      if (!row) {
-        row = new LeaderboardRow(entry, rank)
-        this.container.appendChild(row.element)
-        this.rows.set(entry.id, row)
-      } else {
-        row.update(entry, rank, true)
-      }
-      
-      // Determine vertical position: Top 3 are 0,1,2. My entry might be extra.
-      let displayIdx = idx
-      if (idx >= 3 && entry.isMe) {
-        displayIdx = 4 // Spacer effect
-      }
-      
-      row.element.style.transform = `translateY(${displayIdx * this.rowHeight}px)`
-      row.element.style.display = 'flex'
-      activeIds.add(entry.id)
-    })
-
-    // Hide rows that are no longer active
-    this.rows.forEach((row, id) => {
-      if (!activeIds.has(id)) {
-        row.element.style.display = 'none'
-      }
-    })
+    if (myEntry && myEntry.rank > 3) {
+      this.meRow.style.display = 'block'
+      this.meRow.textContent = `YOU  #${myEntry.rank}  ·  ${myEntry.kills} kills`
+    } else {
+      this.meRow.style.display = 'none'
+    }
   }
 }
