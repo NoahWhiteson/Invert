@@ -83,7 +83,6 @@ const USERDATA_TRAIN_SHELL_VEHICLE_MESH = 'invertTrainShellVehicleMesh'
  */
 export class TrainTrackSystem {
   private objLoader = new OBJLoader()
-  private textureLoader = new THREE.TextureLoader()
   private sourceTrack: THREE.Object3D | null = null
   private scene: THREE.Scene
   private sphereRadius: number
@@ -151,19 +150,10 @@ export class TrainTrackSystem {
 
   private async ensureVehicleMaterial(): Promise<void> {
     if (this.trainVehicleMaterial) return
-    const href = new URL('../assets/models/grave_map/colormap.png', import.meta.url).href
-    const map = await new Promise<THREE.Texture>((resolve, reject) => {
-      this.textureLoader.load(href, resolve, undefined, reject)
-    })
-    map.colorSpace = THREE.SRGBColorSpace
-    map.anisotropy = 8
-    map.wrapS = THREE.ClampToEdgeWrapping
-    map.wrapT = THREE.ClampToEdgeWrapping
     const uTrainShellR = { value: this.nominalTrackRadius() }
     this.trainShellUniforms = { uTrainShellR }
 
     const mat = new THREE.MeshToonMaterial({
-      map,
       color: 0xffffff,
       side: THREE.DoubleSide,
     })
@@ -361,11 +351,25 @@ export class TrainTrackSystem {
       }
       const mesh = child as THREE.Mesh
       if (!mesh.isMesh && !(mesh as THREE.SkinnedMesh).isSkinnedMesh) return
+      if (mesh.name === 'trainVehicleOutline') return
       mesh.material = mat
       mesh.userData[USERDATA_TRAIN_SHELL_VEHICLE_MESH] = true
       mesh.castShadow = true
       mesh.receiveShadow = true
       mesh.frustumCulled = false
+      if (!mesh.getObjectByName('trainVehicleOutline')) {
+        const outlineMat = mat.clone()
+        outlineMat.map = null
+        outlineMat.color.setHex(0x000000)
+        outlineMat.side = THREE.BackSide
+        const outline = new THREE.Mesh(mesh.geometry, outlineMat)
+        outline.name = 'trainVehicleOutline'
+        outline.scale.setScalar(1.02)
+        outline.renderOrder = -1
+        outline.castShadow = false
+        outline.receiveShadow = false
+        mesh.add(outline)
+      }
     })
   }
 

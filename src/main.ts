@@ -1608,8 +1608,18 @@ function throwGrenade(charge: number) {
   cam.getWorldDirection(muzzleDir)
 
   const muzzlePos = new THREE.Vector3()
-  const dummyDir = new THREE.Vector3()
-  heldWeapons.getMuzzleWorldPosAndDir(muzzlePos, dummyDir)
+  const anchor = heldWeapons.getMuzzleFlashAnchor()
+  if (anchor) {
+    anchor.getWorldPosition(muzzlePos)
+  } else {
+    muzzlePos.copy(_worldPos)
+    muzzlePos.addScaledVector(muzzleDir, 0.55)
+  }
+
+  const mdl = heldWeapons.getWeaponModel(GRENADE_SLOT)
+  if (mdl) {
+    grenadeSystem.setModel(mdl)
+  }
 
   // Power scales derived from charge (0 to 1)
   const baseSpeed = 0.18

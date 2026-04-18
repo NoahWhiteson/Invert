@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+const _grenadeDown = new THREE.Vector3()
+
 export class ExplosionEffect {
   public group: THREE.Group
   public active = true
@@ -107,8 +109,14 @@ export class Grenade {
       return
     }
 
-    const downDir = this.obj.position.clone().normalize()
-    this.velocity.add(downDir.clone().multiplyScalar(gravity * 60 * dt))
+    const p = this.obj.position
+    const lenSq = p.lengthSq()
+    if (lenSq > 1e-10) {
+      _grenadeDown.copy(p).multiplyScalar(1 / Math.sqrt(lenSq))
+    } else {
+      _grenadeDown.set(0, 1, 0)
+    }
+    this.velocity.add(_grenadeDown.multiplyScalar(gravity * 60 * dt))
     this.velocity.multiplyScalar(this.friction)
     this.obj.position.add(this.velocity)
 
@@ -154,11 +162,9 @@ export class GrenadeSystem {
     this.onDamageTrigger = onDamage
   }
 
-  public setModel(model: THREE.Object3D) {
-    if (this.model) return
+  public setModel(model: THREE.Object3D | null) {
+    if (!model) return
     this.model = model
-    // Do not force `visible = false` on the live FP weapon mesh — it shares the same object as the
-    // throw template; hiding it breaks the hand model / clone visibility. HeldWeapons owns visibility.
   }
 
   public throw(position: THREE.Vector3, velocity: THREE.Vector3, scale: number = 1) {
