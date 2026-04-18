@@ -19,22 +19,12 @@ export class DeathUI {
   private onRespawnClick: (() => void) | null = null
   /** Native `disabled` on buttons drops click events; use a flag + styling instead. */
   private respawnReady = false
-  private debugEnabled = true
-
-  private setDebug(message: string) {
-    if (!this.debugEnabled) return
-    const t = Math.round(performance.now())
-    const text = `[DeathUI ${t}] ${message}`
-    console.debug(text)
-  }
 
   private readonly boundOnKeyDown = (e: KeyboardEvent) => {
-    this.setDebug(`keydown ${e.code} repeat=${e.repeat} ready=${this.respawnReady}`)
     if (e.code !== 'Space' || e.repeat) return
     if (!this.respawnReady) return
     e.preventDefault()
     e.stopPropagation()
-    this.setDebug('keydown accepted -> onRespawnClick()')
     this.onRespawnClick?.()
   }
 
@@ -153,11 +143,9 @@ export class DeathUI {
     })
 
     const tryRespawn = (e: Event) => {
-      this.setDebug(`click target=${(e.target as HTMLElement | null)?.tagName ?? 'unknown'} ready=${this.respawnReady}`)
       if (!this.respawnReady) return
       e.preventDefault()
       e.stopPropagation()
-      this.setDebug('click accepted -> onRespawnClick()')
       this.onRespawnClick?.()
     }
     this.card.addEventListener('click', tryRespawn)
@@ -292,10 +280,14 @@ export class DeathUI {
     this.shownCountdown = toValue
   }
 
-  public show(killerName: string, weapon: string, onRespawnClick: () => void) {
+  public show(
+    killerName: string,
+    weapon: string,
+    onRespawnClick: () => void,
+    options?: { detailsText?: string }
+  ) {
     this.onRespawnClick = onRespawnClick
-    this.setDebug(`show killer=${killerName} weapon=${weapon}`)
-    this.details.textContent = `${killerName} killed you with ${weapon}`
+    this.details.textContent = options?.detailsText ?? `${killerName} killed you with ${weapon}`
     this.countdown = 10
     this.shownCountdown = 10
     this.respawnReady = false
@@ -325,7 +317,6 @@ export class DeathUI {
         this.timerId = null
         this.respawnReady = true
         this.applyRespawnReadyStyle()
-        this.setDebug('countdown complete -> force respawn')
         this.respawnPrefix.style.display = 'inline'
         this.respawnPrefix.textContent = 'Respawning...'
         this.respawnDigitsRow.style.display = 'none'
@@ -333,7 +324,6 @@ export class DeathUI {
         this.onRespawnClick?.()
         return
       }
-      this.setDebug(`countdown tick -> ${this.countdown}`)
       this.respawnPrefix.textContent = 'Respawn ('
       this.respawnDigitsRow.style.display = 'inline-flex'
       this.respawnSuffix.style.display = 'inline'
@@ -343,7 +333,6 @@ export class DeathUI {
   }
 
   public hide() {
-    this.setDebug('hide')
     this.respawnReady = false
     if (this.timerId) {
       window.clearInterval(this.timerId)

@@ -5,6 +5,9 @@ export {}
 declare global {
   interface Window {
     game: {
+      trainTrackRotation: { x: number; y: number; z: number; order: string }
+      trainTrackRadialOffset: { meters: number }
+      refreshTrainTrack: () => string
       inflictDMG: (damageAmount: number, dirX?: number, dirY?: number, dirZ?: number) => void
       testBlood: () => string
       freeze: () => string

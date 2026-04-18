@@ -6,6 +6,14 @@ import { InputManager } from './core/Input'
 import { LightingSystem } from './systems/Lighting'
 import { GrassSystem } from './systems/GrassSystem'
 import { TreeSystem, type TreePlacement } from './systems/TreeSystem'
+import {
+  TrainTrackSystem,
+  TRAIN_PLAYER_HIT_COOLDOWN_MS,
+  TRAIN_PLAYER_HIT_DAMAGE,
+  TRAIN_PLAYER_HIT_KNOCKBACK,
+  TRAIN_TRACK_PIECE_ROTATION,
+  TRAIN_TRACK_RADIAL_OFFSET,
+} from './systems/TrainTrackSystem'
 import { PlayerController } from './systems/PlayerController'
 import { StaminaUI } from './ui/StaminaUI'
 import { Crosshair } from './ui/Crosshair'
@@ -109,6 +117,7 @@ const input = new InputManager()
 new LightingSystem(core.scene, sphereRadius)
 const grass = new GrassSystem(core.scene, sphereRadius)
 const trees = new TreeSystem(core.scene, sphereRadius)
+const trainTrack = new TrainTrackSystem(core.scene, sphereRadius)
 
 const player = new PlayerController(core.scene, core.camera, sphereRadius)
 
@@ -337,26 +346,18 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
 }
 
 function onDeathScreenConfirmRespawn() {
-  console.debug('[RespawnDebug] onDeathScreenConfirmRespawn fired', {
-    connected: multiplayer.isConnected(),
-    isDead,
-    health: player.state.health,
-  })
   if (multiplayer.isConnected()) {
-    console.debug('[RespawnDebug] sending respawn request to server')
     multiplayer.sendLocalDeath()
     multiplayer.sendRespawn()
     if (respawnFallbackTimer) clearTimeout(respawnFallbackTimer)
     respawnFallbackTimer = setTimeout(() => {
       if (!isDead) return
-      console.debug('[RespawnDebug] fallback local respawn (server ack timeout)')
       player.setPointerLockAllowed(true)
       finishLocalRespawn(100, 100, null)
       void player.controls.lock()
     }, 1300)
     return
   }
-  console.debug('[RespawnDebug] offline respawn path')
   player.setPointerLockAllowed(true)
   finishLocalRespawn(100, 100, null)
   void player.controls.lock()
@@ -389,6 +390,43 @@ function handleLocalDeathFromBot(botIndex: number) {
   killFeed.setOpacity(0)
   heldWeapons.setThirdPerson(true)
   deathUI.show(botName, 'AK-47', onDeathScreenConfirmRespawn)
+}
+
+function handleLocalDeathFromEnvironment(
+  hitImpulseDir: THREE.Vector3,
+  killerLabel: string,
+  weaponLabel: string,
+  detailsText: string
+) {
+  if (isDead) return
+  isDead = true
+  deadKillerId = null
+  player.state.health = 0
+  if (multiplayer.isConnected()) {
+    multiplayer.sendLocalDeath()
+  }
+
+  if (playerModel.root) {
+    const impulse =
+      hitImpulseDir.lengthSq() > 1e-8
+        ? hitImpulseDir.clone().multiplyScalar(14)
+        : player.state.velocity.clone().multiplyScalar(10)
+    localPlayerRagdoll = tryCreateSkeletonRagdoll(playerModel.root, playerModel.anims, impulse)
+  }
+
+  player.setPointerLockAllowed(false)
+  player.controls.unlock()
+  crosshair.setVisible(false)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  heldWeapons.setThirdPerson(true)
+  deathUI.show(killerLabel, weaponLabel, onDeathScreenConfirmRespawn, { detailsText })
+}
+
+function handleLocalDeathFromTrain(hitAwayWorld: THREE.Vector3) {
+  handleLocalDeathFromEnvironment(hitAwayWorld, 'Train', 'Train', 'Killed by Train')
 }
 
 function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius: number): TreePlacement[] {
@@ -469,7 +507,8 @@ setInterval(updateLeaderboard, 100)
 
 void Promise.all([
   targetPlayers.init(),
-  multiplayer.init()
+  multiplayer.init(),
+  trainTrack.init(),
 ]).then(() => {
   void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
 
@@ -566,13 +605,6 @@ void Promise.all([
   }
 
   multiplayer.onPlayerRespawn = (playerId, health, maxHealth, pos) => {
-    console.debug('[RespawnDebug] onPlayerRespawn event', {
-      playerId,
-      local: multiplayer.getLocalPlayerId(),
-      health,
-      maxHealth,
-      hasPos: !!pos,
-    })
     if (playerId !== multiplayer.getLocalPlayerId()) return
     finishLocalRespawn(health, maxHealth, pos)
   }
@@ -702,21 +734,31 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 
   // Handle ALL explosion logic here: Damage, Knockback, Visuals
   const distToPlayer = player.playerGroup.position.distanceTo(params.pos)
-  if (distToPlayer < params.damageRadius) {
+  if (distToPlayer <= params.damageRadius + 1e-3) {
     const power = 1 - (distToPlayer / params.damageRadius)
     // 10 max damage for self-damage, scaled by distance
     const dmg = params.playerSelfDamage * power
     if (dmg >= 1) {
-      window.game.inflictDMG(dmg)
+      player.inflictDamage(dmg)
       if (!playedImpactThisExplosion) {
         playSfx(impactSfx, 1.0, 'impact')
         playedImpactThisExplosion = true
       }
     }
 
-    // Major knockback
-    const kbDir = player.playerGroup.position.clone().sub(params.pos).normalize()
-    player.applyImpulse(kbDir.multiplyScalar(params.knockbackForce * 1.5 * power))
+    const kbDir = _v1.copy(player.playerGroup.position).sub(params.pos)
+    const kbLen = kbDir.length()
+    if (kbLen > 1e-5) {
+      kbDir.multiplyScalar(1 / kbLen)
+    } else {
+      kbDir.copy(player.playerGroup.position)
+      if (kbDir.lengthSq() > 1e-10) kbDir.normalize()
+      else kbDir.set(0, 1, 0)
+    }
+    player.applyImpulse(_colDelta.copy(kbDir).multiplyScalar(params.knockbackForce * 1.5 * power))
+    if (player.state.health <= 0 && !isDead) {
+      handleLocalDeathFromEnvironment(kbDir, 'Self', 'Grenade', 'Killed by Grenade')
+    }
   }
 
   // Damage bots
@@ -1209,6 +1251,8 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
 
 const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
+const _trainHitAway = new THREE.Vector3()
+let lastTrainPlayerHitMs = -Infinity
 let isLeftMouseDown = false
 let isRightMouseDown = false
 let wasLeftMouseDownLastFrame = false
@@ -1592,6 +1636,14 @@ let lastHealth = player.state.health
 let isFrozen = false
 
 window.game = {
+  /** Same object as `TRAIN_TRACK_PIECE_ROTATION` — tweak `.x/.y/.z` in **degrees** then `refreshTrainTrack()`. */
+  trainTrackRotation: TRAIN_TRACK_PIECE_ROTATION,
+  /** Same object as `TRAIN_TRACK_RADIAL_OFFSET` — tweak `.meters` then `refreshTrainTrack()`. */
+  trainTrackRadialOffset: TRAIN_TRACK_RADIAL_OFFSET,
+  refreshTrainTrack() {
+    trainTrack.refreshLayout()
+    return 'Train track ring rebuilt'
+  },
   inflictDMG(damageAmount: number, dirX?: number, dirY?: number, dirZ?: number) {
     const dir =
       dirX !== undefined && dirY !== undefined && dirZ !== undefined
@@ -1609,7 +1661,6 @@ window.game = {
   },
   freeze() {
     isFrozen = !isFrozen
-    console.log(isFrozen ? 'Game Frozen' : 'Game Unfrozen')
     return `Game ${isFrozen ? 'Frozen' : 'Unfrozen'}`
   },
   thirdperson() {
@@ -1683,6 +1734,7 @@ function animate() {
     if (atMainMenu && !isDead) {
       grass.update(time)
       trees.update(time)
+      trainTrack.update(dt)
       targetPlayers.syncPlayerSpawnHint(_mainMenuBotHint)
       if (!mainMenuFullChromeApplied) {
         applyMainMenuView()
@@ -1737,6 +1789,7 @@ function animate() {
 
     grass.update(time)
     trees.update(time)
+    trainTrack.update(dt)
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
 
     const humanPlayerCount = multiplayer.getHumanPlayerCount()
@@ -1910,6 +1963,23 @@ function animate() {
           player.state.velocity.addScaledVector(_colDelta, -into)
         }
       }
+
+      if (!atMainMenu) {
+        const nowTrainHit = performance.now()
+        if (nowTrainHit - lastTrainPlayerHitMs >= TRAIN_PLAYER_HIT_COOLDOWN_MS) {
+          if (trainTrack.testPlayerTrainCollision(myPos, myRadius, _trainHitAway)) {
+            lastTrainPlayerHitMs = nowTrainHit
+            _trainHitAway.normalize()
+            player.inflictDamage(TRAIN_PLAYER_HIT_DAMAGE, _trainHitAway)
+            playSfx(impactSfx, 1.0, 'impact')
+            if (player.state.health <= 0) {
+              handleLocalDeathFromTrain(_trainHitAway)
+            } else {
+              player.applyImpulse(_tmpKb.copy(_trainHitAway).multiplyScalar(TRAIN_PLAYER_HIT_KNOCKBACK))
+            }
+          }
+        }
+      }
     }
     if (player.state.onGround) shotgunMidairKnockbackUsed = false
 
@@ -1927,21 +1997,21 @@ function animate() {
 
     const botBrain: BotBrainContext | null = !settingsUI.isOpen && !matchEndedFreeze
       ? {
-          playerPosition: player.playerGroup.position,
-          playerAlive: !isDead,
-          getHumanPositionsForVision: () => {
-            const out: THREE.Vector3[] = []
-            const grace = performance.now() < localSpawnBotGraceUntilMs
-            if (!isDead && !grace) out.push(player.playerGroup.position)
-            for (const p of multiplayer.getAllPlayers()) {
-              if (!p.ragdoll && p.health > 0) out.push(p.model.position)
-            }
-            return out
-          },
-          worldMesh: mesh,
-          nowMs: currentTime,
-          tryBotAkHit,
-        }
+        playerPosition: player.playerGroup.position,
+        playerAlive: !isDead,
+        getHumanPositionsForVision: () => {
+          const out: THREE.Vector3[] = []
+          const grace = performance.now() < localSpawnBotGraceUntilMs
+          if (!isDead && !grace) out.push(player.playerGroup.position)
+          for (const p of multiplayer.getAllPlayers()) {
+            if (!p.ragdoll && p.health > 0) out.push(p.model.position)
+          }
+          return out
+        },
+        worldMesh: mesh,
+        nowMs: currentTime,
+        tryBotAkHit,
+      }
       : null
     targetPlayers.update(dt, botBrain)
 

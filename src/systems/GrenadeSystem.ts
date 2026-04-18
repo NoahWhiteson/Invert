@@ -157,7 +157,8 @@ export class GrenadeSystem {
   public setModel(model: THREE.Object3D) {
     if (this.model) return
     this.model = model
-    this.model.visible = false
+    // Do not force `visible = false` on the live FP weapon mesh — it shares the same object as the
+    // throw template; hiding it breaks the hand model / clone visibility. HeldWeapons owns visibility.
   }
 
   public throw(position: THREE.Vector3, velocity: THREE.Vector3, scale: number = 1) {
