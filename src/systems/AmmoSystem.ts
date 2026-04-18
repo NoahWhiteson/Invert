@@ -74,4 +74,13 @@ export class AmmoSystem {
     this.reserve[i]! -= take
     return take > 0
   }
+
+  /** Full mags + starting reserves (e.g. respawn). */
+  public refillAllToStarting() {
+    for (let i = 0; i < this.specs.length; i++) {
+      const s = this.specs[i]!
+      this.mag[i] = s.magazineSize
+      this.reserve[i] = s.startingReserve
+    }
+  }
 }

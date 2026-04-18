@@ -1,6 +1,10 @@
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 
+import tracksObjUrl from '../assets/models/train/tracks.obj?url'
+import frontObjUrl from '../assets/models/train/front.obj?url'
+import cartsObjUrl from '../assets/models/train/carts.obj?url'
+
 /** Segment local: +Y = inward normal, +Z = tangent. Model: length +X, tie height +Y, width +Z. */
 const _mPieceToSeg = new THREE.Matrix4()
 _mPieceToSeg.makeBasis(
@@ -388,11 +392,10 @@ export class TrainTrackSystem {
   }
 
   private async loadStyledObj(
-    relPath: string,
+    href: string,
     label: string,
     mode: 'track' | 'vehicle'
   ): Promise<THREE.Group | null> {
-    const href = new URL(relPath, import.meta.url).href
     try {
       const object = await this.objLoader.loadAsync(href)
       if (mode === 'track') this.applyObjDrawables(object)
@@ -422,7 +425,7 @@ export class TrainTrackSystem {
   private async ensureSourceTrackLoaded(): Promise<void> {
     if (this.sourceTrack) return
 
-    const object = await this.loadStyledObj('../assets/models/train/tracks.obj', 'tracks.obj', 'track')
+    const object = await this.loadStyledObj(tracksObjUrl, 'tracks.obj', 'track')
     if (!object) return
 
     this.sourceTrack = object
@@ -435,8 +438,8 @@ export class TrainTrackSystem {
     this.trainCartRingPhaseFromFirstRads.length = 0
 
     const [front, carts0] = await Promise.all([
-      this.loadStyledObj('../assets/models/train/front.obj', 'front.obj', 'vehicle'),
-      this.loadStyledObj('../assets/models/train/carts.obj', 'carts.obj', 'vehicle'),
+      this.loadStyledObj(frontObjUrl, 'front.obj', 'vehicle'),
+      this.loadStyledObj(cartsObjUrl, 'carts.obj', 'vehicle'),
     ])
     if (!front || !carts0) return
 

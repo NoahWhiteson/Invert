@@ -183,9 +183,13 @@ let matchEndTopThreeCache: LeaderboardEntry[] | null = null
 let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
 let deadKillerId: string | null = null
-/** After spawn / respawn, bots ignore the local player for this long (ms). */
-const LOCAL_SPAWN_BOT_GRACE_MS = 5500
-let localSpawnBotGraceUntilMs = 0
+/** After spawn / respawn: no damage from bots / train / grenades / PvP packets (ms). */
+const LOCAL_SPAWN_DAMAGE_INVULN_MS = 3000
+let localSpawnInvulnUntilMs = 0
+
+function localSpawnDamageInvulnerable(): boolean {
+  return performance.now() < localSpawnInvulnUntilMs
+}
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 let respawnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -342,7 +346,11 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   weaponUI.setOpacity(1)
   killFeed.setOpacity(1)
   deathUI.hide()
-  localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
+  localSpawnInvulnUntilMs = performance.now() + LOCAL_SPAWN_DAMAGE_INVULN_MS
+  ammoSystem.refillAllToStarting()
+  for (let s = 0; s < 3; s++) {
+    heldWeapons.setModelVisibility(s, true)
+  }
 }
 
 function onDeathScreenConfirmRespawn() {
@@ -541,6 +549,13 @@ void Promise.all([
 
   multiplayer.onPlayerDamaged = (targetId, damage, _attackerId, health, maxHealth) => {
     if (targetId === multiplayer.getLocalPlayerId()) {
+      if (localSpawnDamageInvulnerable()) {
+        if (typeof maxHealth === 'number') player.state.maxHealth = maxHealth
+        if (typeof health === 'number' && health > player.state.health) {
+          player.state.health = health
+        }
+        return
+      }
       if (typeof health === 'number') {
         const before = player.state.health
         player.state.health = Math.max(0, health)
@@ -734,7 +749,8 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 
   // Handle ALL explosion logic here: Damage, Knockback, Visuals
   const distToPlayer = player.playerGroup.position.distanceTo(params.pos)
-  if (distToPlayer <= params.damageRadius + 1e-3) {
+  const invuln = localSpawnDamageInvulnerable()
+  if (!invuln && distToPlayer <= params.damageRadius + 1e-3) {
     const power = 1 - (distToPlayer / params.damageRadius)
     // 10 max damage for self-damage, scaled by distance
     const dmg = params.playerSelfDamage * power
@@ -965,7 +981,11 @@ async function beginPlayFromMenu() {
   crosshair.setVisible(true)
   coinsHUD.setPlayMode(true)
   coinsHUD.setOpacity(1)
-  localSpawnBotGraceUntilMs = performance.now() + LOCAL_SPAWN_BOT_GRACE_MS
+  localSpawnInvulnUntilMs = performance.now() + LOCAL_SPAWN_DAMAGE_INVULN_MS
+  ammoSystem.refillAllToStarting()
+  for (let s = 0; s < 3; s++) {
+    heldWeapons.setModelVisibility(s, true)
+  }
   isPlayTransitioning = false
 }
 
@@ -1182,7 +1202,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets)
   const hitDist = h?.distance ?? Infinity
 
-  const spawnGraceActive = performance.now() < localSpawnBotGraceUntilMs
+  const spawnGraceActive = localSpawnDamageInvulnerable()
   let tPlayer: number | null = null
   if (!isDead && !spawnGraceActive) {
     tPlayer = rayIntersectSphereDist(_worldPos, _shotDir, player.playerGroup.position, 0.72)
@@ -1964,7 +1984,7 @@ function animate() {
         }
       }
 
-      if (!atMainMenu) {
+      if (!atMainMenu && !localSpawnDamageInvulnerable()) {
         const nowTrainHit = performance.now()
         if (nowTrainHit - lastTrainPlayerHitMs >= TRAIN_PLAYER_HIT_COOLDOWN_MS) {
           if (trainTrack.testPlayerTrainCollision(myPos, myRadius, _trainHitAway)) {
@@ -2001,7 +2021,7 @@ function animate() {
         playerAlive: !isDead,
         getHumanPositionsForVision: () => {
           const out: THREE.Vector3[] = []
-          const grace = performance.now() < localSpawnBotGraceUntilMs
+          const grace = localSpawnDamageInvulnerable()
           if (!isDead && !grace) out.push(player.playerGroup.position)
           for (const p of multiplayer.getAllPlayers()) {
             if (!p.ragdoll && p.health > 0) out.push(p.model.position)
