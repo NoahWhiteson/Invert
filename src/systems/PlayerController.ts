@@ -50,19 +50,29 @@ export class PlayerController {
   private _dirScratch = new THREE.Vector3()
   private _fwdScratch = new THREE.Vector3()
   private pointerLockAllowed = true
+  private lockElement: HTMLElement
 
   public onDamage?: (amount: number, hitDirection?: THREE.Vector3) => void
 
-  constructor(scene: THREE.Scene, camera: THREE.PerspectiveCamera, sphereRadius: number) {
+  constructor(
+    scene: THREE.Scene,
+    camera: THREE.PerspectiveCamera,
+    sphereRadius: number,
+    lockElement: HTMLElement
+  ) {
     this.playerGroup = new THREE.Group()
     scene.add(this.playerGroup)
     this.playerGroup.add(camera)
     camera.position.set(0, 0, 0)
     this.playerGroup.position.set(0, -sphereRadius + this.state.height, 0)
+    this.lockElement = lockElement
 
-    this.controls = new PointerLockControls(camera, document.body)
-    document.addEventListener('click', () => {
+    this.controls = new PointerLockControls(camera, this.lockElement)
+    this.lockElement.addEventListener('click', () => {
       if (!this.pointerLockAllowed) return
+      if (!this.lockElement.isConnected) return
+      const doc = this.lockElement.ownerDocument
+      if (!doc || doc.visibilityState !== 'visible') return
       this.controls.lock()
     })
   }

@@ -119,7 +119,7 @@ const grass = new GrassSystem(core.scene, sphereRadius)
 const trees = new TreeSystem(core.scene, sphereRadius)
 const trainTrack = new TrainTrackSystem(core.scene, sphereRadius)
 
-const player = new PlayerController(core.scene, core.camera, sphereRadius)
+const player = new PlayerController(core.scene, core.camera, sphereRadius, core.renderer.domElement)
 
 const MENU_CHAR_LOCAL_POS = new THREE.Vector3(0, -0.52, -5.1)
 const MENU_CHAR_SKINS_X = 3.45
