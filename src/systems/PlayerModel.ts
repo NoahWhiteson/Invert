@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { AnimationManager } from './AnimationManager'
 import { setRagdollOutlinesVisible } from './ragdollVisuals'
 
@@ -42,7 +42,7 @@ export class PlayerModel {
 
   public async init(scene: THREE.Scene) {
     try {
-      const fbx = await this.loader.loadAsync(IDLE_FBX)
+      const fbx = await loadFbxAsync(this.loader, IDLE_FBX)
       this.root = fbx
       this.root.scale.setScalar(0.01)
       this.root.visible = false
@@ -263,7 +263,7 @@ export class PlayerModel {
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
       try {
-        const fbx = await this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
+        const fbx = await loadFbxAsync(this.loader, new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)
@@ -321,8 +321,6 @@ export class PlayerModel {
           currentHand.add(fbx)
           this.thirdPersonGuns[i] = fbx
           fbx.visible = (i === this.activeWeaponSlot)
-          console.log(`[PlayerModel] Successfully attached ${cfg.file} to bone: ${currentHand.name}`)
-          console.log(`[PlayerModel] ${cfg.file} Local transform: `, fbx.position, fbx.rotation, fbx.scale)
         } else {
           console.error(`[PlayerModel] FAILED to find right hand bone for ${cfg.file}!`)
         }
@@ -340,7 +338,6 @@ export class PlayerModel {
         if (!hand) hand = c
       }
     })
-    console.log(`[PlayerModel findHandBone] Responded with: ${hand ? hand.name : 'null'}`)
     return hand
   }
 

@@ -5,7 +5,7 @@ const WAITING_FOR_PLAYERS_TEXT = 'Waiting for 1 More Player'
 export class TimerUI {
   private element: HTMLDivElement
   private startTime: number
-  private duration: number = 10 * 60 * 1000 // 10 minutes in ms
+  private duration: number = 3 * 60 * 1000 // 3 minutes in ms
   /** When false (solo, under 2 humans), UI shows waiting message. When true, match clock runs. */
   private countdownActive = false
   private serverMatchStart: number | null = null

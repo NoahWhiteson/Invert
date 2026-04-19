@@ -85,7 +85,6 @@ async function init() {
   controls.update()
 
   try {
-    console.log("Loading player model...")
     playerModel = await loader.loadAsync(ANIMS_PATH + 'Idle.fbx')
     
     playerModel.scale.setScalar(0.01)
@@ -140,7 +139,6 @@ async function init() {
     weaponAnchor.add(axesHelper)
     
     if (rightHandBone) {
-      console.log("Found Right Hand Bone:", rightHandBone.name)
       rightHandBone.add(weaponAnchor)
     } else {
       console.warn("Could not find right hand bone. Attaching to root.")

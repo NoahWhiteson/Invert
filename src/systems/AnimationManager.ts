@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 
 export type AnimationState = 'idle' | 'walk' | 'sprint' | 'crouch_idle' | 'crouch_walk' | 'firing' | 'jump'
 
@@ -172,19 +172,9 @@ export class AnimationManager {
     const prev = this.missingAnimLogAt.get(key) ?? 0
     if (now - prev < 400) return
     this.missingAnimLogAt.set(key, now)
-    console.log(`[AnimDebug:${this.debugLabel}] missing animation during ${where} (wanted "${String(wanted)}")`, {
-      currentState: this.currentState,
-      pendingLocomotion: this.pendingLocomotion,
-      actions: this.actionDebugSnapshot(),
-    })
   }
 
-  public logBootstrapInfo() {
-    console.log(`[AnimDebug:${this.debugLabel}] bootstrap`, {
-      states: [...this.actions.keys()],
-      snapshot: this.actionDebugSnapshot(),
-    })
-  }
+  public logBootstrapInfo() {}
 
   public static async preloadAll() {
     if (this.loadingPromise) return this.loadingPromise
@@ -196,7 +186,7 @@ export class AnimationManager {
 
       let firingBase: THREE.AnimationClip | null = null
       try {
-        const riflePose = await loader.loadAsync(FIRING_RIFLE_PATH)
+        const riflePose = await loadFbxAsync(loader, FIRING_RIFLE_PATH)
         if (riflePose.animations.length > 0) {
           firingBase = riflePose.animations[0]!.clone()
           zeroOutRootPositionTracks(firingBase)
@@ -236,7 +226,7 @@ export class AnimationManager {
       await Promise.all(
         otherStates.map(async ([state, path]) => {
           try {
-            const anim = await loader.loadAsync(path)
+            const anim = await loadFbxAsync(loader, path)
             if (anim.animations.length === 0) return
             const clip = anim.animations[0]!.clone()
             clip.name = state
@@ -612,12 +602,6 @@ export class AnimationManager {
       const now = this.nowMs()
       if (now - this.lastZeroWeightLogMs > 450) {
         this.lastZeroWeightLogMs = now
-        console.log(`[AnimDebug:${this.debugLabel}] low total weight -> forcing idle`, {
-          currentState: this.currentState,
-          sumWeight: Number(sumW.toFixed(5)),
-          pendingLocomotion: this.pendingLocomotion,
-          actions: this.actionDebugSnapshot(),
-        })
       }
       const idle = this.actions.get('idle')
       if (idle) {

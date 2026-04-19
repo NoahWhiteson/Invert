@@ -13,6 +13,7 @@ import {
   TRAIN_PLAYER_HIT_KNOCKBACK,
   TRAIN_TRACK_PIECE_ROTATION,
   TRAIN_TRACK_RADIAL_OFFSET,
+  TRAIN_VEHICLE_RADIAL_LIFT,
 } from './systems/TrainTrackSystem'
 import { PlayerController } from './systems/PlayerController'
 import { StaminaUI } from './ui/StaminaUI'
@@ -1688,6 +1689,8 @@ window.game = {
   trainTrackRotation: TRAIN_TRACK_PIECE_ROTATION,
   /** Same object as `TRAIN_TRACK_RADIAL_OFFSET` — tweak `.meters` then `refreshTrainTrack()`. */
   trainTrackRadialOffset: TRAIN_TRACK_RADIAL_OFFSET,
+  /** Loco + wagons only — tweak `.meters` (no refresh). */
+  trainVehicleRadialLift: TRAIN_VEHICLE_RADIAL_LIFT,
   refreshTrainTrack() {
     trainTrack.refreshLayout()
     return 'Train track ring rebuilt'

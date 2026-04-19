@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { AnimationManager, type AnimationState } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
@@ -137,7 +137,7 @@ export class MultiplayerSystem {
         t.generateMipmaps = true
       })
 
-      this.playerTemplate = await this.loader.loadAsync(IDLE_FBX)
+      this.playerTemplate = await loadFbxAsync(this.loader, IDLE_FBX)
       this.playerTemplate.scale.setScalar(0.01)
       
       this.playerTemplate.traverse((child) => {
@@ -238,7 +238,6 @@ export class MultiplayerSystem {
     }
 
     this.socket.onclose = () => {
-      console.log('[multiplayer] connection closed')
       this.socket = null
       if (!this.intentionalClose && this.connectUrl) {
         this.scheduleReconnect()
@@ -259,7 +258,6 @@ export class MultiplayerSystem {
       case "init":
         this.clearRemotePlayers()
         this.localPlayerId = data.playerId
-        console.log("Local player ID:", this.localPlayerId)
         this.worldState = {
           matchStartTime: data.matchStartTime ?? Date.now(),
           treeLayout: Array.isArray(data.treeLayout) ? data.treeLayout : [],
@@ -593,7 +591,7 @@ export class MultiplayerSystem {
 
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
-      this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href).then(fbx => {
+      loadFbxAsync(this.loader, new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href).then((fbx) => {
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)

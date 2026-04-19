@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import type { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
 function weaponAssetUrl(file: string): string {
@@ -320,7 +320,7 @@ export class HeldWeapons {
       const cfg = SLOT_CONFIG[i]!
       const url = weaponAssetUrl(cfg.file)
       try {
-        const fbx = await loader.loadAsync(url)
+        const fbx = await loadFbxAsync(loader, url)
         const wrap = new THREE.Group()
         wrap.name = `held_${cfg.file}`
         const meshes: THREE.Mesh[] = []
@@ -469,7 +469,7 @@ export class HeldWeapons {
     for (const f of files) {
       const url = weaponAssetUrl(f)
       try {
-        const fbx = await loader.loadAsync(url)
+        const fbx = await loadFbxAsync(loader, url)
         fbx.traverse((ch) => {
           const m = ch as THREE.Mesh
           if (!m.isMesh) return

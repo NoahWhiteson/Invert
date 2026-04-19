@@ -50,6 +50,13 @@ export const TRAIN_TRACK_PIECE_ROTATION = {
  */
 export const TRAIN_TRACK_RADIAL_OFFSET = { meters: -0.08 }
 
+/**
+ * Extra world radius for the locomotive + wagons only (track mesh unchanged).
+ * Positive = further from world origin on the same ring angle — lifts the train if it clips sunk ground.
+ * Live each frame; no `refreshTrainTrack()`. Typical tune ~0.1–1.0.
+ */
+export const TRAIN_VEHICLE_RADIAL_LIFT = { meters: -3.7}
+
 /** Locomotive + wagons: model length axis before aligning to ring tangent (+Z = forward on the ring). */
 export const TRAIN_VEHICLE_FORWARD_AXIS: 'x' | 'z' = 'x'
 
@@ -290,9 +297,10 @@ export class TrainTrackSystem {
     trackR: number,
     modelLocalQuat: THREE.Quaternion
   ) {
+    const vehicleR = trackR + TRAIN_VEHICLE_RADIAL_LIFT.meters
     const cu = Math.cos(u)
     const su = Math.sin(u)
-    _pTrain.copy(_e1).multiplyScalar(cu).addScaledVector(_e2, su).multiplyScalar(trackR)
+    _pTrain.copy(_e1).multiplyScalar(cu).addScaledVector(_e2, su).multiplyScalar(vehicleR)
     _tTrain.copy(_e1).multiplyScalar(-su).addScaledVector(_e2, cu).normalize()
     _uTrain.copy(_pTrain).normalize().multiplyScalar(-1)
     _xTrain.crossVectors(_uTrain, _tTrain).normalize()

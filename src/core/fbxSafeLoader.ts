@@ -24,3 +24,47 @@ export function createFbxLoaderWithSafeTextures(): FBXLoader {
   manager.setURLModifier((url) => (isBrokenEmbeddedTextureUrl(url) ? PLACEHOLDER_TEX_DATA_URL : url))
   return new FBXLoader(manager)
 }
+
+/** FBXLoader still console.warns for some valid-but-noisy cases (unsupported map types, >4 weights). */
+function isBenignFbxLoaderText(text: string): boolean {
+  if (!text.includes('THREE.FBXLoader:')) return false
+  return (
+    text.includes('map is not supported in three.js') ||
+    text.includes('more than 4 skinning weights')
+  )
+}
+
+let fbxWarnSuppressDepth = 0
+let realWarn: typeof console.warn = console.warn.bind(console)
+
+function fbxLoaderShimWarn(...args: Parameters<typeof console.warn>) {
+  if (fbxWarnSuppressDepth > 0) {
+    const text = args.map((a) => String(a)).join(' ')
+    if (isBenignFbxLoaderText(text)) return
+  }
+  realWarn(...args)
+}
+
+function beginBenignFbxLoaderWarnSuppress() {
+  if (fbxWarnSuppressDepth === 0) {
+    realWarn = console.warn.bind(console)
+    console.warn = fbxLoaderShimWarn
+  }
+  fbxWarnSuppressDepth++
+}
+
+function endBenignFbxLoaderWarnSuppress() {
+  fbxWarnSuppressDepth = Math.max(0, fbxWarnSuppressDepth - 1)
+  if (fbxWarnSuppressDepth === 0) {
+    console.warn = realWarn
+  }
+}
+
+export async function loadFbxAsync(loader: FBXLoader, url: string): Promise<THREE.Group> {
+  beginBenignFbxLoaderWarnSuppress()
+  try {
+    return (await loader.loadAsync(url)) as THREE.Group
+  } finally {
+    endBenignFbxLoaderWarnSuppress()
+  }
+}

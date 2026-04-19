@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { createFbxLoaderWithSafeTextures } from '../core/fbxSafeLoader'
+import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { AnimationManager } from './AnimationManager'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './SkeletonRagdoll'
@@ -113,7 +113,6 @@ export class TargetPlayersSystem {
   private _dirScratch = new THREE.Vector3()
   private handTraceRightHand: unknown = null
   private handTraceHips: unknown = null
-  private handTraceRightArm: unknown = null
   private handTracePrevLateral = 0
   private handTraceLastHeartbeatMs = 0
   private handTraceLastAnomalyMs = 0
@@ -122,8 +121,6 @@ export class TargetPlayersSystem {
   private _handPoseH = new THREE.Vector3()
   private _handPoseLw = new THREE.Vector3()
   private _handPoseLh = new THREE.Vector3()
-  private _handPoseQ = new THREE.Quaternion()
-  private _handPoseE = new THREE.Euler()
   public lastKnownPlayerPos = new THREE.Vector3(0, -50, 0)
 
   // Shared geometry & materials for performance
@@ -151,7 +148,7 @@ export class TargetPlayersSystem {
 
   public async init() {
     try {
-      this.template = (await this.loader.loadAsync(IDLE_FBX)) as THREE.Group
+      this.template = (await loadFbxAsync(this.loader, IDLE_FBX)) as THREE.Group
       this.template.scale.setScalar(0.01)
       
       this.template.traverse((child) => {
@@ -685,7 +682,7 @@ export class TargetPlayersSystem {
     for (let i = 0; i < configs.length; i++) {
       const cfg = configs[i]!
       try {
-        const fbx = await this.loader.loadAsync(new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
+        const fbx = await loadFbxAsync(this.loader, new URL(`../assets/player/weps/${cfg.file}`, import.meta.url).href)
         fbx.scale.setScalar(cfg.scale)
         fbx.position.copy(cfg.pos)
         fbx.rotation.copy(cfg.rot)
@@ -717,7 +714,6 @@ export class TargetPlayersSystem {
     this.handTracePrevLateral = 0
     let rh: THREE.Object3D | null = null
     let hips: THREE.Object3D | null = null
-    let rarm: THREE.Object3D | null = null
     model.traverse((c) => {
       const o = c as THREE.Object3D
       const n = (o.name ?? '').toLowerCase()
@@ -728,22 +724,9 @@ export class TargetPlayersSystem {
       if (!hips && n.includes('hips') && !n.includes('thumb')) {
         hips = o
       }
-      if (!rarm && (n.includes('rightarm') || n.includes('rightupperarm')) && !n.includes('fore') && !n.includes('roll')) {
-        rarm = o
-      }
     })
     this.handTraceRightHand = rh
     this.handTraceHips = hips
-    this.handTraceRightArm = rarm
-    const rhN = rh ? (rh as THREE.Object3D).name : null
-    const hipsN = hips ? (hips as THREE.Object3D).name : null
-    const rarmN = rarm ? (rarm as THREE.Object3D).name : null
-    console.log('[BotHandTposeTrace] setup bones', {
-      modelRoot: model.name || '(unnamed)',
-      rightHand: rhN,
-      hips: hipsN,
-      rightArm: rarmN,
-    })
   }
 
   private sampleHandPoseTrace(t: TargetState, nowMs: number) {
@@ -754,7 +737,6 @@ export class TargetPlayersSystem {
     if (!hand || !hip) {
       if (!this.handTraceWarnedMissingBones) {
         this.handTraceWarnedMissingBones = true
-        console.log('[BotHandTposeTrace] sample skipped: missing hand/hip bones (see setup log)')
       }
       return
     }
@@ -770,7 +752,6 @@ export class TargetPlayersSystem {
     t.container.worldToLocal(this._handPoseLh)
 
     const dx = this._handPoseLw.x - this._handPoseLh.x
-    const dy = this._handPoseLw.y - this._handPoseLh.y
     const dz = this._handPoseLw.z - this._handPoseLh.z
     const lateral = Math.sqrt(dx * dx + dz * dz)
     const lateralDelta = lateral - this.handTracePrevLateral
@@ -792,48 +773,10 @@ export class TargetPlayersSystem {
 
     if (heartbeat) {
       this.handTraceLastHeartbeatMs = nowMs
-      console.log('[BotHandTposeTrace] heartbeat', {
-        lateral: Number(lateral.toFixed(4)),
-        dy: Number(dy.toFixed(4)),
-        lateralDelta: Number(lateralDelta.toFixed(4)),
-        sumEffectiveWeight: Number(sumW.toFixed(4)),
-        animState: anims.getCurrentState(),
-        locoIntent: t.locoIntent,
-        chasing: t.chasing,
-        onGround: t.onGround,
-        handWorld: [Number(this._handPoseW.x.toFixed(3)), Number(this._handPoseW.y.toFixed(3)), Number(this._handPoseW.z.toFixed(3))],
-        hipWorld: [Number(this._handPoseH.x.toFixed(3)), Number(this._handPoseH.y.toFixed(3)), Number(this._handPoseH.z.toFixed(3))],
-      })
     }
 
     if (anomaly && anomalyCooldown) {
       this.handTraceLastAnomalyMs = nowMs
-      const arm = this.handTraceRightArm as THREE.Object3D | null
-      let armEuler: { x: number; y: number; z: number } | null = null
-      if (arm) {
-        arm.getWorldQuaternion(this._handPoseQ)
-        this._handPoseE.setFromQuaternion(this._handPoseQ, 'YXZ')
-        armEuler = {
-          x: Number(((this._handPoseE.x * 180) / Math.PI).toFixed(1)),
-          y: Number(((this._handPoseE.y * 180) / Math.PI).toFixed(1)),
-          z: Number(((this._handPoseE.z * 180) / Math.PI).toFixed(1)),
-        }
-      }
-      console.log('[BotHandTposeTrace] ANOMALY', {
-        reasons,
-        lateral: Number(lateral.toFixed(4)),
-        dy: Number(dy.toFixed(4)),
-        lateralDelta: Number(lateralDelta.toFixed(4)),
-        sumEffectiveWeight: Number(sumW.toFixed(4)),
-        containerLocalHandMinusHip: { dx: Number(dx.toFixed(4)), dy: Number(dy.toFixed(4)), dz: Number(dz.toFixed(4)) },
-        rightArmBone: arm?.name ?? null,
-        rightArmWorldEulerDeg: armEuler,
-        anim: anims.exportHandPoseDebugContext(),
-        locoIntent: t.locoIntent,
-        chasing: t.chasing,
-        onGround: t.onGround,
-        lastBotFireAgeMs: nowMs - t.lastBotFireMs,
-      })
     }
   }
 
@@ -1057,7 +1000,6 @@ export class TargetPlayersSystem {
         this.handTracePrevLateral = 0
       }
       t.anims.hardResetToIdle()
-      console.log(`[AnimDebug:bot-${String(index + 1).padStart(2, '0')}] respawn hardResetToIdle`)
       if (index === BOT_HAND_TPOSE_TRACE_INDEX) {
         t.anims.ingestExternalTrace('respawn:after_hardResetToIdle', { index })
       }
