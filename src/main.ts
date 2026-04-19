@@ -917,7 +917,6 @@ async function beginPlayFromMenu() {
   matchEndedByDebug = false
   mainMenuFullChromeApplied = false
   player.controls.enabled = false
-  player.setPointerLockAllowed(false)
   mainMenuPlayUI.getPlayButton().style.pointerEvents = 'none'
 
   const startPos = player.playerGroup.position.clone()
@@ -950,6 +949,8 @@ async function beginPlayFromMenu() {
   player.state.onGround = true
   player.setPointerLockAllowed(true)
   player.controls.enabled = true
+  input.isSimulatedUnlocked = false
+  tryAutoLockCursor()
 
   staminaUI.setSuppressForMenu(false)
   mainMenuPlayUI.setVisible(false)
@@ -991,7 +992,12 @@ async function beginPlayFromMenu() {
 
 mainMenuPlayUI = new MainMenuPlayUI()
 mainMenuPlayUI.setOnPlay(() => {
-  if (atMainMenu && !isDead) void beginPlayFromMenu()
+  if (atMainMenu && !isDead) {
+    input.isSimulatedUnlocked = false
+    player.setPointerLockAllowed(true)
+    tryAutoLockCursor()
+    void beginPlayFromMenu()
+  }
 })
 
 mainMenuNavUI = new MainMenuNavUI({
@@ -1664,6 +1670,18 @@ function updateCrosshairEnemyHover() {
 
 let lastHealth = player.state.health
 let isFrozen = false
+let settingsWasOpenLastFrame = false
+let lastDamageTakenAtMs = performance.now()
+const PASSIVE_HEAL_DELAY_MS = 3000
+const PASSIVE_HEAL_PER_SEC = 4
+
+function tryAutoLockCursor() {
+  if (document.visibilityState !== 'visible') return
+  if (document.pointerLockElement === core.renderer.domElement) return
+  if (!player.controls.isLocked) {
+    void player.controls.lock()
+  }
+}
 
 window.game = {
   /** Same object as `TRAIN_TRACK_PIECE_ROTATION` — tweak `.x/.y/.z` in **degrees** then `refreshTrainTrack()`. */
@@ -2169,6 +2187,12 @@ function animate() {
     }
 
     settingsUI.update(input, isDead || matchEndedFreeze)
+    if (settingsWasOpenLastFrame && !settingsUI.isOpen && !atMainMenu && !isDead && !matchEndedFreeze) {
+      input.isSimulatedUnlocked = false
+      player.setPointerLockAllowed(true)
+      tryAutoLockCursor()
+    }
+    settingsWasOpenLastFrame = settingsUI.isOpen
     fpsCounter.update()
     {
       const slot = heldWeapons.getActiveSlot()
@@ -2191,8 +2215,21 @@ function animate() {
 
     if (player.state.health < lastHealth) {
       damageIndicator.trigger()
+      lastDamageTakenAtMs = currentTime
       lastHealth = player.state.health
     } else if (player.state.health > lastHealth) {
+      lastHealth = player.state.health
+    }
+
+    if (
+      !atMainMenu &&
+      !isDead &&
+      !matchEndedFreeze &&
+      player.state.health > 0 &&
+      player.state.health < player.state.maxHealth &&
+      currentTime - lastDamageTakenAtMs >= PASSIVE_HEAL_DELAY_MS
+    ) {
+      player.state.health = Math.min(player.state.maxHealth, player.state.health + PASSIVE_HEAL_PER_SEC * dt)
       lastHealth = player.state.health
     }
 
@@ -2249,6 +2286,7 @@ function animate() {
     )
   } else {
     settingsUI.update(input, isDead)
+    settingsWasOpenLastFrame = settingsUI.isOpen
     fpsCounter.update()
     const slot = heldWeapons.getActiveSlot()
     const st = slot < 3 ? ammoSystem.getState(slot) : null
