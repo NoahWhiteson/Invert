@@ -18,10 +18,8 @@ export class InputManager {
       // Toggle Simulated Unlock with 'KeyY'
       if (e.code === 'KeyY') {
         this.isSimulatedUnlocked = !this.isSimulatedUnlocked
-        // Reset virtual mouse to center when unlocking
         if (this.isSimulatedUnlocked) {
-          this.virtualMousePos.x = window.innerWidth / 2
-          this.virtualMousePos.y = window.innerHeight / 2
+          this.centerVirtualMouse()
         }
       }
     })
@@ -52,6 +50,11 @@ export class InputManager {
     window.addEventListener('contextmenu', (e) => {
       if (document.pointerLockElement) e.preventDefault()
     })
+  }
+
+  public centerVirtualMouse() {
+    this.virtualMousePos.x = window.innerWidth / 2
+    this.virtualMousePos.y = window.innerHeight / 2
   }
 
   public isKeyDown(code: string): boolean {

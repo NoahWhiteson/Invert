@@ -790,6 +790,7 @@ export class SettingsUI {
       }
     } else {
       this.customCursor.style.display = 'none'
+      this.isHovering = false
     }
   }
 }

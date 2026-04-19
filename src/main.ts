@@ -2190,6 +2190,7 @@ function animate() {
     if (settingsWasOpenLastFrame && !settingsUI.isOpen && !atMainMenu && !isDead && !matchEndedFreeze) {
       input.isSimulatedUnlocked = false
       player.setPointerLockAllowed(true)
+      input.centerVirtualMouse()
       tryAutoLockCursor()
     }
     settingsWasOpenLastFrame = settingsUI.isOpen
