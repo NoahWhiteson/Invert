@@ -593,10 +593,14 @@ export class GameRoom extends DurableObject {
 	private generateTreeLayout(count: number, sphereRadius: number, safeZoneRadius: number) {
 		const trees: Array<{ phi: number; theta: number; scale: number }> = [];
 		const spawnPos = { x: 0, y: -sphereRadius, z: 0 };
+		/** Keep in sync with client `src/core/Utils.ts` train corridor (xz great circle, phi = π/2). */
+		const trainPhi = Math.PI / 2;
+		const trainHalfWidth = 0.36;
 
 		while (trees.length < count) {
 			const phi = Math.random() * Math.PI;
 			const theta = Math.random() * Math.PI * 2;
+			if (Math.abs(phi - trainPhi) < trainHalfWidth) continue;
 			const x = sphereRadius * Math.sin(phi) * Math.cos(theta);
 			const y = sphereRadius * Math.cos(phi);
 			const z = sphereRadius * Math.sin(phi) * Math.sin(theta);

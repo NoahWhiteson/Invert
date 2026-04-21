@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { randomPhiThetaClearOfTrainTrack } from '../core/Utils'
 import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { AnimationManager } from './AnimationManager'
@@ -901,7 +902,8 @@ export class TargetPlayersSystem {
     let bestScore = -Infinity
     const best = new THREE.Vector3()
     for (let attempt = 0; attempt < BOT_SPAWN_ATTEMPTS; attempt++) {
-      out.setFromSphericalCoords(R, Math.random() * Math.PI, Math.random() * Math.PI * 2)
+      const st = randomPhiThetaClearOfTrainTrack(80)
+      out.setFromSphericalCoords(R, st.phi, st.theta)
       let nearestPlayer = Infinity
       let nearestBot = Infinity
 
@@ -929,7 +931,8 @@ export class TargetPlayersSystem {
       }
     }
     if (bestScore > -Infinity) return best
-    out.setFromSphericalCoords(R, Math.random() * Math.PI, Math.random() * Math.PI * 2)
+    const st = randomPhiThetaClearOfTrainTrack(80)
+    out.setFromSphericalCoords(R, st.phi, st.theta)
     return out
   }
 

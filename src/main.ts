@@ -2,6 +2,10 @@ import './style.css'
 import m6x11FontUrl from './assets/m6x11.ttf?url'
 import * as THREE from 'three'
 import { SceneSetup } from './core/Scene'
+import {
+  isPhiBlockedByTrainTrack,
+  randomPhiThetaClearOfTrainTrack,
+} from './core/Utils'
 import { InputManager } from './core/Input'
 import { LightingSystem } from './systems/Lighting'
 import { GrassSystem } from './systems/GrassSystem'
@@ -65,7 +69,6 @@ import {
 } from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
 import { TentSystem } from './systems/TentSystem'
-import { CargoSystem } from './systems/CargoSystem'
 
 
 void (async () => {
@@ -124,7 +127,6 @@ const grass = new GrassSystem(core.scene, sphereRadius)
 const trees = new TreeSystem(core.scene, sphereRadius)
 const trainTrack = new TrainTrackSystem(core.scene, sphereRadius)
 const tents = new TentSystem(core.scene, sphereRadius)
-const cargo = new CargoSystem(core.scene, sphereRadius)
 
 
 const player = new PlayerController(core.scene, core.camera, sphereRadius, core.renderer.domElement)
@@ -451,6 +453,7 @@ function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius:
   while (out.length < count) {
     const phi = Math.random() * Math.PI
     const theta = Math.random() * Math.PI * 2
+    if (isPhiBlockedByTrainTrack(phi)) continue
     const p = new THREE.Vector3().setFromSphericalCoords(radius, phi, theta)
     if (p.distanceTo(spawnPos) < safeZoneRadius) continue
     out.push({ phi, theta, scale: 1.2 + Math.random() * 2.0 })
@@ -526,27 +529,23 @@ void Promise.all([
   multiplayer.init(),
   trainTrack.init(),
   tents.init(),
-  cargo.init(),
 ]).then(() => {
   void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
   
-  // Spawn a few tents around the world
-  tents.spawn(Math.PI * 0.45, Math.PI * 0.2)
-  tents.spawn(Math.PI * 0.55, Math.PI * 0.8)
-  tents.spawn(Math.PI * 0.40, Math.PI * 1.45)
+  for (let i = 0; i < 3; i++) {
+    const p = randomPhiThetaClearOfTrainTrack()
+    tents.spawn(p.phi, p.theta)
+  }
 
-  // Spawn some cargo scattered around
-  cargo.spawn(Math.PI * 0.5, Math.PI * 0.5, Math.random() * Math.PI)
-  cargo.spawn(Math.PI * 0.6, Math.PI * 1.1, Math.random() * Math.PI)
-  cargo.spawn(Math.PI * 0.4, Math.PI * 1.8, Math.random() * Math.PI)
-  cargo.spawn(Math.PI * 0.35, Math.PI * 0.25, Math.random() * Math.PI)
-  cargo.spawn(Math.PI * 0.7, Math.PI * 1.4, Math.random() * Math.PI)
 
 
   multiplayer.onWorldState = (state) => {
     timerUI.setStartTime(state.matchStartTime)
     if (state.treeLayout.length > 0) {
-      void trees.init(state.treeLayout)
+      const filtered = state.treeLayout.filter((t) => !isPhiBlockedByTrainTrack(t.phi))
+      void trees.init(
+        filtered.length > 0 ? filtered : createFallbackTreeLayout(80, sphereRadius, 8)
+      )
     }
   }
 
@@ -1139,14 +1138,12 @@ function pickShootIntersection(
   sphereR: number,
   humanPlayers: THREE.Object3D[],
   netPlayers: THREE.Object3D[],
-  tents: THREE.Object3D[],
-  cargo: THREE.Object3D[]
+  tents: THREE.Object3D[]
 ): THREE.Intersection | null {
   _entityRayBuffer.length = 0
   for (let i = 0; i < humanPlayers.length; i++) _entityRayBuffer.push(humanPlayers[i]!)
   for (let i = 0; i < netPlayers.length; i++) _entityRayBuffer.push(netPlayers[i]!)
   for (let i = 0; i < tents.length; i++) _entityRayBuffer.push(tents[i]!)
-  for (let i = 0; i < cargo.length; i++) _entityRayBuffer.push(cargo[i]!)
 
   raycaster.set(origin, dir)
   const entityHits = raycaster.intersectObjects(_entityRayBuffer, true)
@@ -1232,7 +1229,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     (o) => typeof o.userData.targetIdx !== 'number' || o.userData.targetIdx !== botIndex
   )
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), cargo.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets())
   const hitDist = h?.distance ?? Infinity
 
   const spawnGraceActive = localSpawnDamageInvulnerable()
@@ -1256,7 +1253,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
 
   if (!h) return
 
-  if (h.object === mesh || h.object.name.toLowerCase().includes('tent') || h.object.parent?.name.toLowerCase().includes('tent') || h.object.name.toLowerCase().includes('cargo') || h.object.parent?.name.toLowerCase().includes('cargo')) {
+  if (h.object === mesh || h.object.name.toLowerCase().includes('tent') || h.object.parent?.name.toLowerCase().includes('tent')) {
     const normal = h.face
       ? _worldNormalScratch.copy(h.face.normal).applyQuaternion(h.object.quaternion)
       : _worldNormalScratch.copy(h.point).normalize()
@@ -1562,7 +1559,7 @@ function shoot() {
     }
     const targets = targetPlayers.getRaycastTargets()
     const netTargets = multiplayer.getRaycastTargets()
-    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), cargo.getRaycastTargets())
+    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets())
 
     if (h) {
       if (h.object === mesh || !h.object.userData.networkPlayerId) {
@@ -1596,8 +1593,8 @@ function shoot() {
             updateLeaderboard()
             killFeed.push(damageRes.name, weaponLabelFromSlot(slot))
           }
-        } else if (h.object === mesh || h.object.name.toLowerCase().includes('tent') || h.object.parent?.name.toLowerCase().includes('tent') || h.object.name.toLowerCase().includes('cargo') || h.object.parent?.name.toLowerCase().includes('cargo')) {
-          // World, Tent or Cargo hit
+        } else if (h.object === mesh || h.object.name.toLowerCase().includes('tent') || h.object.parent?.name.toLowerCase().includes('tent')) {
+          // World or Tent hit
           const normal = h.face
             ? _worldNormalScratch.copy(h.face.normal).applyQuaternion(h.object.quaternion)
             : _worldNormalScratch.copy(h.point).normalize()
@@ -1683,7 +1680,7 @@ function updateCrosshairEnemyHover() {
   core.camera.getWorldDirection(muzzleDir)
   const targets = targetPlayers.getRaycastTargets()
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), cargo.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets())
   if (!h) {
     crosshair.setEnemyHover(false)
     return
@@ -1817,7 +1814,6 @@ function animate() {
       grass.update(time)
       trees.update(time)
       trainTrack.update(dt)
-      cargo.update(dt)
       targetPlayers.syncPlayerSpawnHint(_mainMenuBotHint)
       if (!mainMenuFullChromeApplied) {
         applyMainMenuView()
@@ -1873,7 +1869,6 @@ function animate() {
     grass.update(time)
     trees.update(time)
     trainTrack.update(dt)
-    cargo.update(dt)
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
 
     const humanPlayerCount = multiplayer.getHumanPlayerCount()
@@ -2052,25 +2047,6 @@ function animate() {
       const tentBodies = tents.getCollisionBodies()
       for (let i = 0; i < tentBodies.length; i++) {
         const b = tentBodies[i]!
-        _colDelta.copy(myPos).sub(b.position)
-        const distSq = _colDelta.lengthSq()
-        if (distSq < 1e-8) continue
-        const minDist = myRadius + b.radius
-        if (distSq >= minDist * minDist) continue
-        const dist = Math.sqrt(distSq)
-        const push = minDist - dist + 1e-4
-        _colDelta.multiplyScalar(1 / dist)
-        myPos.addScaledVector(_colDelta, push)
-        const into = player.state.velocity.dot(_colDelta)
-        if (into < 0) {
-          player.state.velocity.addScaledVector(_colDelta, -into)
-        }
-      }
-
-      // Prevent phasing through cargo
-      const cargoBodies = cargo.getCollisionBodies()
-      for (let i = 0; i < cargoBodies.length; i++) {
-        const b = cargoBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
         const distSq = _colDelta.lengthSq()
         if (distSq < 1e-8) continue
