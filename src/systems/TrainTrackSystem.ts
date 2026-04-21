@@ -67,7 +67,7 @@ export const TRAIN_VEHICLE_SPEED = 1
 export const TRAIN_VEHICLE_SCALE = 4
 
 /** World units between locomotive rear and carts front. */
-const TRAIN_CARTS_GAP = 0.12
+const TRAIN_CARTS_GAP = 0.25
 
 /** Extra `carts.obj` blocks chained behind the first wagon (0 = one block only). */
 const TRAIN_EXTRA_WAGON_BLOCKS = 3
@@ -553,7 +553,8 @@ export class TrainTrackSystem {
   private measureVehicleBodyDepthLocalZ(align: THREE.Group): number {
     align.updateMatrixWorld(true)
     _invAlignScratch.copy(align.matrixWorld).invert()
-    let maxSpan = 1e-4
+    let zMin = Infinity
+    let zMax = -Infinity
     align.traverse((child) => {
       const mesh = child as THREE.Mesh
       if (!mesh.isMesh || mesh.name.toLowerCase().includes('wheels')) return
@@ -561,19 +562,14 @@ export class TrainTrackSystem {
         | THREE.BufferAttribute
         | undefined
       if (!pos) return
-      let zmin = Infinity
-      let zmax = -Infinity
       for (let i = 0; i < pos.count; i++) {
         _bendV.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld).applyMatrix4(_invAlignScratch)
-        if (_bendV.z < zmin) zmin = _bendV.z
-        if (_bendV.z > zmax) zmax = _bendV.z
-      }
-      if (Number.isFinite(zmin) && Number.isFinite(zmax)) {
-        const span = zmax - zmin
-        if (span > maxSpan) maxSpan = span
+        if (_bendV.z < zMin) zMin = _bendV.z
+        if (_bendV.z > zMax) zMax = _bendV.z
       }
     })
-    return maxSpan
+    if (!Number.isFinite(zMin) || !Number.isFinite(zMax)) return 1e-4
+    return zMax - zMin
   }
 
   /**
