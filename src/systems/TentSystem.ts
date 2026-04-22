@@ -51,10 +51,31 @@ export class TentSystem {
     this.material = createTentToonFill(this.tentColor, false)
     this.materialSkinned = createTentToonFill(this.tentColor, true)
 
-    this.edgeMaterial = new THREE.LineBasicMaterial({
-      color: TENT_CONFIG.OUTLINE_COLOR,
+    this.edgeMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(TENT_CONFIG.OUTLINE_COLOR) }
+      },
+      transparent: true,
       depthTest: true,
-    })
+      vertexShader: `
+        varying float vDist;
+        void main() {
+          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+          vDist = length(mvPos.xyz);
+          gl_Position = projectionMatrix * mvPos;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying float vDist;
+        void main() {
+          // Fade out outlines between 15 and 45 units away
+          float alpha = 1.0 - smoothstep(15.0, 45.0, vDist);
+          if (alpha <= 0.0) discard;
+          gl_FragColor = vec4(uColor, alpha);
+        }
+      `
+    }) as any // Cast to any because it will be used as a LineBasicMaterial alternative
   }
 
   public async init() {
@@ -146,5 +167,9 @@ export class TentSystem {
     this.material.emissive.copy(this.tentColor).multiplyScalar(0.38)
     this.materialSkinned.color.copy(this.tentColor)
     this.materialSkinned.emissive.copy(this.tentColor).multiplyScalar(0.38)
+  }
+
+  public getTentPositions(): { position: THREE.Vector3; radius: number }[] {
+    return this.tentsData
   }
 }

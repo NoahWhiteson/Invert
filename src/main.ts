@@ -52,7 +52,7 @@ import { DamageTextSystem } from './systems/DamageTextSystem'
 import { LeaderboardUI, type LeaderboardEntry } from './ui/LeaderboardUI'
 import { AnnouncementUI } from './ui/AnnouncementUI'
 import { MultiplayerSystem } from './systems/MultiplayerSystem'
-import { type AnimationState } from './systems/AnimationManager'
+import { AnimationManager, type AnimationState } from './systems/AnimationManager'
 import { PlayerModel } from './systems/PlayerModel'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './systems/SkeletonRagdoll'
 import { HeldWeapons } from './systems/HeldWeapons'
@@ -186,6 +186,7 @@ window.addEventListener('pagehide', persistMyUsernameToLocalStorage)
 
 let lastFirstPlaceId: string | null = null
 let isDead = false
+let currentFov = 75
 /** PvP match timer hit zero: blur overlay, no move/shoot/look until humans drop below 2. */
 let matchEndedFreeze = false
 let matchEndTopThreeCache: LeaderboardEntry[] | null = null
@@ -194,11 +195,11 @@ let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
 let deadKillerId: string | null = null
 /** After spawn / respawn: no damage from bots / train / grenades / PvP packets (ms). */
-const LOCAL_SPAWN_DAMAGE_INVULN_MS = 3000
+const LOCAL_SPAWN_DAMAGE_INVULN_MS = 5000
 let localSpawnInvulnUntilMs = 0
 
 function localSpawnDamageInvulnerable(): boolean {
-  return performance.now() < localSpawnInvulnUntilMs
+  return atMainMenu || performance.now() < localSpawnInvulnUntilMs
 }
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 let respawnFallbackTimer: ReturnType<typeof setTimeout> | null = null
@@ -314,10 +315,39 @@ window.addEventListener(
 )
 
 function getRandomSpawnPos(radius: number): THREE.Vector3 {
-  const phi = Math.random() * Math.PI
-  const theta = Math.random() * Math.PI * 2
-  return new THREE.Vector3().setFromSphericalCoords(radius, phi, theta)
+  const out = new THREE.Vector3()
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const st = randomPhiThetaClearOfTrainTrack(80) 
+    out.setFromSphericalCoords(radius, st.phi, st.theta)
+    
+    // Check for collisions with other objects
+    let tooClose = false
+    
+    // Check tents
+    const tentPos = tents.getTentPositions()
+    for (const t of tentPos) {
+      if (out.distanceTo(t.position) < t.radius + 2.5) { // Increased from 1.5
+        tooClose = true
+        break
+      }
+    }
+    if (tooClose) continue
+
+    // Check trees
+    const treePos = trees.getTreeLayout()
+    for (const t of treePos) {
+      const tp = new THREE.Vector3().setFromSphericalCoords(radius, t.phi, t.theta)
+      if (out.distanceTo(tp) < 3.0) { // Increased from 2.2
+        tooClose = true
+        break
+      }
+    }
+    
+    if (!tooClose) return out
+  }
+  return out
 }
+  
 
 function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vector3 | null) {
   if (respawnFallbackTimer) {
@@ -988,6 +1018,10 @@ async function beginPlayFromMenu() {
   mainMenuSkinsUI.setOpacity(1)
   mainMenuStoreUI.setOpacity(1)
   mainMenuView = 'home'
+  
+  // Ensure animations are ready before we even start the menu session
+  await AnimationManager.preloadAll()
+  
   menuCharacterHolder.position.copy(MENU_CHAR_LOCAL_POS)
   menuCharacterHolder.visible = true
   if (playerModel.root && playerModel.root.parent === menuCharacterHolder) {
@@ -1242,7 +1276,6 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     const incoming = _tmpKb.copy(_shotDir).multiplyScalar(-1).normalize()
     player.inflictDamage(BOT_AK_DAMAGE, incoming)
     playSfx(impactSfx, 0.85, 'impact')
-    crosshair.triggerHit()
     const headPos = player.playerGroup.position.clone()
     const dmgUp = headPos.clone().normalize().multiplyScalar(-1)
     headPos.addScaledVector(dmgUp, 1.2)
@@ -1799,7 +1832,11 @@ function animate() {
   let lastFrameDt = 0
   if (!isFrozen) {
     timer.update()
-    const dt = timer.getDelta()
+    let dt = timer.getDelta()
+    // Sanity check for dt to prevent animation freezes or skips
+    if (isNaN(dt) || dt < 0) dt = 1/60
+    if (dt > 0.1) dt = 0.1 
+    
     lastFrameDt = dt
     const time = performance.now() / 1000
     const currentTime = performance.now()
@@ -1857,8 +1894,9 @@ function animate() {
       fpsCounter.update()
 
       const menuTargetFov = 50 + settingsUI.fovPercent * 70
-      if (core.camera.fov !== menuTargetFov) {
-        core.camera.fov = menuTargetFov
+      if (currentFov !== menuTargetFov) {
+        currentFov = menuTargetFov
+        core.camera.fov = currentFov
         core.camera.updateProjectionMatrix()
       }
 
@@ -2062,7 +2100,8 @@ function animate() {
         }
       }
 
-      if (!atMainMenu && !localSpawnDamageInvulnerable()) {
+      const isProtected = localSpawnDamageInvulnerable()
+      if (!atMainMenu && !isProtected) {
         const nowTrainHit = performance.now()
         if (nowTrainHit - lastTrainPlayerHitMs >= TRAIN_PLAYER_HIT_COOLDOWN_MS) {
           if (trainTrack.testPlayerTrainCollision(myPos, myRadius, _trainHitAway)) {
@@ -2335,6 +2374,30 @@ function animate() {
       currentTime,
       player.state.lastFailedActionTime
     )
+
+    // Update camera FOV from settings with ADS zoom + speed effects (smooth interpolation)
+    const baseFov = 50 + settingsUI.fovPercent * 70
+    let targetFov = baseFov
+    
+    if (player.state.isAiming) {
+      targetFov = baseFov * 0.82
+    } else {
+      // Dynamic FOV based on movement state
+      if (player.state.isSprinting) targetFov *= 1.15
+      if (player.state.isSliding) targetFov *= 1.25
+      if (!player.state.onGround && player.state.velocity.length() > player.state.moveSpeed * 2) targetFov *= 1.1
+    }
+
+    if (Math.abs(currentFov - targetFov) > 0.05) {
+      const blend = 1 - Math.pow(0.005, dt) // Responsive smoothing
+      currentFov += (targetFov - currentFov) * blend
+      core.camera.fov = currentFov
+      core.camera.updateProjectionMatrix()
+    } else if (currentFov !== targetFov) {
+      currentFov = targetFov
+      core.camera.fov = currentFov
+      core.camera.updateProjectionMatrix()
+    }
   } else {
     settingsUI.update(input, isDead)
     settingsWasOpenLastFrame = settingsUI.isOpen
@@ -2355,12 +2418,6 @@ function animate() {
     )
   }
 
-  // Update camera FOV from settings
-  const targetFov = 50 + (settingsUI.fovPercent * 70)
-  if (core.camera.fov !== targetFov) {
-    core.camera.fov = targetFov
-    core.camera.updateProjectionMatrix()
-  }
 
   core.render()
   matchEndShowcase.update(lastFrameDt, matchEndedFreeze && !atMainMenu && !isFrozen)

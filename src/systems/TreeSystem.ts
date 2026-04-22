@@ -173,4 +173,8 @@ export class TreeSystem {
       this.container.add(treeGroup)
     }
   }
+
+  public getTreeLayout(): TreePlacement[] {
+    return this.container.children.map((c) => c.userData as TreePlacement).filter(Boolean)
+  }
 }

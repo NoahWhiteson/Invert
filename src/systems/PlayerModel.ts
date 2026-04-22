@@ -152,9 +152,9 @@ export class PlayerModel {
   }
 
   public setVisible(visible: boolean, includeFootShadow = true) {
-    if (this.root) this.root.visible = visible
+    if (this.root) this.root.visible = visible && this.ready
     if (this.footShadow) {
-      this.footShadow.visible = visible && includeFootShadow
+      this.footShadow.visible = visible && includeFootShadow && this.ready
     }
   }
 

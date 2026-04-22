@@ -100,20 +100,13 @@ export class PlayerController {
       }
     }
 
-    let targetFOV = 75
     let targetZ = 0
     if (this.state.isAiming) {
-      targetFOV = this.state.isThirdPerson ? 50 : 38
       targetZ = this.state.isThirdPerson ? 2.5 : -0.8
     } else {
-      if (this.state.isSprinting) targetFOV = 88
-      if (this.state.isSliding) targetFOV = 98
-      if (!this.state.onGround && this.state.velocity.length() > this.state.moveSpeed * 2) targetFOV = 100
       targetZ = this.state.isThirdPerson ? 4.8 : 0
     }
     const fovBlend = 1 - Math.pow(0.85, Math.min(frameEquiv, 60))
-    camera.fov += (targetFOV - camera.fov) * fovBlend
-    camera.updateProjectionMatrix()
 
     if (this.state.shakeIntensity > 0.001) {
       const sx = (Math.random() - 0.5) * this.state.shakeIntensity

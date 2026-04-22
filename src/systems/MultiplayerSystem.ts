@@ -483,7 +483,11 @@ export class MultiplayerSystem {
     })
 
     const anims = new AnimationManager(model)
-    void anims.loadAll() // Async load
+    model.visible = false // Hide until ready
+    anims.loadAll().then(() => {
+      model.visible = true
+      anims.hardResetToIdle()
+    })
 
     const thirdPersonGuns: (THREE.Group | null)[] = [null, null, null]
     this.addThirdPersonGunsToRemote(model, thirdPersonGuns)

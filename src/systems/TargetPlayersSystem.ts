@@ -581,8 +581,6 @@ export class TargetPlayersSystem {
 
       if (t.anims && t.health > 0) {
         t.anims.update(dt)
-        t.anims.repairFiringStale()
-        t.anims.ensureAnyActionOrIdle()
       } else if (t.anims && t.health <= 0) {
         t.anims.update(0)
       }
@@ -645,7 +643,10 @@ export class TargetPlayersSystem {
       t.chasing = false
       t.velocity.set(0, 0, 0)
       t.steerDir.set(0, 0, 0)
-      if (t.anims) t.anims.update(0)
+      if (t.anims) {
+        t.anims.setState('idle', 0.2)
+        t.anims.update(dt)
+      }
 
       // Sink in gravity direction, then remove from scene.
       this._vA.copy(t.container.position)
@@ -838,13 +839,14 @@ export class TargetPlayersSystem {
     nameTag.position.set(0, floor + 2.35, 0)
     container.add(nameTag)
 
-    this.scene.add(container)
     const anims = new AnimationManager(model)
     anims.setDebugLabel(`bot-${String(index + 1).padStart(2, '0')}`)
     await anims.loadAll()
     anims.setState('idle', 0) // Initialize state immediately
     anims.hardResetToIdle()   // Ensure clean start
     anims.logBootstrapInfo()
+
+    this.scene.add(container)
 
     const guns: (THREE.Group | null)[] = [null, null, null]
     await this.addThirdPersonGunsToBot(model, guns)
@@ -953,7 +955,8 @@ export class TargetPlayersSystem {
   private respawnTarget(index: number) {
     const t = this.targets[index]
     if (!t) return
-    t.model.visible = true
+    // Visibility moved to after hardResetToIdle to avoid T-pose flicker
+    t.model.visible = false 
     if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
       t.anims.ingestExternalTrace('respawn:before_skeleton_pose_pass1', { index })
     }
@@ -1007,6 +1010,7 @@ export class TargetPlayersSystem {
         t.anims.ingestExternalTrace('respawn:after_hardResetToIdle', { index })
       }
     }
+    t.model.visible = true // Reveal after animations are reset
     t.facingYawTarget = t.model.rotation.y
 
     const nameTag = t.container.getObjectByName('nameTag')

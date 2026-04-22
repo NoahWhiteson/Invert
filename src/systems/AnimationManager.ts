@@ -552,6 +552,8 @@ export class AnimationManager {
       }
     }
     this.mixer.update(dt)
+    this.repairFiringStale()
+    this.ensureAnyActionOrIdle()
   }
 
   /** Firing sometimes never gets mixer `finished` (e.g. state churn); snap back to walk/idle. */
