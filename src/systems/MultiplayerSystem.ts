@@ -747,8 +747,12 @@ export class MultiplayerSystem {
         const isFlashing = p.flashTimer > 0
         p.model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh || (child as THREE.SkinnedMesh).isSkinnedMesh) {
+            (child as THREE.Mesh).frustumCulled = false
             const mat = (child as THREE.Mesh).material as THREE.MeshToonMaterial
-            if (mat?.color) mat.color.setHex(isFlashing ? 0xff0000 : 0x9f9f9f)
+            if (mat && mat.emissive) {
+              mat.emissive.setHex(isFlashing ? 0xff3333 : 0x000000)
+              mat.emissiveIntensity = isFlashing ? 0.8 : 0
+            }
           }
         })
       }

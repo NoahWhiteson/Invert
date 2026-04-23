@@ -594,8 +594,9 @@ export class TargetPlayersSystem {
       t.container.visible = true
 
       t.model.traverse((c) => {
-        if (c instanceof THREE.Mesh || (c as THREE.SkinnedMesh).isSkinnedMesh) {
+        if ((c as any).isMesh || (c as any).isSkinnedMesh) {
           c.visible = true
+          c.frustumCulled = false
         }
       })
 

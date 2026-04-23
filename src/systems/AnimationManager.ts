@@ -28,6 +28,18 @@ function zeroOutRootPositionTracks(clip: THREE.AnimationClip) {
   }
 }
 
+/** Mixamo / FBX often prefix tracks with object names (e.g. "bot.mixamorigHips"). Strip them. */
+function normalizeClipTracks(clip: THREE.AnimationClip) {
+  for (const track of clip.tracks) {
+    const parts = track.name.split('.')
+    if (parts.length > 2) {
+      // e.g. "bot.mixamorigHips.quaternion" -> "mixamorigHips.quaternion"
+      // we remove the first part if it's likely a container name
+      track.name = parts.slice(1).join('.')
+    }
+  }
+}
+
 /** Full skeleton locked to first sampled frame — used for idle (not shooting). */
 function freezeClipToFirstFrame(clip: THREE.AnimationClip): THREE.AnimationClip {
   const out = clip.clone()
@@ -71,7 +83,6 @@ export class AnimationManager {
   private currentState: AnimationState = 'idle'
   private ragdollFrozen = false
   private debugLabel = 'anim'
-  private lastZeroWeightLogMs = 0
   private missingAnimLogAt = new Map<string, number>()
   private animOpRing: AnimOpEntry[] = []
   private readonly ANIM_OP_RING_CAP = 56
@@ -210,12 +221,14 @@ export class AnimationManager {
 
           const idleClip = freezeClipToFirstFrame(firingBase)
           idleClip.name = 'idle'
+          normalizeClipTracks(idleClip)
           this.clipCache.set('idle', idleClip)
 
           const firingClip = firingBase.clone()
           firingClip.name = 'firing'
           flattenHipsQuaternionToFirstFrame(firingClip)
           zeroOutRootPositionTracks(firingClip)
+          normalizeClipTracks(firingClip)
           this.clipCache.set('firing', firingClip)
         }
       } catch (e) {
@@ -231,6 +244,7 @@ export class AnimationManager {
             const clip = anim.animations[0]!.clone()
             clip.name = state
             zeroOutRootPositionTracks(clip)
+            normalizeClipTracks(clip) // Apply normalization here
 
             const newTracks = [...clip.tracks]
             this.riflePoseTracks.forEach((track, name) => {
@@ -272,6 +286,7 @@ export class AnimationManager {
     const idle = this.actions.get('idle')
     if (idle) {
       idle.play()
+      this.mixer.update(0.1) // Sample at least one frame immediately
     }
     this.trace('loadAll:complete', { actionCount: this.actions.size })
   }
@@ -595,23 +610,17 @@ export class AnimationManager {
     this.actions.forEach((a) => {
       sumW += a.getEffectiveWeight()
     })
-    if (sumW < 0.05) {
+    if (sumW < 0.1) {
       this.trace('ensureAnyActionOrIdle:low_weight_recover', {
         sumWeight: Number(sumW.toFixed(5)),
         currentState: this.currentState,
-        pendingLocomotion: this.pendingLocomotion,
       })
-      const now = this.nowMs()
-      if (now - this.lastZeroWeightLogMs > 450) {
-        this.lastZeroWeightLogMs = now
-      }
       const idle = this.actions.get('idle')
       if (idle) {
         this.mixer.stopAllAction()
         idle.reset().setEffectiveWeight(1).play()
+        this.mixer.update(0.001) // Force pose calculation
         this.currentState = 'idle'
-      } else {
-        this.logMissingAnimation('ensureAnyActionOrIdle', 'idle')
       }
     }
   }
@@ -631,7 +640,7 @@ export class AnimationManager {
       this.logMissingAnimation('hardResetToIdle', 'idle')
     }
     this.currentState = 'idle'
-    this.mixer.update(0)
+    this.mixer.update(0.1) 
     this.trace('hardResetToIdle:done', {})
   }
 

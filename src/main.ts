@@ -142,6 +142,8 @@ const blood = new BloodSystem(core.scene, sphereRadius)
 const bulletHoles = new BulletHoleSystem(core.scene, sphereRadius)
 const targetPlayers = new TargetPlayersSystem(core.scene, sphereRadius, 4)
 const multiplayer = new MultiplayerSystem(core.scene)
+const playerModel = new PlayerModel()
+const heldWeapons = new HeldWeapons(core.scene, core.camera, sphereRadius)
 const damageTexts = new DamageTextSystem(core.scene)
 const leaderboardUI = new LeaderboardUI()
 const announcementUI = new AnnouncementUI()
@@ -195,12 +197,13 @@ let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
 let deadKillerId: string | null = null
 /** After spawn / respawn: no damage from bots / train / grenades / PvP packets (ms). */
-const LOCAL_SPAWN_DAMAGE_INVULN_MS = 5000
+const LOCAL_SPAWN_DAMAGE_INVULN_MS = 8000
 let localSpawnInvulnUntilMs = 0
 
 function localSpawnDamageInvulnerable(): boolean {
   return atMainMenu || performance.now() < localSpawnInvulnUntilMs
 }
+;(window as any).globalLocalSpawnInvulnerable = localSpawnDamageInvulnerable
 let localPlayerRagdoll: SkeletonRagdoll | undefined = undefined
 let respawnFallbackTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -559,6 +562,8 @@ void Promise.all([
   multiplayer.init(),
   trainTrack.init(),
   tents.init(),
+  AnimationManager.preloadAll(),
+  heldWeapons.loadAll(),
 ]).then(() => {
   void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
   
@@ -690,7 +695,6 @@ void Promise.all([
     }
   }
 })
-const playerModel = new PlayerModel()
 function resolveMatchEndPortraitSource(id: string): THREE.Group | null {
   if (id === 'me') {
     return playerModel.root ?? null
@@ -899,8 +903,6 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
     }
   }
 })
-const heldWeapons = new HeldWeapons(core.scene, core.camera, sphereRadius)
-void heldWeapons.loadAll()
 
 const AK_SKIN_TEX_URL: Record<AkGunSkinId, string> = {
   fabric: new URL('./assets/skins/Fabric.jpg', import.meta.url).href,
@@ -1018,9 +1020,6 @@ async function beginPlayFromMenu() {
   mainMenuSkinsUI.setOpacity(1)
   mainMenuStoreUI.setOpacity(1)
   mainMenuView = 'home'
-  
-  // Ensure animations are ready before we even start the menu session
-  await AnimationManager.preloadAll()
   
   menuCharacterHolder.position.copy(MENU_CHAR_LOCAL_POS)
   menuCharacterHolder.visible = true
@@ -1834,8 +1833,9 @@ function animate() {
     timer.update()
     let dt = timer.getDelta()
     // Sanity check for dt to prevent animation freezes or skips
-    if (isNaN(dt) || dt < 0) dt = 1/60
+    if (isNaN(dt) || dt <= 0) dt = 1/60
     if (dt > 0.1) dt = 0.1 
+    if (dt < 0.001) dt = 0.001
     
     lastFrameDt = dt
     const time = performance.now() / 1000

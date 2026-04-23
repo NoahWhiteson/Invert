@@ -332,6 +332,12 @@ export class PlayerController {
   public inflictDamage(amount: number, hitDirection?: THREE.Vector3) {
     const n = Number(amount)
     if (!Number.isFinite(n) || n < 0) return
+    
+    // Check if we are currently protected (window.globalLocalSpawnInvulnerable is set in main.ts)
+    if ((window as any).globalLocalSpawnInvulnerable?.()) {
+      return
+    }
+    
     this.state.health = Math.max(0, this.state.health - n)
     // Trigger shake based on damage %
     this.state.shakeIntensity = Math.min(0.5, this.state.shakeIntensity + (n / this.state.maxHealth) * 1.5)
