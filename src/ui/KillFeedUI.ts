@@ -77,6 +77,33 @@ export class KillFeedUI {
 
     row.appendChild(img)
     row.appendChild(text)
+
+    const coinImg = document.createElement('img')
+    coinImg.src = new URL('../assets/icons/coin.png', import.meta.url).href
+    coinImg.alt = ''
+    coinImg.style.width = '18px'
+    coinImg.style.height = '18px'
+    coinImg.style.objectFit = 'contain'
+    coinImg.style.imageRendering = 'pixelated'
+    coinImg.style.setProperty('image-rendering', 'crisp-edges')
+    coinImg.style.setProperty('image-rendering', '-webkit-optimize-contrast')
+    coinImg.draggable = false
+    coinImg.style.filter = ICON_TINY_OUTLINE
+    coinImg.style.marginLeft = '4px'
+
+    const coinText = document.createElement('span')
+    coinText.textContent = '+10'
+    coinText.style.fontFamily = "'m6x11', monospace"
+    coinText.style.fontSize = '18px'
+    coinText.style.lineHeight = '24px'
+    coinText.style.color = '#ffffff' // white
+    coinText.style.textShadow = ringTextShadow(3)
+    coinText.style.letterSpacing = '1px'
+    coinText.style.whiteSpace = 'nowrap'
+
+    row.appendChild(coinImg)
+    row.appendChild(coinText)
+
     this.container.prepend(row)
 
     window.setTimeout(() => {
