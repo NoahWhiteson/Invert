@@ -5,7 +5,7 @@ import { Crosshair } from './Crosshair'
 import { ringTextShadow } from './textOutline'
 
 export type SoundType = 'master' | 'gun' | 'impact' | 'explosion'
-export type GraphicOption = 'grass' | 'blood' | 'bulletHoles'
+export type GraphicOption = 'grass' | 'blood' | 'bulletHoles' | 'killLeaderMsg'
 
 export class SettingsUI {
   private button: HTMLImageElement
@@ -51,10 +51,11 @@ export class SettingsUI {
   public graphics: Record<GraphicOption, boolean> = {
     grass: true,
     blood: true,
-    bulletHoles: true
+    bulletHoles: true,
+    killLeaderMsg: true
   }
   public onGraphicsChange: (key: GraphicOption, on: boolean) => void = () => { }
-  private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null }
+  private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null, killLeaderMsg: null }
 
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
 
@@ -135,13 +136,21 @@ export class SettingsUI {
     window.addEventListener('contextmenu', (e) => e.preventDefault())
 
     this.menu.innerHTML = `
-      <div style="padding-bottom: 30px;">
-        <!-- VIEW SECTION -->
-        <div style="padding: 24px 30px 16px 30px; display: flex; align-items: center; justify-content: center; gap: 12px;">
-          <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
-          <span style="font-family: 'm6x11', monospace; font-size: 24px; color: #888; letter-spacing: 1.5px;">VIEW</span>
-          <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
-        </div>
+      <style>
+        .settings-scroll::-webkit-scrollbar { display: none; }
+        .settings-scroll {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      </style>
+      <div class="settings-scroll" style="width: 100%; height: 100%; overflow-y: scroll; -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 85%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 85%, transparent 100%); padding-bottom: 20px; box-sizing: border-box;">
+        <div style="padding-bottom: 40px;">
+          <!-- VIEW SECTION -->
+          <div style="padding: 24px 30px 16px 30px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+            <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+            <span style="font-family: 'm6x11', monospace; font-size: 24px; color: #888; letter-spacing: 1.5px;">VIEW</span>
+            <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+          </div>
         
         <div style="padding: 0 40px; display: flex; flex-direction: column; gap: 20px;">
           <div style="display: flex; align-items: center; justify-content: space-between;">
@@ -153,16 +162,16 @@ export class SettingsUI {
           </div>
           <div style="display: flex; align-items: center; justify-content: space-between;">
             <span style="font-family: 'm6x11', monospace; font-size: 28px; color: black; letter-spacing: 1px;">CROSSHAIR</span>
-            <div style="display: flex; gap: 10px;">
-              <div id="circleBtn" style="width: 52px; height: 52px; border: 2px solid black; display: flex; align-items: center; justify-content: center; border-radius: 2px; cursor: none;">
+            <div style="display: flex; width: 170px; gap: 6px;">
+              <div id="circleBtn" style="flex: 1; height: 42px; border: 2px solid black; display: flex; align-items: center; justify-content: center; cursor: none; box-sizing: border-box;">
                  <div id="circleIconContainer" style="width: 14px; height: 14px; border: 2px solid black; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                    <div id="circleIcon_Dot" style="width: 2px; height: 2px; background: black; border-radius: 50%;"></div>
                  </div>
               </div>
-              <div id="plusBtn" style="width: 52px; height: 52px; border: 2px solid black; display: flex; align-items: center; justify-content: center; border-radius: 2px; cursor: none;">
-                 <div style="position: relative; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;">
-                   <div id="plusIconV" style="position: absolute; width: 3px; height: 18px; background: black;"></div>
-                   <div id="plusIconH" style="position: absolute; width: 18px; height: 3px; background: black;"></div>
+              <div id="plusBtn" style="flex: 1; height: 42px; border: 2px solid black; display: flex; align-items: center; justify-content: center; cursor: none; box-sizing: border-box;">
+                 <div style="position: relative; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;">
+                   <div id="plusIconV" style="position: absolute; width: 2px; height: 16px; background: black;"></div>
+                   <div id="plusIconH" style="position: absolute; width: 16px; height: 2px; background: black;"></div>
                  </div>
               </div>
             </div>
@@ -195,6 +204,19 @@ export class SettingsUI {
           ${this.renderGraphicToggle('BLOOD', 'blood')}
           ${this.renderGraphicToggle('BULLET HOLES', 'bulletHoles')}
         </div>
+
+        <!-- GAMEPLAY SECTION -->
+        <div style="padding: 32px 30px 16px 30px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+          <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+          <span style="font-family: 'm6x11', monospace; font-size: 24px; color: #888; letter-spacing: 1.5px;">GAMEPLAY</span>
+          <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+        </div>
+
+        <div style="padding: 0 40px; display: flex; flex-direction: column; gap: 20px;">
+          ${this.renderGraphicToggle('KILL LEADER MSG', 'killLeaderMsg')}
+        </div>
+
+      </div>
       </div>
     `
     document.body.appendChild(this.menu)
@@ -221,6 +243,7 @@ export class SettingsUI {
     this.graphicButtons.grass = this.menu.querySelector('#btn-grass')
     this.graphicButtons.blood = this.menu.querySelector('#btn-blood')
     this.graphicButtons.bulletHoles = this.menu.querySelector('#btn-bulletHoles')
+    this.graphicButtons.killLeaderMsg = this.menu.querySelector('#btn-killLeaderMsg')
 
     // 5. Title (Above Card)
     this.title = document.createElement('h2')
@@ -439,7 +462,7 @@ export class SettingsUI {
   }
 
   public syncSystems() {
-    for (const key of ['grass', 'blood', 'bulletHoles'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
       this.onGraphicsChange(key, this.graphics[key])
     }
     this.crosshair.setStyle(this.currentCrosshairStyle)
@@ -546,7 +569,7 @@ export class SettingsUI {
     this.crosshair.setStyle('circle')
     this.updateStyleButtons()
 
-    for (const key of ['grass', 'blood', 'bulletHoles'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
       this.graphics[key] = true
       this.onGraphicsChange(key, true)
     }
@@ -585,7 +608,7 @@ export class SettingsUI {
   }
 
   private updateGraphicButtons() {
-    for (const key of ['grass', 'blood', 'bulletHoles'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
       const btn = this.graphicButtons[key]!
       if (this.graphics[key]) {
         btn.textContent = 'ENABLED'
@@ -682,7 +705,7 @@ export class SettingsUI {
       }
 
       let isOverGraphic = false
-      for (const key of ['grass', 'blood', 'bulletHoles'] as GraphicOption[]) {
+      for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
         const btn = this.graphicButtons[key]!
         const r = btn.getBoundingClientRect()
         if (this.isOpen && mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {

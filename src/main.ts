@@ -541,8 +541,10 @@ function updateLeaderboard() {
   const topOne = allEntries[0]
   if (topOne && topOne.kills > 0) {
     if (lastFirstPlaceId !== topOne.id) {
-      playSfx(newKillLeaderSfx, 1.0, 'master')
-      announcementUI.show('NEW KILL LEADER')
+      if (settingsUI.graphics.killLeaderMsg) {
+        playSfx(newKillLeaderSfx, 1.0, 'master')
+        announcementUI.show('NEW KILL LEADER')
+      }
     }
     lastFirstPlaceId = topOne.id
   } else {
