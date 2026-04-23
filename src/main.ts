@@ -260,6 +260,7 @@ function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number
   mainMenuNameUI.setOpacity(m)
   mainMenuSkinsUI.setOpacity(m)
   mainMenuStoreUI.setOpacity(m)
+  coinsHUD.setOpacity(m)
   leaderboardUI.setOpacity(g)
   timerUI.setOpacity(g)
   healthUI.setOpacity(g)
@@ -796,6 +797,7 @@ function applyMainMenuView() {
   mainMenuStoreUI.setOpacity(1)
   leaderboardUI.setVisible(false)
   timerUI.setVisible(false)
+  coinsHUD.setPlayMode(false)
 }
 
 const _v1 = new THREE.Vector3()
@@ -966,12 +968,13 @@ async function beginPlayFromMenu() {
     isPlayTransitioning = false
     return
   }
-  atMainMenu = false
   pendingDebugMatchEnd = false
   matchEndedByDebug = false
   mainMenuFullChromeApplied = false
   player.controls.enabled = false
   mainMenuPlayUI.getPlayButton().style.pointerEvents = 'none'
+  playerModel.setVisible(false)
+  menuCharacterHolder.visible = false
 
   const startPos = player.playerGroup.position.clone()
   const startQuat = player.playerGroup.quaternion.clone()
@@ -993,6 +996,7 @@ async function beginPlayFromMenu() {
   crosshair.setOpacity(0)
 
   await playMenuToGameTransition(startPos, startQuat, spawnPos, endQuat, startCamPos, startCamQuat)
+  atMainMenu = false // State change AFTER transition
   player.state.velocity.set(0, 0, 0)
 
   player.playerGroup.quaternion.copy(endQuat)
@@ -1847,7 +1851,7 @@ function animate() {
       timerUI.setVisible(false)
     }
 
-    if (atMainMenu && !isDead) {
+    if (atMainMenu && !isDead && !isPlayTransitioning) {
       grass.update(time)
       trees.update(time)
       trainTrack.update(dt)
