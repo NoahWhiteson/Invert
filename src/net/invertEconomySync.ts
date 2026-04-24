@@ -246,6 +246,10 @@ export async function trySyncEconomyFromApi(): Promise<void> {
       headers: { Authorization: `Bearer ${token}` },
     })
     if (!econ.ok) {
+      if (econ.status === 401 || econ.status === 404) {
+        localStorage.removeItem(API_TOKEN_KEY)
+        localStorage.removeItem(API_ACCOUNT_ID_KEY)
+      }
       if (import.meta.env.DEV) {
         console.warn('[economy] GET /economy failed', econ.status, await econ.text().catch(() => ''))
       }
@@ -281,6 +285,10 @@ async function pushCoinsToServer(): Promise<void> {
       body: JSON.stringify({ coins }),
     })
     if (!res.ok) {
+      if (res.status === 401 || res.status === 404) {
+        localStorage.removeItem(API_TOKEN_KEY)
+        localStorage.removeItem(API_ACCOUNT_ID_KEY)
+      }
       if (import.meta.env.DEV) console.warn('[economy] PATCH failed', res.status, await res.text().catch(() => ''))
       return
     }
