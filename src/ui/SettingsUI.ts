@@ -5,7 +5,7 @@ import { Crosshair } from './Crosshair'
 import { ringTextShadow } from './textOutline'
 
 export type SoundType = 'master' | 'gun' | 'impact' | 'explosion'
-export type GraphicOption = 'grass' | 'blood' | 'bulletHoles' | 'killLeaderMsg'
+export type GraphicOption = 'grass' | 'blood' | 'bulletHoles' | 'killLeaderMsg' | 'trainNoise'
 
 export class SettingsUI {
   private button: HTMLImageElement
@@ -52,10 +52,11 @@ export class SettingsUI {
     grass: true,
     blood: true,
     bulletHoles: true,
-    killLeaderMsg: true
+    killLeaderMsg: true,
+    trainNoise: true
   }
   public onGraphicsChange: (key: GraphicOption, on: boolean) => void = () => { }
-  private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null, killLeaderMsg: null }
+  private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null, killLeaderMsg: null, trainNoise: null }
 
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
 
@@ -214,6 +215,7 @@ export class SettingsUI {
 
         <div style="padding: 0 40px; display: flex; flex-direction: column; gap: 20px;">
           ${this.renderGraphicToggle('KILL LEADER MSG', 'killLeaderMsg')}
+          ${this.renderGraphicToggle('TRAIN NOISES', 'trainNoise')}
         </div>
 
       </div>
@@ -244,6 +246,7 @@ export class SettingsUI {
     this.graphicButtons.blood = this.menu.querySelector('#btn-blood')
     this.graphicButtons.bulletHoles = this.menu.querySelector('#btn-bulletHoles')
     this.graphicButtons.killLeaderMsg = this.menu.querySelector('#btn-killLeaderMsg')
+    this.graphicButtons.trainNoise = this.menu.querySelector('#btn-trainNoise')
 
     // 5. Title (Above Card)
     this.title = document.createElement('h2')
@@ -462,7 +465,7 @@ export class SettingsUI {
   }
 
   public syncSystems() {
-    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg', 'trainNoise'] as GraphicOption[]) {
       this.onGraphicsChange(key, this.graphics[key])
     }
     this.crosshair.setStyle(this.currentCrosshairStyle)
@@ -569,7 +572,7 @@ export class SettingsUI {
     this.crosshair.setStyle('circle')
     this.updateStyleButtons()
 
-    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg', 'trainNoise'] as GraphicOption[]) {
       this.graphics[key] = true
       this.onGraphicsChange(key, true)
     }
@@ -608,7 +611,7 @@ export class SettingsUI {
   }
 
   private updateGraphicButtons() {
-    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg', 'trainNoise'] as GraphicOption[]) {
       const btn = this.graphicButtons[key]!
       if (this.graphics[key]) {
         btn.textContent = 'ENABLED'
@@ -705,7 +708,7 @@ export class SettingsUI {
       }
 
       let isOverGraphic = false
-      for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg'] as GraphicOption[]) {
+      for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg', 'trainNoise'] as GraphicOption[]) {
         const btn = this.graphicButtons[key]!
         const r = btn.getBoundingClientRect()
         if (this.isOpen && mx >= r.left && mx <= r.right && my >= r.top && my <= r.bottom) {

@@ -22,7 +22,7 @@ const SLOT_GAP_PX = 10
 
 const hotbarUrl = new URL('../assets/icons/hotbar.png', import.meta.url).href
 
-const GUN_SLOT_PX = 52
+const GUN_SLOT_PX = 72
 
 const AK_MENU_TEX: Record<AkGunSkinId, string> = {
   fabric: new URL('../assets/skins/Fabric.jpg', import.meta.url).href,
@@ -107,14 +107,14 @@ export class MainMenuSkinsUI {
   private onAkGunSkinEquip?: (skin: EquippedAkSkin) => void
 
   private async applyCharacterEquipment(skinId: string | null): Promise<void> {
-    void this.clickSfx.play().catch(() => {})
+    void this.clickSfx.play().catch(() => { })
     const synced = await patchEconomyEquipment({ equippedCharacterSkin: skinId })
     if (!synced) writeEquippedSkinId(skinId)
     this.refresh()
   }
 
   private async applyGunEquipment(skin: EquippedAkSkin): Promise<void> {
-    void this.clickSfx.play().catch(() => {})
+    void this.clickSfx.play().catch(() => { })
     const synced = await patchEconomyEquipment({ equippedAkSkin: skin })
     if (!synced) setEquippedAkSkin(skin)
     this.onAkGunSkinEquip?.(skin)
@@ -150,7 +150,8 @@ export class MainMenuSkinsUI {
     this.leftPanel.style.display = 'flex'
     this.leftPanel.style.flexDirection = 'column'
     this.leftPanel.style.alignItems = 'flex-start'
-    this.leftPanel.style.gap = '14px'
+    this.leftPanel.style.gap = '20px'
+    this.leftPanel.style.padding = '42px 28px'
     this.leftPanel.style.pointerEvents = 'auto'
 
     this.emptyHintEl = document.createElement('div')
@@ -185,7 +186,7 @@ export class MainMenuSkinsUI {
     this.gunSection.appendChild(this.gunRow)
 
     this.charLabelEl = document.createElement('div')
-    this.charLabelEl.textContent = 'Character skins'
+    this.charLabelEl.textContent = 'Gun skins'
     this.charLabelEl.style.fontFamily = "'m6x11', monospace"
     this.charLabelEl.style.fontSize = '18px'
     this.charLabelEl.style.color = '#fff'
@@ -195,10 +196,9 @@ export class MainMenuSkinsUI {
     this.gridHost = document.createElement('div')
     this.gridHost.style.display = 'grid'
     this.gridHost.style.gridTemplateColumns = `repeat(${GRID_COLS}, ${SLOT_PX}px)`
-    this.gridHost.style.gap = `${SLOT_GAP_PX}px`
+    this.gridHost.style.gap = '16px'
 
     this.leftPanel.appendChild(this.emptyHintEl)
-    this.leftPanel.appendChild(this.gunSection)
     this.leftPanel.appendChild(this.charLabelEl)
     this.leftPanel.appendChild(this.gridHost)
 
@@ -242,7 +242,7 @@ export class MainMenuSkinsUI {
     inner.appendChild(soon)
   }
 
-  private makeAkGunSlot(skin: EquippedAkSkin, isEquipped: boolean): HTMLDivElement {
+  private makeAkGunSlot(skin: EquippedAkSkin, owned: boolean, isEquipped: boolean): HTMLDivElement {
     const wrap = document.createElement('div')
     wrap.style.width = `${GUN_SLOT_PX}px`
     wrap.style.display = 'flex'
@@ -269,6 +269,7 @@ export class MainMenuSkinsUI {
     hb.style.objectFit = 'contain'
     hb.style.imageRendering = 'pixelated'
     hb.style.pointerEvents = 'none'
+    if (!owned) hb.style.filter = 'brightness(0.42)'
 
     const inner = document.createElement('div')
     inner.style.position = 'absolute'
@@ -284,7 +285,7 @@ export class MainMenuSkinsUI {
       white.style.height = `${HOTBAR_PREVIEW_FILL * 100}%`
       white.style.maxWidth = '100%'
       white.style.maxHeight = '100%'
-      white.style.backgroundColor = '#f5f5f5'
+      white.style.backgroundColor = owned ? '#f5f5f5' : 'rgba(200,200,200,0.3)'
       white.style.borderRadius = '2px'
       white.style.boxSizing = 'border-box'
       white.style.border = '1px solid rgba(0,0,0,0.35)'
@@ -307,43 +308,51 @@ export class MainMenuSkinsUI {
       previewImg.style.webkitMaskSize = '100% 100%'
       previewImg.style.maskRepeat = 'no-repeat'
       previewImg.style.webkitMaskRepeat = 'no-repeat'
+      if (!owned) previewImg.style.filter = 'brightness(0.5) saturate(0.6)'
       inner.appendChild(previewImg)
     }
 
-    slot.style.cursor = 'none'
-    if (isEquipped) {
-      slot.style.outline = '2px solid #fff'
-      slot.style.outlineOffset = '2px'
-      slot.style.transform = 'scale(1.08)'
-      slot.style.zIndex = '1'
+    if (owned) {
+      slot.style.cursor = 'none'
+      if (isEquipped) {
+        slot.style.outline = '2px solid #fff'
+        slot.style.outlineOffset = '2px'
+        slot.style.transform = 'scale(1.08)'
+        slot.style.zIndex = '1'
+      } else {
+        slot.style.outline = 'none'
+        slot.style.transform = 'scale(1.0)'
+        slot.style.zIndex = '0'
+      }
+      slot.title = skin === 'default' ? 'Default AK' : `${AK_MENU_LABEL[skin]} (owned)`
+      slot.addEventListener('click', (e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        void this.applyGunEquipment(skin)
+      })
     } else {
+      slot.style.cursor = 'default'
       slot.style.outline = 'none'
       slot.style.transform = 'scale(1.0)'
       slot.style.zIndex = '0'
+      slot.title = `${AK_MENU_LABEL[skin as AkGunSkinId] ?? skin} — buy in Store`
     }
-
-    slot.title = skin === 'default' ? 'Default AK' : `${AK_MENU_LABEL[skin]} (owned)`
-    slot.addEventListener('click', (e) => {
-      e.stopPropagation()
-      e.preventDefault()
-      void this.applyGunEquipment(skin)
-    })
 
     slot.appendChild(hb)
     slot.appendChild(inner)
     wrap.appendChild(slot)
 
     const caption = document.createElement('div')
-    caption.textContent = skin === 'default' ? 'Default' : AK_MENU_LABEL[skin]
+    caption.textContent = skin === 'default' ? 'Default' : (AK_MENU_LABEL[skin as AkGunSkinId] ?? skin)
     caption.style.fontFamily = "'m6x11', monospace"
-    caption.style.fontSize = '10px'
+    caption.style.fontSize = '14px'
     caption.style.lineHeight = '1.1'
     caption.style.textAlign = 'center'
     caption.style.marginTop = '2px'
     caption.style.maxWidth = `${GUN_SLOT_PX}px`
     caption.style.textShadow = LABEL_SHADOW
     caption.style.pointerEvents = 'none'
-    caption.style.color = '#fff'
+    caption.style.color = owned ? '#fff' : 'rgba(255,255,255,0.45)'
     wrap.appendChild(caption)
 
     return wrap
@@ -449,40 +458,18 @@ export class MainMenuSkinsUI {
       eqAk = 'default'
     }
 
-    this.gunRow.replaceChildren()
-    this.gunRow.appendChild(this.makeAkGunSlot('default', eqAk === 'default'))
-    for (const id of ownedAk) {
-      this.gunRow.appendChild(this.makeAkGunSlot(id, eqAk === id))
-    }
-    if (ownedAk.length === 0) {
-      const hint = document.createElement('div')
-      hint.textContent = 'Buy AK skins in Store.'
-      hint.style.fontFamily = "'m6x11', monospace"
-      hint.style.fontSize = '12px'
-      hint.style.color = 'rgba(255,255,255,0.65)'
-      hint.style.textShadow = LABEL_SHADOW
-      hint.style.flexBasis = '100%'
-      hint.style.marginTop = '2px'
-      this.gunRow.appendChild(hint)
-    }
+    this.emptyHintEl.textContent = 'Select Default or buy weapon styles in the Store to unlock slots'
+    this.emptyHintEl.style.display = ownedAk.length === 0 ? 'block' : 'none'
 
-    const owned = readOwnedSkinIds()
-    let equipped = readStoredEquippedId()
-    if (equipped && !owned.includes(equipped)) {
-      writeEquippedSkinId(null)
-      equipped = null
-    }
-
-    this.emptyHintEl.textContent =
-      'Select Default or buy character / weapon skins in the Store to unlock slots'
-    this.emptyHintEl.style.display = owned.length === 0 && ownedAk.length === 0 ? 'block' : 'none'
-
-    const ownedSet = new Set(owned)
     this.gridHost.replaceChildren()
-    this.gridHost.appendChild(this.makeDefaultCharacterSlot(equipped))
-    for (let i = 0; i < SKIN_CATALOG.length; i++) {
-      const skinId = SKIN_CATALOG[i]!.id
-      this.gridHost.appendChild(this.makeCatalogSlot(skinId, ownedSet.has(skinId), equipped, i + 1))
+
+    // Add default
+    this.gridHost.appendChild(this.makeAkGunSlot('default', true, eqAk === 'default'))
+
+    // Add all catalog gun skins
+    const catalogAks = Object.keys(AK_MENU_LABEL) as AkGunSkinId[]
+    for (const id of catalogAks) {
+      this.gridHost.appendChild(this.makeAkGunSlot(id, ownedAk.includes(id), eqAk === id))
     }
   }
 

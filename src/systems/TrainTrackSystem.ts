@@ -114,7 +114,7 @@ export class TrainTrackSystem {
   /** Half-width of collision tube around loco→wagon spine (world). */
   private trainHitTubeRadius = 4
 
-  private readonly _hitPathPool: THREE.Vector3[] = Array.from({ length: 10 }, () => new THREE.Vector3())
+  private readonly _hitPathPool: THREE.Vector3[] = Array.from({ length: 32 }, () => new THREE.Vector3())
   private readonly _hitClosest = new THREE.Vector3()
   private readonly _hitSegAb = new THREE.Vector3()
   private readonly _hitSegAp = new THREE.Vector3()
@@ -203,6 +203,13 @@ export class TrainTrackSystem {
     this.rebuildRing()
   }
 
+  /** Returns true and fills `out` with the train front world position if the train is loaded. */
+  public getTrainFrontWorldPosition(out: THREE.Vector3): boolean {
+    if (!this.trainFrontAlign) return false
+    this.trainFrontAlign.getWorldPosition(out)
+    return true
+  }
+
   public update(dt: number) {
     if (this.trainRoot.children.length === 0) return
     this.trainPhase -= dt * TRAIN_VEHICLE_SPEED
@@ -247,9 +254,18 @@ export class TrainTrackSystem {
     let n = 0
     this.trainFrontAlign.getWorldPosition(this._hitPathPool[n]!)
     n++
+    // Insert interpolated midpoints between front and each cart for wider coverage
+    const _p0 = new THREE.Vector3()
+    const _p1 = new THREE.Vector3()
+    this.trainFrontAlign.getWorldPosition(_p0)
     for (let i = 0; i < this.trainCartsAligns.length; i++) {
-      this.trainCartsAligns[i]!.getWorldPosition(this._hitPathPool[n]!)
+      this.trainCartsAligns[i]!.getWorldPosition(_p1)
+      // midpoint between previous pivot and this one
+      this._hitPathPool[n]!.lerpVectors(_p0, _p1, 0.5)
       n++
+      this._hitPathPool[n]!.copy(_p1)
+      n++
+      _p0.copy(_p1)
     }
 
     const thresh = this.trainHitTubeRadius + playerBodyRadius
@@ -543,7 +559,9 @@ export class TrainTrackSystem {
       this.trainCartsAligns[1]!.getWorldPosition(this._hitMeasureC)
       dMax = Math.max(dMax, this._hitMeasureB.distanceTo(this._hitMeasureC))
     }
-    this.trainHitTubeRadius = Math.max(3.2, dMax * 0.48)
+    // Use half the inter-cart step as radius, but ensure it's always wide enough
+    // to cover the physical cart body (minimum 5 world units)
+    this.trainHitTubeRadius = Math.max(5.0, dMax * 0.55)
   }
 
   /**

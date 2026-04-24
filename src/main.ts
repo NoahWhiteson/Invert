@@ -1365,9 +1365,153 @@ const heartbeatSfx = new Audio(new URL('./assets/audio/heartbeat.mp3', import.me
 heartbeatSfx.loop = true
 heartbeatSfx.volume = 0
 const oneMinuteSfx = new Audio(new URL('./assets/audio/1 Minute.mp3', import.meta.url).href)
+
 const audioCtx = typeof window !== 'undefined'
   ? new ((window as any).AudioContext || (window as any).webkitAudioContext)()
   : null
+
+// ── Train Spatial Audio ────────────────────────────────────────────────────
+// We use WebAudio so we can:
+//   • Perfectly loop exactly 0–6 s with loopStart / loopEnd (no gap)
+//   • Update gain each frame based on camera↔train distance (spatial)
+//   • Respect the trainNoise settings toggle
+
+const TRAIN_CROSSFADE_AT = 4.0  // start next loop at 4s
+const TRAIN_LOOP_DUR    = 6.0  // full clip length
+const TRAIN_MAX_DIST    = 35   // world units — only audible up close
+const TRAIN_BASE_VOL    = 0.35 // max volume right next to train
+
+let trainAmbientGain: GainNode | null = null
+let trainAudioBuf: AudioBuffer | null = null
+let trainAudioReady = false
+let _trainLoopScheduled = false
+
+/** Schedule a crossfade-loop pair from WebAudio clock `startAt`. */
+function _scheduleTrainLoop(startAt: number) {
+  if (!audioCtx || !trainAudioBuf || !trainAmbientGain) return
+  const gain = trainAmbientGain
+
+  // Primary source — plays from 0
+  const src = audioCtx.createBufferSource()
+  src.buffer = trainAudioBuf
+  src.connect(gain)
+  src.start(startAt, 0)
+  src.stop(startAt + TRAIN_LOOP_DUR)
+
+  // At CROSSFADE_AT seconds schedule the next loop (overlaps for clean handoff)
+  src.addEventListener('ended', () => {
+    // already kicked off next at crossfade point
+  })
+
+  // Schedule next instance to start at startAt + CROSSFADE_AT (while this one is still playing)
+  const nextStart = startAt + TRAIN_CROSSFADE_AT
+  // Use setTimeout to schedule recursively (deltaTime = crossfade offset in ms)
+  const msTill = (nextStart - audioCtx.currentTime) * 1000 - 50 // fire 50ms early
+  setTimeout(() => {
+    if (!trainAudioReady || !trainAmbientGain) return
+    _scheduleTrainLoop(nextStart)
+  }, Math.max(0, msTill))
+}
+
+async function initTrainAudio() {
+  if (!audioCtx || trainAudioReady) return
+  try {
+    const resp = await fetch(new URL('./assets/audio/train.mp3', import.meta.url).href)
+    const arrayBuf = await resp.arrayBuffer()
+    trainAudioBuf = await audioCtx.decodeAudioData(arrayBuf)
+
+    const gainNode = audioCtx.createGain()
+    gainNode.gain.value = 0
+    gainNode.connect(audioCtx.destination)
+    trainAmbientGain = gainNode
+    trainAudioReady = true
+
+    _scheduleTrainLoop(audioCtx.currentTime)
+  } catch (e) {
+    console.warn('[train audio] init failed', e)
+  }
+}
+
+// ── Train Horn — use plain HTMLAudioElement (reliable across browsers) ──────
+const _trainHornEl = new Audio(new URL('./assets/audio/trainhorn.mp3', import.meta.url).href)
+let lastTrainHornMs = -Infinity
+
+function playTrainHornSpatial(trainPos: THREE.Vector3) {
+  if (!settingsUI.graphics.trainNoise) return
+  const camPos = new THREE.Vector3()
+  core.camera.getWorldPosition(camPos)
+  const dist = camPos.distanceTo(trainPos)
+  const norm = dist / Math.max(1, TRAIN_MAX_DIST * 8) // horn heard further than rumble
+  const atten = 1 / (1 + norm * norm * 1.5)
+  const vol = Math.max(0, Math.min(1, 0.9 * atten * settingsUI.volumes.master))
+  const horn = new Audio(_trainHornEl.src)
+  horn.volume = vol
+  void horn.play().catch(() => { /* blocked */ })
+
+  // Fade out at 3 seconds over 500ms
+  setTimeout(() => {
+    const fadeSteps = 20
+    const fadeMs = 500
+    const startVol = horn.volume
+    let step = 0
+    const id = setInterval(() => {
+      step++
+      horn.volume = Math.max(0, startVol * (1 - step / fadeSteps))
+      if (step >= fadeSteps) {
+        clearInterval(id)
+        horn.pause()
+      }
+    }, fadeMs / fadeSteps)
+  }, 3000)
+}
+
+function scheduleTrainHorn() {
+  const delay = 30000 + Math.random() * 30000
+  setTimeout(() => {
+    const now = performance.now()
+    if (now - lastTrainHornMs >= 30000 && settingsUI.graphics.trainNoise) {
+      lastTrainHornMs = now
+      const trainPos = new THREE.Vector3()
+      if (trainTrack.getTrainFrontWorldPosition(trainPos)) {
+        playTrainHornSpatial(trainPos)
+      }
+    }
+    scheduleTrainHorn()
+  }, delay)
+}
+
+// Resume AudioContext and kick off train audio on first user interaction
+const _resumeTrainAudio = () => {
+  if (!audioCtx) return
+  if (audioCtx.state === 'suspended') void audioCtx.resume()
+  void initTrainAudio()
+  scheduleTrainHorn()
+}
+window.addEventListener('click', _resumeTrainAudio, { once: true })
+window.addEventListener('keydown', _resumeTrainAudio, { once: true })
+
+// Called each game frame — updates gain based on distance to train
+const _trainCamPos = new THREE.Vector3()
+const _trainPos = new THREE.Vector3()
+function updateTrainSpatialAudio() {
+  if (!trainAmbientGain || !trainAudioReady) return
+  if (!settingsUI.graphics.trainNoise) {
+    trainAmbientGain.gain.value = 0
+    return
+  }
+  if (!trainTrack.getTrainFrontWorldPosition(_trainPos)) {
+    trainAmbientGain.gain.value = 0
+    return
+  }
+  core.camera.getWorldPosition(_trainCamPos)
+  const dist = _trainCamPos.distanceTo(_trainPos)
+  const norm = dist / Math.max(1, TRAIN_MAX_DIST)
+  // Steep falloff — very quiet beyond TRAIN_MAX_DIST
+  const atten = 1 / (1 + norm * norm * 6)
+  const target = TRAIN_BASE_VOL * atten * settingsUI.volumes.master
+  trainAmbientGain.gain.setTargetAtTime(Math.max(0, target), audioCtx!.currentTime, 0.08)
+}
+
 
 function createFlashTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas')
@@ -1857,6 +2001,7 @@ function animate() {
       grass.update(time)
       trees.update(time)
       trainTrack.update(dt)
+      updateTrainSpatialAudio()
       targetPlayers.syncPlayerSpawnHint(_mainMenuBotHint)
       if (!mainMenuFullChromeApplied) {
         applyMainMenuView()
@@ -1913,6 +2058,7 @@ function animate() {
     grass.update(time)
     trees.update(time)
     trainTrack.update(dt)
+    updateTrainSpatialAudio()
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
 
     const humanPlayerCount = multiplayer.getHumanPlayerCount()
