@@ -28,6 +28,15 @@ export class StaminaUI {
     this.container.appendChild(this.bar)
   }
 
+  public setOpacity(alpha: number) {
+    this.suppressForMenu = alpha <= 0
+    if (this.suppressForMenu) {
+      this.container.style.opacity = '0'
+    } else {
+      this.container.style.opacity = '1'
+    }
+  }
+
   public setSuppressForMenu(suppress: boolean) {
     this.suppressForMenu = suppress
     if (suppress) this.container.style.opacity = '0'

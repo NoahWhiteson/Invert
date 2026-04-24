@@ -1944,8 +1944,22 @@ function animate() {
           player.state.isAiming = false
           heldWeapons.setAiming(false)
           crosshair.setVisible(false)
+          leaderboardUI.setOpacity(0)
+          timerUI.setOpacity(0)
+          healthUI.setOpacity(0)
+          ammoUI.setOpacity(0)
+          weaponUI.setOpacity(0)
+          killFeed.setOpacity(0)
+          coinsHUD.setOpacity(0)
+          staminaUI.setOpacity(0)
           const entries = buildSortedLeaderboardEntries()
           matchEndTopThreeCache = entries.slice(0, 3)
+
+          const myIx = matchEndTopThreeCache.findIndex(e => e.id === 'me' || e.username === myUsername)
+          if (myIx === 0) setCoins(getCoins() + 500)
+          else if (myIx === 1) setCoins(getCoins() + 300)
+          else if (myIx === 2) setCoins(getCoins() + 100)
+
           matchEndUI.show(matchEndTopThreeCache)
           matchEndShowcase.syncFromEntries(matchEndTopThreeCache)
         }
@@ -1959,6 +1973,14 @@ function animate() {
           player.setPointerLockAllowed(true)
           player.controls.enabled = player.controls.isLocked
           crosshair.setVisible(true)
+          leaderboardUI.setOpacity(1)
+          timerUI.setOpacity(1)
+          healthUI.setOpacity(1)
+          ammoUI.setOpacity(1)
+          weaponUI.setOpacity(1)
+          killFeed.setOpacity(1)
+          coinsHUD.setOpacity(1)
+          staminaUI.setOpacity(1)
         }
       }
     }

@@ -5,8 +5,7 @@ export class MatchEndUI {
   private root: HTMLDivElement
   private grayOverlay: HTMLDivElement
   private card: HTMLDivElement
-  private title: HTMLDivElement
-  private subtitle: HTMLDivElement
+
   private nameLine: HTMLDivElement
   private killsLine: HTMLDivElement
   private place2: HTMLDivElement
@@ -37,7 +36,7 @@ export class MatchEndUI {
     this.card.style.position = 'absolute'
     this.card.style.zIndex = '1'
     this.card.style.left = '50%'
-    this.card.style.bottom = '150px'
+    this.card.style.bottom = '60px'
     this.card.style.transform = 'translateX(-50%) skewX(-10deg)'
     this.card.style.minWidth = 'min(94vw, 560px)'
     this.card.style.padding = '10px'
@@ -50,22 +49,7 @@ export class MatchEndUI {
     this.card.style.transition = 'opacity 350ms ease, transform 350ms cubic-bezier(0.1, 0.88, 0.16, 1)'
     this.root.appendChild(this.card)
 
-    this.title = document.createElement('div')
-    this.title.textContent = "TIME'S UP"
-    this.title.style.fontSize = '72px'
-    this.title.style.letterSpacing = '4px'
-    this.title.style.color = '#e8c440'
-    this.title.style.textShadow = `${this.thickOutline}, ${ringTextShadow(3)}`
-    this.card.appendChild(this.title)
 
-    this.subtitle = document.createElement('div')
-    this.subtitle.textContent = 'MOST KILLS'
-    this.subtitle.style.marginTop = '8px'
-    this.subtitle.style.fontSize = '26px'
-    this.subtitle.style.letterSpacing = '6px'
-    this.subtitle.style.color = '#c8ccd4'
-    this.subtitle.style.textShadow = this.thickOutline
-    this.card.appendChild(this.subtitle)
 
     this.nameLine = document.createElement('div')
     this.nameLine.style.marginTop = '18px'
