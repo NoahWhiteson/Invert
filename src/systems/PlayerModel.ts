@@ -140,6 +140,7 @@ export class PlayerModel {
       this.bindMinY += 0.05 
 
       this.anims = new AnimationManager(this.root)
+      this.anims.setDebugLabel('local')
       await this.anims.loadAll()
       
       // Load 3rd person guns
@@ -349,11 +350,7 @@ export class PlayerModel {
 
   public resetPoseAfterRagdoll() {
     if (!this.root) return
-    this.root.traverse((c) => {
-      if ((c as THREE.SkinnedMesh).isSkinnedMesh) {
-        ;(c as THREE.SkinnedMesh).skeleton.pose()
-      }
-    })
+    this.anims?.hardResetToIdle()
     setRagdollOutlinesVisible(this.root, true)
     this.anims?.setRagdollFrozen(false)
   }

@@ -1384,7 +1384,6 @@ const TRAIN_BASE_VOL    = 0.35 // max volume right next to train
 let trainAmbientGain: GainNode | null = null
 let trainAudioBuf: AudioBuffer | null = null
 let trainAudioReady = false
-let _trainLoopScheduled = false
 
 /** Schedule a crossfade-loop pair from WebAudio clock `startAt`. */
 function _scheduleTrainLoop(startAt: number) {
@@ -1934,6 +1933,18 @@ window.game = {
     targetPlayers.setDebug(on)
     return `Target debug ${on ? 'ON' : 'OFF'}`
   },
+  /** Console: `[tpose-debug]` when mixer total weight drops (throttled per character). */
+  tposeDebug(on: boolean) {
+    AnimationManager.setTposeDebug(on)
+    return `T-pose debug ${on ? 'ON' : 'OFF'}`
+  },
+  animDebugLocal() {
+    return playerModel.anims?.exportFullTposeReport() ?? null
+  },
+  animDebugDump() {
+    const n = AnimationManager.dumpAllMixersToConsole()
+    return `Dumped ${n} AnimationManager(s) to console`
+  },
   updateLeaderboard(data: LeaderboardEntry[], myRank?: LeaderboardEntry) {
     leaderboardUI.update(data, myRank)
     return 'Leaderboard updated'
@@ -1968,6 +1979,20 @@ window.game = {
     pendingDebugMatchEnd = true
     return 'Match end on next frame (call game.fireEndRound() again to clear while held by debug)'
   },
+}
+
+try {
+  const q =
+    typeof location !== 'undefined' && typeof URLSearchParams !== 'undefined'
+      ? new URLSearchParams(location.search)
+      : null
+  if (import.meta.env.DEV || (q && q.has('debugAnim'))) {
+    queueMicrotask(() => {
+      AnimationManager.setTposeDebug(true)
+    })
+  }
+} catch {
+  /* ignore */
 }
 
 let viewToggleKeyWasDown = false

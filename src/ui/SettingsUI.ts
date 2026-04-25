@@ -27,6 +27,7 @@ export class SettingsUI {
   private targetScale: number = 1.0
   private isMouseDown: boolean = false
   private isHovering: boolean = false
+  private wasMenuOpen = false
   /** Extra elements (e.g. main menu nav) that should use the click-hand cursor when hovered. */
   private extraCursorTargets: HTMLElement[] = []
 
@@ -628,6 +629,11 @@ export class SettingsUI {
   public update(input: InputManager, forceShow: boolean = false) {
     const dead = document.body.classList.contains('is-dead')
     this.button.style.pointerEvents = dead ? 'none' : 'auto'
+
+    if (this.isOpen && !this.wasMenuOpen) {
+      input.centerVirtualMouse()
+    }
+    this.wasMenuOpen = this.isOpen
 
     const shouldShowCursor = input.isSimulatedUnlocked || this.isOpen || !document.pointerLockElement || forceShow
 

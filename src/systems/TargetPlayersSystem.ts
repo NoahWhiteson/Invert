@@ -959,15 +959,7 @@ export class TargetPlayersSystem {
     // Visibility moved to after hardResetToIdle to avoid T-pose flicker
     t.model.visible = false 
     if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
-      t.anims.ingestExternalTrace('respawn:before_skeleton_pose_pass1', { index })
-    }
-    if (t.model.traverse) {
-      t.model.traverse(c => {
-        if (c instanceof THREE.SkinnedMesh) c.skeleton.pose()
-      })
-    }
-    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
-      t.anims.ingestExternalTrace('respawn:after_skeleton_pose_pass1', { index })
+      t.anims.ingestExternalTrace('respawn:before_outlines', { index })
     }
     setRagdollOutlinesVisible(t.model, true)
 
@@ -988,18 +980,6 @@ export class TargetPlayersSystem {
     t.model.position.set(0, 0, 0)
     t.model.quaternion.identity()
     t.model.scale.setScalar(1)
-
-    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
-      t.anims.ingestExternalTrace('respawn:before_skeleton_pose_pass2', { index })
-    }
-    t.model.traverse(c => {
-      if ((c as any).isSkinnedMesh) {
-        (c as THREE.SkinnedMesh).skeleton.pose()
-      }
-    })
-    if (index === BOT_HAND_TPOSE_TRACE_INDEX && t.anims) {
-      t.anims.ingestExternalTrace('respawn:after_skeleton_pose_pass2', { index })
-    }
 
     if (t.anims) {
       if (index === BOT_HAND_TPOSE_TRACE_INDEX) {

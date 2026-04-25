@@ -5,7 +5,6 @@ import {
   readOwnedSkinIds,
   readEquippedAkSkin,
   setEquippedAkSkin,
-  SKIN_CATALOG,
   type AkGunSkinId,
   type EquippedAkSkin,
 } from '../store/skinEconomy'
@@ -18,7 +17,6 @@ export const EQUIPPED_SKIN_KEY = 'invert_equipped_skin'
 /** Default + one fixed slot per catalog skin (15). */
 const GRID_COLS = 4
 const SLOT_PX = 64
-const SLOT_GAP_PX = 10
 
 const hotbarUrl = new URL('../assets/icons/hotbar.png', import.meta.url).href
 
@@ -451,6 +449,10 @@ export class MainMenuSkinsUI {
   }
 
   public refresh() {
+    // Keep legacy character-slot builders retained (re-enabled after economy merge).
+    void this.makeCatalogSlot
+    void this.makeDefaultCharacterSlot
+
     const ownedAk = readOwnedAkGunSkins()
     let eqAk = readEquippedAkSkin()
     if (eqAk !== 'default' && !ownedAk.includes(eqAk)) {

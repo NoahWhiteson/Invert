@@ -102,7 +102,7 @@ export class MultiplayerSystem {
       // Clean up ragdoll on respawn
       if (p.ragdoll) {
         p.ragdoll = undefined
-        this.resetSkinnedPose(p.model)
+        this.resetSkinnedPoseAfterRagdoll(p.model, p.anims)
         p.anims?.setRagdollFrozen(false)
       }
 
@@ -381,7 +381,7 @@ export class MultiplayerSystem {
             // Clean up ragdoll on respawn
             if (p.ragdoll) {
               p.ragdoll = undefined
-              this.resetSkinnedPose(p.model)
+              this.resetSkinnedPoseAfterRagdoll(p.model, p.anims)
               p.anims?.setRagdollFrozen(false)
             }
             this.setPlayerHitboxesColliding(p, true)
@@ -483,6 +483,7 @@ export class MultiplayerSystem {
     })
 
     const anims = new AnimationManager(model)
+    anims.setDebugLabel(`net-${id.slice(0, 8)}`)
     model.visible = false // Hide until ready
     anims.loadAll().then(() => {
       model.visible = true
@@ -880,12 +881,9 @@ export class MultiplayerSystem {
     }
   }
 
-  private resetSkinnedPose(model: THREE.Group) {
-    model.traverse((c) => {
-      if ((c as THREE.SkinnedMesh).isSkinnedMesh) {
-        ;(c as THREE.SkinnedMesh).skeleton.pose()
-      }
-    })
+  /** Do not call `skeleton.pose()` — that is bind/T-pose and fights {@link AnimationManager}. */
+  private resetSkinnedPoseAfterRagdoll(model: THREE.Group, anims?: AnimationManager) {
+    anims?.hardResetToIdle()
     setRagdollOutlinesVisible(model, true)
   }
 }

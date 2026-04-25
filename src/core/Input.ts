@@ -36,12 +36,9 @@ export class InputManager {
     
     window.addEventListener('mousemove', (e) => {
       if (document.pointerLockElement) {
-        if (this.isSimulatedUnlocked) {
-          this.virtualMousePos.x = Math.max(0, Math.min(window.innerWidth, this.virtualMousePos.x + e.movementX))
-          this.virtualMousePos.y = Math.max(0, Math.min(window.innerHeight, this.virtualMousePos.y + e.movementY))
-        }
+        this.virtualMousePos.x = Math.max(0, Math.min(window.innerWidth, this.virtualMousePos.x + e.movementX))
+        this.virtualMousePos.y = Math.max(0, Math.min(window.innerHeight, this.virtualMousePos.y + e.movementY))
       } else {
-        // Not locked, follow the real mouse
         this.virtualMousePos.x = e.clientX
         this.virtualMousePos.y = e.clientY
       }
