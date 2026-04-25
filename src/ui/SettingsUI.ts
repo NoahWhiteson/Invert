@@ -28,6 +28,8 @@ export class SettingsUI {
   private isMouseDown: boolean = false
   private isHovering: boolean = false
   private wasMenuOpen = false
+  /** Prevent slider capture on the same click used to open settings. */
+  private ignoreDragUntilMouseUp = false
   /** Extra elements (e.g. main menu nav) that should use the click-hand cursor when hovered. */
   private extraCursorTargets: HTMLElement[] = []
 
@@ -358,6 +360,7 @@ export class SettingsUI {
       this.isMouseDown = false
       this.isDraggingFov = false
       this.draggingType = null
+      this.ignoreDragUntilMouseUp = false
     })
 
     this.updateStyleButtons()
@@ -520,6 +523,9 @@ export class SettingsUI {
     this.isOpen = open
     if (playSound) this.playClick()
     if (open) {
+      this.ignoreDragUntilMouseUp = true
+      this.isDraggingFov = false
+      this.draggingType = null
       this.refreshAccountUuidLabel()
       this.menu.style.opacity = '1'
       this.menu.style.pointerEvents = 'auto'
@@ -653,7 +659,7 @@ export class SettingsUI {
         mx >= trackRect.left - 10 && mx <= trackRect.right + 10 &&
         my >= trackRect.top - 10 && my <= trackRect.top + 28 + 10)
 
-      if (isOverTrack && this.isMouseDown && !this.draggingType) {
+      if (isOverTrack && this.isMouseDown && !this.draggingType && !this.ignoreDragUntilMouseUp) {
         this.isDraggingFov = true
       }
       if (this.isDraggingFov && this.isOpen) {
@@ -673,7 +679,7 @@ export class SettingsUI {
         const r = t.getBoundingClientRect()
         const isOver = this.isOpen && (mx >= r.left - 10 && mx <= r.right + 10 && my >= r.top - 10 && my <= r.top + 28 + 10)
 
-        if (isOver && this.isMouseDown && !this.isDraggingFov) {
+        if (isOver && this.isMouseDown && !this.isDraggingFov && !this.ignoreDragUntilMouseUp) {
           this.draggingType = key
         }
         if (this.draggingType === key && this.isOpen) {
