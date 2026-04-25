@@ -138,10 +138,6 @@ export class AnimationManager {
   private readonly FIRE_RATE_MIN_INTERVAL_S = 0.05
   private readonly FIRE_SYNC_SCALE_MIN = 0.45
   private readonly FIRE_SYNC_SCALE_MAX = 2.5
-  /** When true, the next stacked-weight spike may run a one-shot `stopAllAction` scrub (not every frame). */
-  private mixerStackSpikePrimed = true
-  private static readonly MIXER_STACK_SUM_THRESHOLD = 2.12
-
   private applyFiringTimeScale(action: THREE.AnimationAction, fireRateMs: number) {
     const clip = action.getClip()
     const d = Math.max(clip.duration, 1 / 60)
@@ -426,7 +422,6 @@ export class AnimationManager {
       this.actions.clear()
       this.currentState = 'idle'
       this.pendingLocomotion = 'idle'
-      this.mixerStackSpikePrimed = true
     }
 
     AnimationManager.clipCache.forEach((sharedClip, state) => {
@@ -679,14 +674,14 @@ export class AnimationManager {
     if (fadeDur > 0) action.fadeIn(fadeDur)
     else action.setEffectiveWeight(1)
     action.play()
+    action.paused = false
 
-    this.actions.forEach((a, key) => {
-      if (key === 'firing') return
-      const w = a.getEffectiveWeight()
-      if (w <= 1e-4 && !a.isRunning()) return
-      if (fadeDur > 0 && a.isRunning()) a.fadeOut(fadeDur)
-      else a.stop()
-    })
+    // Keep locomotion under firing. If firing clip has incomplete lower-body tracks,
+    // stopping base locomotion can collapse legs/hips toward bind pose (looks like T-pose).
+    if (currentAction && this.currentState !== 'firing') {
+      currentAction.play()
+      currentAction.paused = false
+    }
 
     this.currentState = 'firing'
     this.trace('triggerFire:now_firing', {})
@@ -822,8 +817,10 @@ export class AnimationManager {
   }
 
   /**
-   * Clears finished firing that still holds weight (logical state already locomotion), and
-   * stops orphan stacked clips when total effective weight blows past a normal crossfade.
+   * Minimal runtime repair:
+   * - clear stale finished firing that still has weight while locomotion is active
+   * We intentionally avoid hard stacked-weight scrubs here because they can rewind/kill
+   * locomotion clips (walk/sprint/crouch) mid-frame.
    */
   private repairMixerStuckWeights() {
     if (this.ragdollFrozen) return
@@ -845,59 +842,6 @@ export class AnimationManager {
         }
       }
     }
-
-    let sum = 0
-    this.actions.forEach((a) => {
-      sum += a.getEffectiveWeight()
-    })
-    if (sum <= AnimationManager.MIXER_STACK_SUM_THRESHOLD) {
-      this.mixerStackSpikePrimed = true
-      return
-    }
-
-    if (!this.mixerStackSpikePrimed) return
-    this.mixerStackSpikePrimed = false
-
-    if (this.currentState === 'firing') {
-      this.mixer.stopAllAction()
-      const fa = this.actions.get('firing')
-      if (fa) {
-        fa.reset().setEffectiveWeight(1).play()
-        fa.paused = false
-      }
-      this.mixer.update(0)
-      let sumAfter = 0
-      this.actions.forEach((a) => {
-        sumAfter += a.getEffectiveWeight()
-      })
-      if (sumAfter > AnimationManager.MIXER_STACK_SUM_THRESHOLD) this.mixerStackSpikePrimed = true
-      this.trace('repairMixerStuckWeights:oneshot_fire', {
-        label: this.debugLabel,
-        sumBefore: Number(sum.toFixed(3)),
-        sumAfter: Number(sumAfter.toFixed(3)),
-      })
-      return
-    }
-
-    const keep = this.currentState
-    this.mixer.stopAllAction()
-    const keeper = this.actions.get(keep)
-    if (keeper) {
-      keeper.reset().setEffectiveWeight(1).play()
-      keeper.paused = false
-    }
-    this.mixer.update(0)
-    let sumAfterLoco = 0
-    this.actions.forEach((a) => {
-      sumAfterLoco += a.getEffectiveWeight()
-    })
-    if (sumAfterLoco > AnimationManager.MIXER_STACK_SUM_THRESHOLD) this.mixerStackSpikePrimed = true
-    this.trace('repairMixerStuckWeights:oneshot_locomotion', {
-      label: this.debugLabel,
-      sumBefore: Number(sum.toFixed(3)),
-      sumAfter: Number(sumAfterLoco.toFixed(3)),
-      kept: keep,
-    })
   }
 
   /** Firing sometimes never gets mixer `finished` (e.g. state churn); snap back to walk/idle. */
@@ -950,7 +894,6 @@ export class AnimationManager {
         idle.reset().setEffectiveWeight(1).play()
         this.mixer.update(0.001) // Force pose calculation
         this.currentState = 'idle'
-        this.mixerStackSpikePrimed = true
       }
     }
   }
@@ -970,7 +913,6 @@ export class AnimationManager {
       this.logMissingAnimation('hardResetToIdle', 'idle')
     }
     this.currentState = 'idle'
-    this.mixerStackSpikePrimed = true
     this.mixer.update(0.1) 
     this.trace('hardResetToIdle:done', {})
   }
