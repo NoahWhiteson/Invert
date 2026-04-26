@@ -51,7 +51,6 @@ import { TargetPlayersSystem, type BotBrainContext } from './systems/TargetPlaye
 import { DamageTextSystem } from './systems/DamageTextSystem'
 
 // Global synchronization state
-let matchStartTimeForTrain = 0
 let initialTrainPhaseForTrain = 0
 let trainPhaseSynced = false
 let localSyncTimeForTrain = 0
@@ -585,7 +584,6 @@ void Promise.all([
 
   multiplayer.onWorldState = (state) => {
     timerUI.setStartTime(state.matchStartTime)
-    matchStartTimeForTrain = state.matchStartTime
     if (state.treeLayout.length > 0) {
       const filtered = state.treeLayout.filter((t) => !isPhiBlockedByTrainTrack(t.phi))
       void trees.init(
@@ -1952,7 +1950,7 @@ window.game = {
     return `T-pose debug ${on ? 'ON' : 'OFF'}`
   },
   animDebugLocal() {
-    return playerModel.anims?.exportFullTposeReport() ?? null
+    return null
   },
   animDebugDump() {
     const n = AnimationManager.dumpAllMixersToConsole()
@@ -2086,7 +2084,7 @@ function animate() {
         },
         worldMesh: mesh,
         nowMs: currentTime,
-        tryBotAkHit: (botIdx, eye, dir) => { /* noop in menu */ },
+        tryBotAkHit: (..._args: any[]) => { /* noop in menu */ },
       } : null
 
       targetPlayers.update(dt, botBrain)

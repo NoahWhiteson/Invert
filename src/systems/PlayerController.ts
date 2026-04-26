@@ -199,6 +199,11 @@ export class PlayerController {
       moveDir.normalize()
       const moveInPlayerSpace = moveDir.clone().applyQuaternion(camera.quaternion)
       moveInPlayerSpace.y = 0
+      if (moveInPlayerSpace.lengthSq() < 1e-6) {
+        // If looking straight up/down, use the camera's "up" vector project onto the plane
+        // or just a fixed forward. For YXZ camera, rotation.y is the yaw.
+        moveInPlayerSpace.set(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), camera.rotation.y)
+      }
       moveInPlayerSpace.normalize()
 
       // Sliding has even less control than air
@@ -321,12 +326,18 @@ export class PlayerController {
     }
 
     const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.playerGroup.quaternion)
-    const rotationQuat = new THREE.Quaternion().setFromUnitVectors(currentUp, upDir)
-    this.playerGroup.quaternion.premultiply(rotationQuat)
     
-    // Rotate velocity to match the new surface orientation
-    // This keeps "upward" knockback pointing "out" as we move around the sphere
-    this.state.velocity.applyQuaternion(rotationQuat)
+    // Check if we actually need to rotate (prevent precision snaps)
+    const dot = currentUp.dot(upDir)
+    if (dot < 0.999999) {
+      const rotationQuat = new THREE.Quaternion().setFromUnitVectors(currentUp, upDir)
+      this.playerGroup.quaternion.premultiply(rotationQuat)
+      this.playerGroup.quaternion.normalize()
+      
+      // Rotate velocity to match the new surface orientation
+      // This keeps "upward" knockback pointing "out" as we move around the sphere
+      this.state.velocity.applyQuaternion(rotationQuat)
+    }
   }
 
   public inflictDamage(amount: number, hitDirection?: THREE.Vector3) {
