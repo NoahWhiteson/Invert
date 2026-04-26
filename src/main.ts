@@ -49,6 +49,12 @@ import { BloodSystem } from './systems/BloodSystem'
 import { BulletHoleSystem } from './systems/BulletHoleSystem'
 import { TargetPlayersSystem, type BotBrainContext } from './systems/TargetPlayersSystem'
 import { DamageTextSystem } from './systems/DamageTextSystem'
+
+// Global synchronization state
+let matchStartTimeForTrain = 0
+let initialTrainPhaseForTrain = 0
+let trainPhaseSynced = false
+let localSyncTimeForTrain = 0
 import { LeaderboardUI, type LeaderboardEntry } from './ui/LeaderboardUI'
 import { AnnouncementUI } from './ui/AnnouncementUI'
 import { MultiplayerSystem } from './systems/MultiplayerSystem'
@@ -196,6 +202,8 @@ let matchEndTopThreeCache: LeaderboardEntry[] | null = null
 let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
 let deadKillerId: string | null = null
+
+
 /** After spawn / respawn: no damage from bots / train / grenades / PvP packets (ms). */
 const LOCAL_SPAWN_DAMAGE_INVULN_MS = 8000
 let localSpawnInvulnUntilMs = 0
@@ -575,15 +583,20 @@ void Promise.all([
     tents.spawn(p.phi, p.theta)
   }
 
-
-
   multiplayer.onWorldState = (state) => {
     timerUI.setStartTime(state.matchStartTime)
+    matchStartTimeForTrain = state.matchStartTime
     if (state.treeLayout.length > 0) {
       const filtered = state.treeLayout.filter((t) => !isPhiBlockedByTrainTrack(t.phi))
       void trees.init(
         filtered.length > 0 ? filtered : createFallbackTreeLayout(80, sphereRadius, 8)
       )
+    }
+    if (typeof state.trainPhase === 'number' && !trainPhaseSynced) {
+      trainPhaseSynced = true
+      initialTrainPhaseForTrain = state.trainPhase
+      localSyncTimeForTrain = Date.now()
+      trainTrack.setPhase(state.trainPhase)
     }
   }
 
@@ -2050,11 +2063,48 @@ function animate() {
         playerModel.root.quaternion.identity()
         playerModel.applyMenuWeaponSlot(AK_SLOT)
       }
-      if (playerModel.anims) playerModel.anims.setState('idle', 0.12)
+      if (playerModel.anims) {
+        playerModel.anims.setState('idle', 0.12)
+        playerModel.anims.setPitch(0)
+      }
       playerModel.update(dt)
       heldWeapons.update(dt, player.state.gravity)
 
-      targetPlayers.update(dt, null)
+      const humanPlayerCount = multiplayer.getHumanPlayerCount()
+      const pvpOnlyMode = humanPlayerCount >= 2
+      targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
+
+      const botBrain: BotBrainContext | null = !pvpOnlyMode ? {
+        playerPosition: player.playerGroup.position,
+        playerAlive: true,
+        getHumanPositionsForVision: () => {
+          const out: THREE.Vector3[] = []
+          for (const p of multiplayer.getAllPlayers()) {
+            if (!p.ragdoll && p.health > 0 && !p.atMenu) out.push(p.model.position)
+          }
+          return out
+        },
+        worldMesh: mesh,
+        nowMs: currentTime,
+        tryBotAkHit: (botIdx, eye, dir) => { /* noop in menu */ },
+      } : null
+
+      targetPlayers.update(dt, botBrain)
+
+      // Sync menu state to multiplayer so others know we are at menu
+      multiplayer.update(
+        dt,
+        player.playerGroup.position,
+        player.playerGroup.quaternion,
+        0, // localViewYaw
+        0, // localViewPitch
+        myUsername,
+        myBotKills + myPvpKills,
+        'idle',
+        heldWeapons.getActiveSlot(),
+        true, // atMenu
+        false // isDead
+      )
 
       const frameEquivMenuNade = dt * 60
       const stepCountMenuNade = Math.max(1, Math.min(Math.floor(frameEquivMenuNade + 1e-9), 24))
@@ -2082,7 +2132,18 @@ function animate() {
 
     grass.update(time)
     trees.update(time)
-    trainTrack.update(dt)
+    
+    // Smoothly update train phase based on synchronized match time
+    if (trainPhaseSynced) {
+      const speed = 1.0 // TRAIN_VEHICLE_SPEED
+      const elapsed = (Date.now() - localSyncTimeForTrain) / 1000
+      // We know at localSyncTimeForTrain, the phase was initialTrainPhaseForTrain
+      const currentPhase = initialTrainPhaseForTrain - (elapsed * speed)
+      trainTrack.update(dt, currentPhase)
+    } else {
+      trainTrack.update(dt)
+    }
+
     updateTrainSpatialAudio()
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
 
@@ -2340,7 +2401,7 @@ function animate() {
           const grace = localSpawnDamageInvulnerable()
           if (!isDead && !grace) out.push(player.playerGroup.position)
           for (const p of multiplayer.getAllPlayers()) {
-            if (!p.ragdoll && p.health > 0) out.push(p.model.position)
+            if (!p.ragdoll && p.health > 0 && !p.atMenu) out.push(p.model.position)
           }
           return out
         },
@@ -2422,9 +2483,15 @@ function animate() {
       currentAnim = 'idle'
     }
 
+    // Calculate local pitch/yaw for animations and multiplayer.
+    // Since camera is a child of playerGroup, camera.rotation is already local to the player's orientation.
+    const localViewPitch = core.camera.rotation.x
+    const localViewYaw = core.camera.rotation.y
+
     if (!isDead) {
       if (playerModel.anims) {
         playerModel.anims.setState(currentAnim)
+        playerModel.anims.setPitch(localViewPitch)
       }
       playerModel.update(dt)
     } else {
@@ -2438,8 +2505,6 @@ function animate() {
     }
     syncMuzzleFlashParent()
 
-    // Always update multiplayer interpolation even when dead, so we can see the killer moving
-    const viewEuler = new THREE.Euler().setFromQuaternion(core.camera.quaternion, 'YXZ')
     // Remotes only run triggerFire() when anim === 'firing'; local uses triggerFire from shoot() instead.
     const ANIM_FIRE_NET_MS = 340
     let animForNet: AnimationState = currentAnim
@@ -2455,11 +2520,13 @@ function animate() {
       dt,
       player.playerGroup.position,
       player.playerGroup.quaternion,
-      viewEuler.y,
+      localViewYaw,
+      localViewPitch,
       myUsername,
       myBotKills + myPvpKills,
       isDead ? 'idle' : animForNet,
       heldWeapons.getActiveSlot(),
+      atMainMenu,
       isDead
     )
 

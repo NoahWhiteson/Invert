@@ -44,6 +44,7 @@ export class PlayerModel {
     try {
       const fbx = await loadFbxAsync(this.loader, IDLE_FBX)
       this.root = fbx
+      this.root.rotation.order = 'YXZ'
       this.root.scale.setScalar(0.01)
       this.root.visible = false
       scene.add(this.root)

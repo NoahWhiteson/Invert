@@ -181,9 +181,13 @@ export class TargetPlayersSystem {
       if (this.bindMinY > -0.02) this.bindMinY = -0.85
       this.bindMinY += 0.05 
 
+      console.info(`[TargetPlayersSystem] starting parallel spawn of ${this.count} bots`)
+      const spawnPromises: Promise<void>[] = []
       for (let i = 0; i < this.count; i++) {
-        await this.spawnTarget(i)
+        spawnPromises.push(this.spawnTarget(i))
       }
+      await Promise.all(spawnPromises)
+      console.info(`[TargetPlayersSystem] all bots spawned`)
     } catch (e) {
       console.warn('TargetPlayersSystem: failed to load target model', e)
     }
@@ -284,12 +288,14 @@ export class TargetPlayersSystem {
     this._qInv.copy(t.container.quaternion).invert()
     flat.applyQuaternion(this._qInv)
 
-    t.facingYawTarget = Math.atan2(flat.x, flat.z)
+    // Match human yaw logic: -Z is forward, +PI offset
+    t.facingYawTarget = Math.atan2(flat.x, flat.z) + Math.PI
   }
 
   /** Tangent "forward" from model yaw + surface frame (for vision cone). */
   private getBotForwardWorld(t: TargetState, out: THREE.Vector3): void {
-    this._fwdScratch.set(0, 0, 1)
+    // Model faces -Z in its local space after +PI offset
+    this._fwdScratch.set(0, 0, -1)
     this._fwdScratch.applyQuaternion(t.model.quaternion)
     this._fwdScratch.applyQuaternion(t.container.quaternion)
     const radial = this._vA.copy(t.shellPoint).normalize()
@@ -520,6 +526,21 @@ export class TargetPlayersSystem {
     }
 
     if (t.anims && t.health > 0) {
+      // Calculate look pitch for bots
+      const radialUp = this._vA.copy(t.shellPoint).normalize()
+      const toTarget = this._vC.copy(t.lastAimWorld).sub(t.shellPoint)
+      const distToTarget = toTarget.length()
+      if (distToTarget > 0.1) {
+        toTarget.normalize()
+        // Pitch is the angle between the target direction and the horizon (tangent plane)
+        // A dot product with the "up" vector gives the sine of the pitch
+        const dotUp = toTarget.dot(radialUp)
+        const botPitch = -Math.asin(THREE.MathUtils.clamp(dotUp, -0.99, 0.99))
+        t.anims.setPitch(botPitch)
+      } else {
+        t.anims.setPitch(0)
+      }
+
       if (!t.onGround) {
         const distToGround = groundR - t.shellPoint.length()
         const verticalVel = t.velocity.dot(this._vD.copy(t.shellPoint).normalize())
@@ -614,12 +635,14 @@ export class TargetPlayersSystem {
 
   /** 2+ humans alive in room => sink/remove bots; <=1 => restore bots. */
   public setSuppressedByRealPlayers(suppress: boolean) {
-    if (this.suppressBotsForPvP === suppress) return
+    // If it's already in the desired state, we still want to make sure
+    // any NEWLY initialized bots (from init loop) are in the correct state.
+    const changed = this.suppressBotsForPvP !== suppress
     this.suppressBotsForPvP = suppress
 
     if (suppress) {
       for (const t of this.targets) {
-        if (!t) continue
+        if (!t || t.despawnedForPvP) continue
         t.chasing = false
         t.velocity.set(0, 0, 0)
         t.steerDir.set(0, 0, 0)
@@ -627,14 +650,17 @@ export class TargetPlayersSystem {
       return
     }
 
+    // Unsuppress
     for (let i = 0; i < this.targets.length; i++) {
       const t = this.targets[i]
       if (!t) continue
-      t.despawnedForPvP = false
-      if (t.container.parent !== this.scene) this.scene.add(t.container)
-      t.container.visible = true
-      t.model.visible = true
-      this.respawnTarget(i)
+      if (t.despawnedForPvP || changed) {
+        t.despawnedForPvP = false
+        if (t.container.parent !== this.scene) this.scene.add(t.container)
+        t.container.visible = true
+        t.model.visible = true
+        this.respawnTarget(i)
+      }
     }
   }
 
@@ -787,6 +813,7 @@ export class TargetPlayersSystem {
     if (!this.template) return
     const container = new THREE.Group()
     const model = cloneSkinned(this.template) as THREE.Group
+    model.rotation.order = 'YXZ'
     model.traverse(c => {
       if (c instanceof THREE.Mesh || (c as any).isSkinnedMesh) {
         const m = c as THREE.Mesh
@@ -845,7 +872,6 @@ export class TargetPlayersSystem {
     await anims.loadAll()
     anims.setState('idle', 0) // Initialize state immediately
     anims.hardResetToIdle()   // Ensure clean start
-    anims.logBootstrapInfo()
 
     this.scene.add(container)
 

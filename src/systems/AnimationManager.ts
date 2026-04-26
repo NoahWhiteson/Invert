@@ -77,20 +77,16 @@ export class AnimationManager {
   private static clipCache: Map<AnimationState, THREE.AnimationClip> = new Map()
   private static riflePoseTracks: Map<string, THREE.KeyframeTrack> = new Map()
   private static loadingPromise: Promise<void> | null = null
-  /** When true, logs low mixer weight / missing idle (throttled) for every {@link AnimationManager} instance. */
+  /** When true, logs torso-aim debug info. */
   private static tposeDebug = false
-  private static tposeDebugLogAt = new Map<string, number>()
+  private static rotationDebugAt = new Map<string, number>()
 
   public static setTposeDebug(on: boolean) {
     this.tposeDebug = on
     if (!on) {
-      this.tposeDebugLogAt.clear()
-      this.periodicTelemetryAt.clear()
-      this.stackedMixerWarnAt.clear()
+      this.rotationDebugAt.clear()
     } else {
-      console.info(
-        '[tpose-debug] ON — look for [tpose-debug:beat] (Verbose) / [AnimationManager]. game.animDebugDump() for full snapshots.'
-      )
+      console.info('[anim] Torso-aim debug ON')
     }
   }
 
@@ -99,16 +95,13 @@ export class AnimationManager {
   }
 
   private static readonly allMixers = new Set<AnimationManager>()
-  private static periodicTelemetryAt = new Map<string, number>()
-  private static stackedMixerWarnAt = new Map<string, number>()
 
   /** One-shot console dump of every active mixer (call from `game.animDebugDump()`). */
   public static dumpAllMixersToConsole() {
     const list = [...AnimationManager.allMixers]
-    console.groupCollapsed(`[tpose-debug] dump ${list.length} AnimationManager(s)`)
-    console.log('global clipCache keys:', [...AnimationManager.clipCache.keys()])
+    console.groupCollapsed(`[anim] dump ${list.length} AnimationManager(s)`)
     for (const m of list) {
-      console.log('—', m.exportFullTposeReport())
+      console.log('—', m.debugLabel, { state: m.currentState, pitch: m.lookPitch })
     }
     console.groupEnd()
     return list.length
@@ -122,6 +115,14 @@ export class AnimationManager {
   private missingAnimLogAt = new Map<string, number>()
   private animOpRing: AnimOpEntry[] = []
   private readonly ANIM_OP_RING_CAP = 56
+
+  private spineBones: THREE.Bone[] = []
+  private spineDefaultQuats: THREE.Quaternion[] = []
+  private lookPitch = 0
+  private readonly _scratchQuat = new THREE.Quaternion()
+  private readonly _scratchAxisX = new THREE.Vector3(1, 0, 0)
+  private currentAppliedPitch = 0
+  private pitchInitialized = false
 
   private readonly JUMP_HOLD_START = 20 / 30
   private readonly JUMP_HOLD_END = 22 / 30
@@ -138,6 +139,7 @@ export class AnimationManager {
   private readonly FIRE_RATE_MIN_INTERVAL_S = 0.05
   private readonly FIRE_SYNC_SCALE_MIN = 0.45
   private readonly FIRE_SYNC_SCALE_MAX = 2.5
+  
   private applyFiringTimeScale(action: THREE.AnimationAction, fireRateMs: number) {
     const clip = action.getClip()
     const d = Math.max(clip.duration, 1 / 60)
@@ -151,6 +153,30 @@ export class AnimationManager {
   constructor(model: THREE.Object3D) {
     this.mixer = new THREE.AnimationMixer(model)
     AnimationManager.allMixers.add(this)
+
+    // Find upper body bones for aim-pitch offsets
+    model.traverse((o) => {
+      if ((o as THREE.Bone).isBone) {
+        const n = o.name.toLowerCase()
+        // Standard Mixamo-like spine bones, plus neck and head
+        if (
+          (n.includes('spine') || n.includes('chest') || n.includes('neck') || n.includes('head')) &&
+          !n.includes('leaf') &&
+          !n.includes('arm') &&
+          !n.includes('hand')
+        ) {
+          this.spineBones.push(o as THREE.Bone)
+        }
+      }
+    })
+    // No sorting needed - traverse is already root-to-leaf (depth-first)
+    // which is perfect for hierarchical rotation distribution.
+    // We don't slice anymore to ensure the whole chain (spine -> head) is covered.
+
+    // Capture default poses so we can reset them before mixer.update (prevents cumulative spin)
+    for (const b of this.spineBones) {
+      this.spineDefaultQuats.push(b.quaternion.clone())
+    }
   }
 
   public setDebugLabel(label: string) {
@@ -181,144 +207,9 @@ export class AnimationManager {
     return s
   }
 
-  private getPerActionEffectiveWeights(): Record<string, number> {
-    const o: Record<string, number> = {}
-    this.actions.forEach((a, k) => {
-      o[k] = Number(a.getEffectiveWeight().toFixed(3))
-    })
-    return o
-  }
-
-  public exportHandPoseDebugContext() {
-    return {
-      label: this.debugLabel,
-      currentState: this.currentState,
-      pendingLocomotion: this.pendingLocomotion,
-      ragdollFrozen: this.ragdollFrozen,
-      jumpPhase: this.jumpPhase,
-      sumEffectiveWeight: Number(this.getTotalEffectiveWeight().toFixed(5)),
-      actions: this.actionDebugSnapshot(),
-      recentOps: this.debugLabel === 'bot-01' ? this.animOpRing.slice(-24) : [],
-    }
-  }
-
-  /** Idle clip track node names vs bones under the mixer root (mismatch → skin stays bind / T-pose). */
-  public exportFullTposeReport(): Record<string, unknown> {
-    return {
-      ...this.exportHandPoseDebugContext(),
-      mixerTime: Number(this.mixer.time.toFixed(4)),
-      mixerTimeScale: this.mixer.timeScale,
-      idleBinding: this.scanIdleTrackBoneBinding(),
-      globalClipCacheKeys: [...AnimationManager.clipCache.keys()],
-    }
-  }
-
-  private scanIdleTrackBoneBinding(): Record<string, unknown> {
-    const idleAction = this.actions.get('idle')
-    if (!idleAction) {
-      return { ok: false, reason: 'no_idle_action' }
-    }
-    const clip = idleAction.getClip()
-    const root = this.mixer.getRoot()
-    const boneNames = new Set<string>()
-    if (root instanceof THREE.Object3D) {
-      root.traverse((o: THREE.Object3D) => {
-        if ((o as THREE.Bone).isBone) boneNames.add(o.name)
-      })
-    } else {
-      return {
-        ok: false,
-        reason: 'mixer_root_not_object3d',
-        clipTrackCount: clip.tracks.length,
-        tracksWithNodePrefix: 0,
-        boneCountInRig: 0,
-        missingNodesSample: [],
-      }
-    }
-    const missing = new Set<string>()
-    let tracksWithNode = 0
-    for (const tr of clip.tracks) {
-      const dot = tr.name.indexOf('.')
-      if (dot <= 0) continue
-      const nodeName = tr.name.slice(0, dot)
-      tracksWithNode++
-      if (!boneNames.has(nodeName)) missing.add(nodeName)
-    }
-    if (clip.tracks.length > 0 && tracksWithNode === 0) {
-      return {
-        ok: false,
-        reason: 'no_dot_prefixed_tracks',
-        clipTrackCount: clip.tracks.length,
-        tracksWithNodePrefix: 0,
-        boneCountInRig: boneNames.size,
-        sampleTrackNames: clip.tracks.slice(0, 12).map((t) => t.name),
-        missingNodesSample: [],
-      }
-    }
-    if (boneNames.size === 0 && clip.tracks.length > 0) {
-      return {
-        ok: false,
-        reason: 'no_bones_under_mixer_root',
-        clipTrackCount: clip.tracks.length,
-        tracksWithNodePrefix: tracksWithNode,
-        boneCountInRig: 0,
-        missingNodesSample: [...missing].slice(0, 20),
-      }
-    }
-    return {
-      ok: missing.size === 0,
-      clipTrackCount: clip.tracks.length,
-      tracksWithNodePrefix: tracksWithNode,
-      boneCountInRig: boneNames.size,
-      missingNodesSample: [...missing].slice(0, 20),
-    }
-  }
-
   private nowMs() {
     if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now()
     return Date.now()
-  }
-
-  private actionDebugSnapshot() {
-    const snap: Record<string, { running: boolean; w: number; t: number; clipDur: number; paused: boolean }> = {}
-    this.actions.forEach((a, state) => {
-      snap[state] = {
-        running: a.isRunning(),
-        w: Number(a.getEffectiveWeight().toFixed(4)),
-        t: Number(a.time.toFixed(3)),
-        clipDur: Number(a.getClip().duration.toFixed(3)),
-        paused: a.paused,
-      }
-    })
-    return snap
-  }
-
-  /** What the mixer is actually weighting vs {@link currentState} (for T-pose diagnostics). */
-  private getMixerPlaybackSnapshot() {
-    let maxW = -1
-    let maxKey: AnimationState | null = null
-    this.actions.forEach((a, k) => {
-      const w = a.getEffectiveWeight()
-      if (w > maxW) {
-        maxW = w
-        maxKey = k
-      }
-    })
-    const heaviest = maxKey != null && maxW > 1e-4 ? maxKey : null
-    const heaviestAction = heaviest ? this.actions.get(heaviest) : undefined
-    const weights: Record<string, number> = {}
-    this.actions.forEach((a, k) => {
-      const w = a.getEffectiveWeight()
-      if (w > 0.02) weights[k] = Number(w.toFixed(3))
-    })
-    return {
-      managerState: this.currentState,
-      pendingAfterFire: this.pendingLocomotion,
-      heaviestAction: heaviest,
-      heaviestClip: heaviestAction?.getClip().name ?? null,
-      heaviestWeight: heaviest ? Number(maxW.toFixed(4)) : 0,
-      weightsOver002: weights,
-    }
   }
 
   private logMissingAnimation(where: string, wanted: AnimationState | string) {
@@ -329,12 +220,9 @@ export class AnimationManager {
     this.missingAnimLogAt.set(key, now)
     console.warn(`[AnimationManager] missing action "${String(wanted)}" @ ${where}`, {
       label: this.debugLabel,
-      clipCacheKeys: [...AnimationManager.clipCache.keys()],
       instanceActionKeys: [...this.actions.keys()],
     })
   }
-
-  public logBootstrapInfo() {}
 
   public static async preloadAll() {
     if (this.loadingPromise) return this.loadingPromise
@@ -357,6 +245,7 @@ export class AnimationManager {
               name.includes('arm') ||
               name.includes('hand') ||
               name.includes('spine') ||
+              name.includes('chest') ||
               name.includes('neck') ||
               name.includes('head')
             ) {
@@ -393,7 +282,7 @@ export class AnimationManager {
             const clip = anim.animations[0]!.clone()
             clip.name = state
             zeroOutRootPositionTracks(clip)
-            normalizeClipTracks(clip) // Apply normalization here
+            normalizeClipTracks(clip)
 
             const newTracks = [...clip.tracks]
             this.riflePoseTracks.forEach((track, name) => {
@@ -450,28 +339,9 @@ export class AnimationManager {
     const idle = this.actions.get('idle')
     if (idle) {
       idle.reset().setEffectiveWeight(1).play()
-      this.mixer.update(0.1) // Sample at least one frame immediately
-    } else {
-      const snap = this.getMixerPlaybackSnapshot()
-      console.error(
-        `TPOSE detected [${this.debugLabel}] no idle clip — managerState=${snap.managerState} heaviest=${snap.heaviestAction ?? 'none'} clip="${snap.heaviestClip ?? ''}"`,
-        { label: this.debugLabel, actionCount: this.actions.size, playback: snap }
-      )
+      this.mixer.update(0.1)
     }
     this.trace('loadAll:complete', { actionCount: this.actions.size })
-    if (idle) {
-      const ib = this.scanIdleTrackBoneBinding()
-      if (ib.ok !== true) {
-        const snap = this.getMixerPlaybackSnapshot()
-        console.warn(
-          `TPOSE detected [${this.debugLabel}] (idle vs rig at load) managerState=${snap.managerState} heaviest=${snap.heaviestAction ?? 'none'} clip="${snap.heaviestClip ?? ''}"`,
-          { idleBinding: ib, playback: snap }
-        )
-      }
-    }
-    if (AnimationManager.tposeDebug) {
-      console.debug('[tpose-debug] loadAll', this.exportFullTposeReport())
-    }
   }
 
   public setState(state: AnimationState, duration: number = 0.2) {
@@ -722,8 +592,52 @@ export class AnimationManager {
     }
   }
 
+  public setPitch(pitchRadians: number) {
+    this.lookPitch = pitchRadians
+    if (!this.pitchInitialized) {
+      this.pitchInitialized = true
+      this.currentAppliedPitch = THREE.MathUtils.clamp(-this.lookPitch * 0.65, -1.1, 1.1)
+    }
+  }
+
+  private applyLookPitch(dt: number) {
+    if (this.spineBones.length === 0 || this.ragdollFrozen) return
+    
+    // Negate the pitch to fix inversion (looking up was looking down)
+    // Scale and clamp to reasonable human limits
+    // Add a strong positive offset (+1.65) to pull the gaze down to level. 
+    // Base FBX animations have a very steep upward tilt that requires a large counter-rotation.
+    const targetPitch = THREE.MathUtils.clamp((-this.lookPitch + 1.65) * 0.65, -1.1, 1.1)
+    
+    // Smooth the pitch change to prevent snapping
+    const lerpFactor = 1 - Math.exp(-18 * dt)
+    this.currentAppliedPitch += (targetPitch - this.currentAppliedPitch) * lerpFactor
+    const perBone = this.currentAppliedPitch / this.spineBones.length
+    
+    const now = Date.now()
+    const lastDebug = AnimationManager.rotationDebugAt.get(this.debugLabel) ?? 0
+    if (AnimationManager.tposeDebug && now - lastDebug > 2000) {
+      AnimationManager.rotationDebugAt.set(this.debugLabel, now)
+      console.info(`[anim] torso-aim: label="${this.debugLabel}" pitch=${this.lookPitch.toFixed(3)} (applied total=${this.currentAppliedPitch.toFixed(3)}) boneCount=${this.spineBones.length}`)
+    }
+
+    for (const b of this.spineBones) {
+      // Create a rotation around the bone's local X axis
+      this._scratchQuat.setFromAxisAngle(this._scratchAxisX, perBone)
+      // Apply it to the current quaternion
+      b.quaternion.multiply(this._scratchQuat)
+    }
+  }
+
   public update(dt: number) {
     if (this.ragdollFrozen) return
+
+    // Pre-mixer: Reset spine bones to their original bind pose.
+    // This is the "clean" state that the mixer will then update if it has tracks for these bones.
+    // This prevents accumulation on bones without tracks and ensures smooth movement.
+    for (let i = 0; i < this.spineBones.length; i++) {
+      this.spineBones[i]!.quaternion.copy(this.spineDefaultQuats[i]!)
+    }
 
     const jumpAction = this.actions.get('jump')
     if (this.currentState === 'jump' && jumpAction) {
@@ -751,77 +665,15 @@ export class AnimationManager {
       }
     }
     this.mixer.update(dt)
+
+    // Apply look pitch AFTER mixer.update so it offsets the animation
+    this.applyLookPitch(dt)
+
     this.repairMixerStuckWeights()
     this.repairFiringStale()
     this.ensureAnyActionOrIdle()
-    this.logTposeDebugIfNeeded()
-    this.logPeriodicTposeTelemetry()
   }
 
-  private logTposeDebugIfNeeded() {
-    if (!AnimationManager.tposeDebug || this.ragdollFrozen) return
-    const sum = this.getTotalEffectiveWeight()
-    const bind = this.scanIdleTrackBoneBinding() as { ok?: boolean; missingNodesSample?: string[] }
-    const bindBad = bind.ok !== true
-    if (sum >= 0.12 && !bindBad) return
-    const now = this.nowMs()
-    const last = AnimationManager.tposeDebugLogAt.get(this.debugLabel) ?? 0
-    if (now - last < 700) return
-    AnimationManager.tposeDebugLogAt.set(this.debugLabel, now)
-    const snap = this.getMixerPlaybackSnapshot()
-    const pending =
-      snap.pendingAfterFire != null ? ` pendingAfterFire=${snap.pendingAfterFire}` : ''
-    console.warn(
-      `TPOSE detected [${this.debugLabel}] managerState=${snap.managerState}${pending} heaviest=${snap.heaviestAction ?? 'none'} clip="${snap.heaviestClip ?? ''}" w=${snap.heaviestWeight} sumW=${sum.toFixed(4)} bindOk=${bind.ok}`,
-      { playback: snap, idleBinding: bind, full: this.exportFullTposeReport() }
-    )
-  }
-
-  /** Throttled heartbeat while `setTposeDebug(true)` so you can inspect rigs without waiting for low weight. */
-  private logPeriodicTposeTelemetry() {
-    if (!AnimationManager.tposeDebug || this.ragdollFrozen) return
-    const now = this.nowMs()
-    const last = AnimationManager.periodicTelemetryAt.get(this.debugLabel) ?? 0
-    if (now - last < 3200) return
-    AnimationManager.periodicTelemetryAt.set(this.debugLabel, now)
-    const sum = this.getTotalEffectiveWeight()
-    const idle = this.actions.get('idle')
-    const bind = this.scanIdleTrackBoneBinding() as { ok?: boolean; missingNodesSample?: string[] }
-    const snap = this.getMixerPlaybackSnapshot()
-    const likelyTpose = sum < 0.12 || bind.ok !== true
-    const line = `TPOSE detected [${this.debugLabel}] managerState=${snap.managerState} heaviest=${snap.heaviestAction ?? 'none'} clip="${snap.heaviestClip ?? ''}" sumW=${sum.toFixed(3)} bindOk=${bind.ok}`
-    if (likelyTpose) {
-      console.warn(line, {
-        playback: snap,
-        idleW: idle ? Number(idle.getEffectiveWeight().toFixed(3)) : null,
-        missingNodes: bind.missingNodesSample ?? [],
-      })
-    } else if (sum > 2.05) {
-      const lastStack = AnimationManager.stackedMixerWarnAt.get(this.debugLabel) ?? 0
-      if (now - lastStack >= 10_000) {
-        AnimationManager.stackedMixerWarnAt.set(this.debugLabel, now)
-        console.warn(`[anim] MIXER stacked weights sumW=${sum.toFixed(2)} (expected ≤~1.2 during crossfade)`, {
-          label: this.debugLabel,
-          perActionW: this.getPerActionEffectiveWeights(),
-          playback: snap,
-          bindOk: bind.ok,
-        })
-      }
-    } else {
-      console.debug(`[tpose-debug:beat] ${this.debugLabel}`, {
-        playback: snap,
-        sumW: Number(sum.toFixed(3)),
-        bindOk: bind.ok,
-      })
-    }
-  }
-
-  /**
-   * Minimal runtime repair:
-   * - clear stale finished firing that still has weight while locomotion is active
-   * We intentionally avoid hard stacked-weight scrubs here because they can rewind/kill
-   * locomotion clips (walk/sprint/crouch) mid-frame.
-   */
   private repairMixerStuckWeights() {
     if (this.ragdollFrozen) return
 
@@ -834,11 +686,6 @@ export class AnimationManager {
         const done = !firing.isRunning() || firing.time >= dur * 0.995
         if (done) {
           firing.stop()
-          this.trace('repairMixerStuckWeights:stale_firing', {
-            label: this.debugLabel,
-            w: Number(w.toFixed(3)),
-            managerState: this.currentState,
-          })
         }
       }
     }
@@ -862,13 +709,6 @@ export class AnimationManager {
     const finishedByTime = firing.time >= dur * 0.998
     if (!finishedByMixer && !finishedByTime) return
 
-    this.trace('repairFiringStale:recover', {
-      finishedByMixer,
-      finishedByTime,
-      firingTime: Number(firing.time.toFixed(4)),
-      dur: Number(dur.toFixed(4)),
-      pendingLocomotion: this.pendingLocomotion,
-    })
     this.detachFiringFinishedListener()
     firing.stopFading()
     firing.stop()
@@ -884,10 +724,6 @@ export class AnimationManager {
       sumW += a.getEffectiveWeight()
     })
     if (sumW < 0.1) {
-      this.trace('ensureAnyActionOrIdle:low_weight_recover', {
-        sumWeight: Number(sumW.toFixed(5)),
-        currentState: this.currentState,
-      })
       const idle = this.actions.get('idle')
       if (idle) {
         this.mixer.stopAllAction()
@@ -900,12 +736,13 @@ export class AnimationManager {
 
   /** After ragdoll / bad mixer state: single clean idle baseline. */
   public hardResetToIdle() {
-    this.trace('hardResetToIdle:enter', { priorState: this.currentState, pendingLocomotion: this.pendingLocomotion })
     this.detachFiringFinishedListener()
     this.ragdollFrozen = false
     this.mixer.timeScale = 1
     this.mixer.stopAllAction()
     this.pendingLocomotion = 'idle'
+    this.currentAppliedPitch = 0
+    this.pitchInitialized = false
     const idle = this.actions.get('idle')
     if (idle) {
       idle.reset().setEffectiveWeight(1).play()
@@ -914,7 +751,6 @@ export class AnimationManager {
     }
     this.currentState = 'idle'
     this.mixer.update(0.1) 
-    this.trace('hardResetToIdle:done', {})
   }
 
   public getCurrentState(): AnimationState {

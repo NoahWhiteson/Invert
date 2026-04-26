@@ -13,6 +13,7 @@ const _netViewQuatScratch = new THREE.Quaternion()
 export type WorldState = {
   matchStartTime: number
   treeLayout: Array<{ phi: number; theta: number; scale: number }>
+  trainPhase?: number
 }
 
 interface NetworkPlayer {
@@ -28,8 +29,11 @@ interface NetworkPlayer {
   targetQuat: THREE.Quaternion
   targetViewYaw: number
   viewYaw: number
+  targetViewPitch: number
+  viewPitch: number
   surfaceQuat: THREE.Quaternion
   activeSlot: number
+  atMenu: boolean
   thirdPersonGuns: (THREE.Group | null)[]
   hitboxes: THREE.Mesh[]
   health: number
@@ -48,6 +52,7 @@ export class MultiplayerSystem {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempt = 0
   private intentionalClose = false
+  private localAtMenu = true
   private players: Map<string, NetworkPlayer> = new Map()
   private localPlayerId: string | null = null
   private scene: THREE.Scene
@@ -59,6 +64,7 @@ export class MultiplayerSystem {
   private textureLoader = new THREE.TextureLoader()
   private rankTextures: Record<number, THREE.Texture | null> = { 1: null, 2: null, 3: null }
   private _posDeltaScratch = new THREE.Vector3()
+  private yawInitialized = new Set<string>()
 
   public onPlayerDamaged?: (
     targetId: string,
@@ -261,6 +267,7 @@ export class MultiplayerSystem {
         this.worldState = {
           matchStartTime: data.matchStartTime ?? Date.now(),
           treeLayout: Array.isArray(data.treeLayout) ? data.treeLayout : [],
+          trainPhase: typeof data.trainPhase === 'number' ? data.trainPhase : undefined,
         }
         this.onWorldState?.(this.worldState)
         if (data.players) {
@@ -283,6 +290,13 @@ export class MultiplayerSystem {
       case "username_sync":
         if (typeof data.username === 'string' && data.username.length > 0) {
           this.onLocalUsername?.(data.username)
+        }
+        break
+
+      case "match_start":
+        if (this.worldState && typeof data.matchStartTime === 'number') {
+          this.worldState.matchStartTime = data.matchStartTime
+          this.onWorldState?.(this.worldState)
         }
         break
 
@@ -427,9 +441,15 @@ export class MultiplayerSystem {
     p.targetPos.set(data.pos.x, data.pos.y, data.pos.z)
     p.targetQuat.set(data.quat.x, data.quat.y, data.quat.z, data.quat.w)
     p.targetViewYaw = typeof data.viewYaw === 'number' ? data.viewYaw : 0
+    if (!this.yawInitialized.has(data.playerId)) {
+      this.yawInitialized.add(data.playerId)
+      p.viewYaw = p.targetViewYaw
+    }
+    p.targetViewPitch = typeof data.viewPitch === 'number' ? data.viewPitch : 0
     p.activeSlot = data.slot !== undefined ? data.slot : 0
     if (typeof data.kills === 'number') p.kills = data.kills
     if (typeof data.botKills === 'number') p.botKills = data.botKills
+    if (typeof data.atMenu === 'boolean') p.atMenu = data.atMenu
     p.lastUpdate = Date.now()
     
     // Update visible gun
@@ -471,6 +491,7 @@ export class MultiplayerSystem {
 
   private createRemotePlayer(id: string, username: string): NetworkPlayer {
     const model = cloneSkinned(this.playerTemplate!) as THREE.Group
+    model.rotation.order = 'YXZ'
     
     model.traverse(c => {
       const mesh = c as THREE.Mesh
@@ -552,8 +573,11 @@ export class MultiplayerSystem {
       targetQuat: new THREE.Quaternion().identity(),
       targetViewYaw: 0,
       viewYaw: 0,
+      targetViewPitch: 0,
+      viewPitch: 0,
       surfaceQuat: new THREE.Quaternion().identity(),
       activeSlot: 0,
+      atMenu: true,
       thirdPersonGuns,
       hitboxes,
       health: 100,
@@ -674,6 +698,7 @@ export class MultiplayerSystem {
   }
 
   private removePlayer(id: string) {
+    this.yawInitialized.delete(id)
     const p = this.players.get(id)
     if (p) {
       this.scene.remove(p.model)
@@ -690,22 +715,27 @@ export class MultiplayerSystem {
     localPos: THREE.Vector3,
     localQuat: THREE.Quaternion,
     localViewYaw: number,
+    localViewPitch: number,
     username: string,
     kills: number,
     anim: AnimationState,
     slot: number = 0,
+    atMenu: boolean = true,
     isDead: boolean = false
   ) {
+    this.localAtMenu = atMenu
     if (!isDead) {
       this.safeSend({
         type: "move",
         pos: { x: localPos.x, y: localPos.y, z: localPos.z },
         quat: { x: localQuat.x, y: localQuat.y, z: localQuat.z, w: localQuat.w },
         viewYaw: localViewYaw,
+        viewPitch: localViewPitch,
         username,
         kills,
         anim,
-        slot
+        slot,
+        atMenu
       })
     }
 
@@ -733,8 +763,12 @@ export class MultiplayerSystem {
       _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw + Math.PI)
       p.model.quaternion.multiply(_netViewQuatScratch)
 
+      // Smoothly interpolate view pitch
+      p.viewPitch += (p.targetViewPitch - p.viewPitch) * 0.15
+
       // Update animations
       if (p.anims) {
+        p.anims.setPitch(p.viewPitch)
         if (p.anims.getCurrentState() === 'jump') {
           const distToGround = (50 - 1.8 / 2) - p.model.position.length() // Use 50 as sphereRadius
           // We don't have vertical velocity for remote players easily, so use distance
@@ -844,7 +878,11 @@ export class MultiplayerSystem {
 
   /** You + connected remotes (bots not included). */
   public getHumanPlayerCount(): number {
-    return 1 + this.players.size
+    let count = this.localAtMenu ? 0 : 1 // local
+    for (const p of this.players.values()) {
+      if (!p.atMenu) count++
+    }
+    return count
   }
 
   public getCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {

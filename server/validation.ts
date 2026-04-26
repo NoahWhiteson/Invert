@@ -81,6 +81,11 @@ export function sanitizeViewYaw(raw: unknown): number {
   return Math.max(-1e6, Math.min(1e6, raw))
 }
 
+export function sanitizeViewPitch(raw: unknown): number {
+  if (!isFiniteNum(raw)) return 0
+  return Math.max(-Math.PI, Math.min(Math.PI, raw))
+}
+
 export function sanitizeSlot(raw: unknown): number {
   if (!isFiniteNum(raw)) return 0
   const s = Math.floor(raw)

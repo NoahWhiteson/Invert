@@ -18,6 +18,7 @@ import {
   sanitizeUsername,
   sanitizeVec3,
   sanitizeViewYaw,
+  sanitizeViewPitch,
   sanitizeVolume,
   sanitizeWeapon,
   isValidPlayerId,
@@ -31,10 +32,12 @@ type PlayerRecord = {
 	pos: { x: number; y: number; z: number };
 	quat: { x: number; y: number; z: number; w: number };
 	viewYaw: number;
+	viewPitch: number;
 	kills: number;
 	botKills: number;
 	anim: string;
 	slot: number;
+	atMenu: boolean;
 	health: number;
 	maxHealth: number;
 	lastUpdate: number;
@@ -49,10 +52,12 @@ function playerPublic(p: PlayerRecord): Record<string, unknown> {
 		pos: p.pos,
 		quat: p.quat,
 		viewYaw: p.viewYaw,
+		viewPitch: p.viewPitch,
 		kills: p.kills,
 		botKills: p.botKills,
 		anim: p.anim,
 		slot: p.slot,
+		atMenu: p.atMenu,
 		health: p.health,
 		maxHealth: p.maxHealth,
 		lastUpdate: p.lastUpdate,
@@ -88,8 +93,9 @@ export class GameRoom extends DurableObject {
 	private players = new Map<string, PlayerRecord>();
 	private sessions = new Set<WebSocket>();
 	private playerSockets = new Map<string, WebSocket>();
-	private readonly matchStartTime: number;
+	private matchStartTime: number;
 	private readonly treeLayout: Array<{ phi: number; theta: number; scale: number }>;
+	private readonly initialTrainPhase: number;
 	/** General inbound rate: timestamps (ms) in the last 1s per player */
 	private inboundTs = new Map<string, number[]>();
 	/** Damage events per attacker per rolling second */
@@ -102,6 +108,14 @@ export class GameRoom extends DurableObject {
 		super(state, env);
 		this.matchStartTime = Date.now();
 		this.treeLayout = this.generateTreeLayout(80, 50, 8);
+		this.initialTrainPhase = Math.random() * Math.PI * 2;
+	}
+
+	private getCurrentTrainPhase(): number {
+		const speed = 1.0; // Keep in sync with TRAIN_VEHICLE_SPEED in client
+		// Use a fixed epoch (Date.now() / 1000) for global synchronization.
+		// This ensures the phase is identical for all players and stable across match resets.
+		return (this.initialTrainPhase - (Date.now() / 1000) * speed);
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -240,15 +254,27 @@ export class GameRoom extends DurableObject {
 			pos: { x: 0, y: 0, z: 0 },
 			quat: { x: 0, y: 0, z: 0, w: 1 },
 			viewYaw: 0,
+			viewPitch: 0,
 			kills: 0,
 			botKills: 0,
 			anim: "idle",
 			slot: 0,
+			atMenu: true,
 			health: 100,
 			maxHealth: 100,
 			lastUpdate: Date.now(),
 		};
 		this.players.set(playerId, initial);
+
+		// If this is the 2nd player, start the match timer now for PvP
+		if (this.players.size === 2) {
+			this.matchStartTime = Date.now();
+			// Broadcast the new start time to everyone already in
+			this.broadcast({
+				type: "match_start",
+				matchStartTime: this.matchStartTime
+			});
+		}
 
 		try {
 			ws.send(JSON.stringify({
@@ -256,7 +282,8 @@ export class GameRoom extends DurableObject {
 				playerId,
 				players: Array.from(this.players.entries()).map(([id, p]) => [id, playerPublic(p)]),
 				matchStartTime: this.matchStartTime,
-				treeLayout: this.treeLayout
+				treeLayout: this.treeLayout,
+				trainPhase: this.getCurrentTrainPhase(),
 			}));
 		} catch (err) {
 			console.error("init send failed", playerId, err);
@@ -356,8 +383,10 @@ export class GameRoom extends DurableObject {
 		p.pos = pos;
 		p.quat = quat;
 		p.viewYaw = sanitizeViewYaw(d.viewYaw);
+		p.viewPitch = sanitizeViewPitch(d.viewPitch);
 		p.anim = sanitizeAnim(d.anim);
 		p.slot = sanitizeSlot(d.slot);
+		p.atMenu = !!d.atMenu;
 		p.lastUpdate = Date.now();
 
 		this.broadcast({
@@ -366,11 +395,13 @@ export class GameRoom extends DurableObject {
 			pos: p.pos,
 			quat: p.quat,
 			viewYaw: p.viewYaw,
+			viewPitch: p.viewPitch,
 			username: p.username,
 			kills: p.kills,
 			botKills: p.botKills,
 			anim: p.anim,
 			slot: p.slot,
+			atMenu: p.atMenu,
 		}, ws);
 	}
 

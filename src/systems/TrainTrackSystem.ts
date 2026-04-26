@@ -210,9 +210,15 @@ export class TrainTrackSystem {
     return true
   }
 
-  public update(dt: number) {
+  public update(dt: number, externalPhase?: number) {
     if (this.trainRoot.children.length === 0) return
-    this.trainPhase -= dt * TRAIN_VEHICLE_SPEED
+    
+    if (typeof externalPhase === 'number') {
+      this.trainPhase = externalPhase
+    } else {
+      this.trainPhase -= dt * TRAIN_VEHICLE_SPEED
+    }
+    
     const trackR = this.nominalTrackRadius()
     const uFirstCart = THREE.MathUtils.euclideanModulo(this.trainPhase, Math.PI * 2)
     const uFront = THREE.MathUtils.euclideanModulo(
@@ -238,6 +244,14 @@ export class TrainTrackSystem {
       this.trainShellUniforms.uTrainShellR.value = trackR
     }
     this.fillTrainVehicleShellDeltas(trackR)
+  }
+
+  public setPhase(phase: number) {
+    this.trainPhase = phase
+  }
+
+  public getPhase(): number {
+    return this.trainPhase
   }
 
   /**
