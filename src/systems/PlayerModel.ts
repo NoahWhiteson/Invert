@@ -393,7 +393,7 @@ export class PlayerModel {
 
     this.root.quaternion.copy(playerQuat)
     this._tempEuler.setFromQuaternion(cameraQuat, 'YXZ')
-    this._tempQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this._tempEuler.y + Math.PI)
+    this._tempQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this._tempEuler.y)
     this.root.quaternion.multiply(this._tempQuat)
 
     // footWorld = rootWorld + q * (0, bindMinY, 0)  →  rootWorld = footWorld - q * (0, bindMinY, 0)

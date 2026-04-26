@@ -760,7 +760,7 @@ export class MultiplayerSystem {
       // Shortest-angle interpolation to avoid wrap spins around +/-PI
       const yawDelta = Math.atan2(Math.sin(p.targetViewYaw - p.viewYaw), Math.cos(p.targetViewYaw - p.viewYaw))
       p.viewYaw += yawDelta * 0.2
-      _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw + Math.PI)
+      _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw)
       p.model.quaternion.multiply(_netViewQuatScratch)
 
       // Smoothly interpolate view pitch
