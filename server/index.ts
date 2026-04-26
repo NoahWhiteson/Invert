@@ -131,6 +131,7 @@ export class GameRoom extends DurableObject {
 	/** Last damage time attacker→target to block burst exploits */
 	private lastDamagePairMs = new Map<string, number>();
 	private botKillTs = new Map<string, number[]>();
+	private joinTimes = new Map<string, number>();
 
 	constructor(state: DurableObjectState, env: Env) {
 		super(state, env);
@@ -304,7 +305,10 @@ export class GameRoom extends DurableObject {
 		const playerId = crypto.randomUUID();
 		this.sessions.add(ws);
 		this.playerSockets.set(playerId, ws);
+		this.joinTimes.set(playerId, Date.now());
 		ws.accept();
+
+		void this.sendDiscordNotification(`🎮 **Player joined Undersphere!** (ID: \`${playerId.slice(0, 8)}\`)`);
 
 		ws.addEventListener("error", (e) => {
 			console.error("WebSocket error", playerId, e);
@@ -372,9 +376,18 @@ export class GameRoom extends DurableObject {
 		});
 
 		ws.addEventListener("close", () => {
+			const p = this.players.get(playerId);
+			const username = p?.username ?? "Unknown";
+			const joinTime = this.joinTimes.get(playerId) ?? Date.now();
+			const durationSec = Math.floor((Date.now() - joinTime) / 1000);
+			const durationStr = durationSec > 60 ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` : `${durationSec}s`;
+
+			void this.sendDiscordNotification(`👋 **Player left:** \`${username}\` (Played for ${durationStr})`);
+
 			this.players.delete(playerId);
 			this.sessions.delete(ws);
 			this.playerSockets.delete(playerId);
+			this.joinTimes.delete(playerId);
 			this.cleanupRateState(playerId);
 			this.broadcast({
 				type: "player_left",
@@ -705,6 +718,22 @@ export class GameRoom extends DurableObject {
 					/* noop */
 				}
 			}
+		}
+	}
+
+	private async sendDiscordNotification(content: string) {
+		const url = "https://discord.com/api/webhooks/1498064799458922587/N8BUDVjPH204jTirtmH2IZjMJl0Z57ISixEaMEkFIqUic4vx5RrLlP78bOhQ9H7qVsTh";
+		try {
+			await fetch(url, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					content,
+					username: "Undersphere Logs",
+				}),
+			});
+		} catch (err) {
+			console.error("Discord notification failed", err);
 		}
 	}
 
