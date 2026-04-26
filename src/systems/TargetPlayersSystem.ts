@@ -288,14 +288,15 @@ export class TargetPlayersSystem {
     this._qInv.copy(t.container.quaternion).invert()
     flat.applyQuaternion(this._qInv)
 
-    // Match human yaw logic: -Z is forward, +PI offset
-    t.facingYawTarget = Math.atan2(flat.x, flat.z) + Math.PI
+    // atan2(x, z) points the model's local +Z towards the target.
+    // Our models (Idle.fbx) face +Z by default.
+    t.facingYawTarget = Math.atan2(flat.x, flat.z)
   }
 
   /** Tangent "forward" from model yaw + surface frame (for vision cone). */
   private getBotForwardWorld(t: TargetState, out: THREE.Vector3): void {
-    // Model faces -Z in its local space after +PI offset
-    this._fwdScratch.set(0, 0, -1)
+    // Model faces +Z in its local space
+    this._fwdScratch.set(0, 0, 1)
     this._fwdScratch.applyQuaternion(t.model.quaternion)
     this._fwdScratch.applyQuaternion(t.container.quaternion)
     const radial = this._vA.copy(t.shellPoint).normalize()
