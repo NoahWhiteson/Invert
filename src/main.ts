@@ -640,7 +640,7 @@ function updateLeaderboard() {
   if (topOne && topOne.kills > 0) {
     if (lastFirstPlaceId !== topOne.id) {
       if (settingsUI.graphics.killLeaderMsg) {
-        playSfx(newKillLeaderSfx, 1.0, 'master')
+        playSfx(newKillLeaderSfx, 1.0, 'ui')
         announcementUI.show('NEW KILL LEADER')
       }
     }
@@ -710,7 +710,15 @@ void Promise.all([
     updateLeaderboard()
   }
 
-  multiplayer.onPlayerDamaged = (targetId, damage, _attackerId, health, maxHealth) => {
+  multiplayer.onPlayerDamaged = (targetId, damage, attackerId, health, maxHealth) => {
+    if (targetId.startsWith('bot_')) {
+      if (attackerId !== multiplayer.getLocalPlayerId()) {
+        const idx = parseInt(targetId.split('_')[1]!)
+        targetPlayers.inflictDirectDamage(idx, damage)
+      }
+      return
+    }
+
     if (targetId === multiplayer.getLocalPlayerId()) {
       if (localSpawnDamageInvulnerable()) {
         if (typeof maxHealth === 'number') player.state.maxHealth = maxHealth
@@ -742,6 +750,22 @@ void Promise.all([
     killerKills,
     killerBotKills
   ) => {
+    if (targetId.startsWith('bot_')) {
+      const idx = parseInt(targetId.split('_')[1]!)
+      // Ensure bot is marked as killed locally if not already
+      targetPlayers.inflictDirectDamage(idx, 999) 
+      
+      const botName = victimName || `BOT-${String(idx + 1).padStart(2, '0')}`
+      killFeed.push(botName, weaponLabelFromSlot(slotFromWeaponName(weapon || '')))
+      
+      if (attackerId === multiplayer.getLocalPlayerId()) {
+        if (typeof killerKills === 'number') myPvpKills = killerKills
+        if (typeof killerBotKills === 'number') myBotKills = killerBotKills
+        updateLeaderboard()
+      }
+      return
+    }
+
     if (targetId === multiplayer.getLocalPlayerId()) {
       isDead = true
       deadKillerId = attackerId ?? null
@@ -918,6 +942,8 @@ function applyMainMenuView() {
 
 const _v1 = new THREE.Vector3()
 const _v2 = new THREE.Vector3()
+const _v3 = new THREE.Vector3()
+const _q1 = new THREE.Quaternion()
 const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
   let playedImpactThisExplosion = false
   playSpatialSfxAt(explosionSfx, params.pos, 1.2, 120, 'explosion')
@@ -932,7 +958,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
     if (dmg >= 1) {
       player.inflictDamage(dmg)
       if (!playedImpactThisExplosion) {
-        playSfx(impactSfx, 1.0, 'impact')
+        playSfx(impactSfx, 1.0, 'impact', true)
         playedImpactThisExplosion = true
       }
     }
@@ -970,7 +996,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
       if (res && res.damaged) {
         hitIndices.add(idx)
         if (!playedImpactThisExplosion) {
-          playSfx(impactSfx, 1.0, 'impact')
+          playSfx(impactSfx, 1.0, 'impact', true)
           playedImpactThisExplosion = true
         }
         damageTexts.spawn(res.pos, Math.round(dmg), idx)
@@ -978,11 +1004,14 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
         if (res.killed) {
           awardKillCoins()
           rewardAmmoOnKill()
-          myBotKills++
           discoveredPlayers.add(`bot_${idx}`)
-          if (multiplayer.isConnected()) multiplayer.notifyBotKill()
+          // stats will be synced via player_killed message from server
           updateLeaderboard()
           killFeed.push(res.name, 'Grenade')
+        }
+
+        if (multiplayer.isConnected()) {
+          multiplayer.sendDamage(`bot_${idx}`, dmg, 'Grenade', _v1)
         }
 
         // Ragdoll knockback for bots
@@ -1007,10 +1036,10 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
       const finalDmg = params.maxDamage * power
       multiplayer.sendDamage(p.id, finalDmg, 'Grenade', _v1)
 
-      if (!playedImpactThisExplosion) {
-        playSfx(impactSfx, 1.0, 'impact')
-        playedImpactThisExplosion = true
-      }
+        if (!playedImpactThisExplosion) {
+          playSfx(impactSfx, 1.0, 'impact', true)
+          playedImpactThisExplosion = true
+        }
 
       // Show damage text above head
       const headPos = p.model.position.clone()
@@ -1169,7 +1198,7 @@ async function beginPlayFromMenu() {
   isPlayTransitioning = false
 }
 
-mainMenuPlayUI = new MainMenuPlayUI()
+mainMenuPlayUI = new MainMenuPlayUI(settingsUI)
 mainMenuPlayUI.setOnPlay(() => {
   if (atMainMenu && !isDead) {
     input.isSimulatedUnlocked = false
@@ -1188,7 +1217,7 @@ mainMenuNavUI = new MainMenuNavUI({
   onStore: () => setMainMenuView('store'),
   onSettings: () => settingsUI.toggleFromNav(),
   onCredits: () => setMainMenuView('credits'),
-})
+}, settingsUI)
 
 mainMenuDevblogUI = new MainMenuDevblogUI()
 
@@ -1198,13 +1227,13 @@ mainMenuNameUI = new MainMenuNameInputUI(myUsername, (name) => {
   updateLeaderboard()
 })
 
-mainMenuSkinsUI = new MainMenuSkinsUI({
+mainMenuSkinsUI = new MainMenuSkinsUI(settingsUI, {
   onAkGunSkinEquip: (skin) => {
     if (skin === 'default') applyDefaultAkGunLook()
     else applyAkGunSkin(skin)
   },
 })
-mainMenuStoreUI = new MainMenuStoreUI({
+mainMenuStoreUI = new MainMenuStoreUI(settingsUI, {
   onPurchased: () => mainMenuSkinsUI.refresh(),
   onSkinSwatchPreview: (skin) => {
     if (skin === 'default') applyDefaultAkGunLook()
@@ -1500,6 +1529,24 @@ const audioCtx = typeof window !== 'undefined'
   ? new ((window as any).AudioContext || (window as any).webkitAudioContext)()
   : null
 
+// Master Limiter / Compressor to prevent "breaking the sound barrier" (digital clipping)
+let masterBus: GainNode | null = null
+
+if (audioCtx) {
+  const limiter = audioCtx.createDynamicsCompressor()
+  limiter.threshold.setValueAtTime(-3, audioCtx.currentTime) // Duck early
+  limiter.knee.setValueAtTime(12, audioCtx.currentTime)
+  limiter.ratio.setValueAtTime(20, audioCtx.currentTime) // Hard limit
+  limiter.attack.setValueAtTime(0.003, audioCtx.currentTime)
+  limiter.release.setValueAtTime(0.1, audioCtx.currentTime)
+
+  const bus = audioCtx.createGain()
+  bus.gain.setValueAtTime(0.85, audioCtx.currentTime) // Slight head-room
+  masterBus = bus
+
+  bus.connect(limiter).connect(audioCtx.destination)
+}
+
 // ── Train Spatial Audio ────────────────────────────────────────────────────
 // We use WebAudio so we can:
 //   • Perfectly loop exactly 0–6 s with loopStart / loopEnd (no gap)
@@ -1704,16 +1751,31 @@ function syncMuzzleFlashParent() {
 
 // Voice limiting to prevent sound clipping/merging issues
 const voiceCount = new Map<string, number>()
-const MAX_VOICES_PER_TYPE = 8
+const lastTriggerTime = new Map<string, number>()
+const MAX_VOICES_PER_TYPE = 16
+const MIN_RETRIGGER_GAP_MS = 25 // Prevent extreme "phasing" mash
 
-function playSfx(audio: HTMLAudioElement, volume: number = 1.0, type: 'master' | 'gun' | 'impact' | 'explosion' = 'master') {
+function playSfx(
+  audio: HTMLAudioElement,
+  volume: number = 1.0,
+  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
+  bypassLimit: boolean = false
+) {
+  const now = performance.now()
+  const soundId = audio.src
+  const lastTime = lastTriggerTime.get(soundId) ?? 0
+  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
+  lastTriggerTime.set(soundId, now)
+
   const currentCount = voiceCount.get(type) ?? 0
-  if (currentCount >= MAX_VOICES_PER_TYPE) return
+  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
 
   const layer = new Audio(audio.src)
   const master = settingsUI.volumes.master
   const typeVol = settingsUI.volumes[type]
-  layer.volume = Math.max(0, Math.min(1, volume * master * typeVol))
+  const finalVol = Math.max(0, Math.min(1, volume * master * typeVol))
+  
+  layer.volume = finalVol
   layer.playbackRate = audio.playbackRate
   layer.preservesPitch = audio.preservesPitch
   layer.currentTime = 0
@@ -1724,36 +1786,46 @@ function playSfx(audio: HTMLAudioElement, volume: number = 1.0, type: 'master' |
     voiceCount.set(type, Math.max(0, c - 1))
   }
 
+  if (audioCtx) {
+    if (audioCtx.state === 'suspended') void audioCtx.resume()
+    if (masterBus) {
+      try {
+        const src = audioCtx.createMediaElementSource(layer)
+        src.connect(masterBus)
+      } catch {
+        // Fallback to direct volume if source binding fails
+      }
+    }
+  }
+
   void layer.play()
 }
 
-timerUI.onOneMinuteRemaining = () => playSfx(oneMinuteSfx, 1, 'master')
+timerUI.onOneMinuteRemaining = () => playSfx(oneMinuteSfx, 1, 'ui')
 
 function playSpatialSfxAt(
   audio: HTMLAudioElement,
   sourcePos: THREE.Vector3,
   baseVolume: number = 1.0,
   maxDistance: number = 80,
-  type: 'master' | 'gun' | 'impact' | 'explosion' = 'master'
+  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
+  bypassLimit: boolean = false
 ) {
-  const currentCount = voiceCount.get(type) ?? 0
-  if (currentCount >= MAX_VOICES_PER_TYPE) return
+  const now = performance.now()
+  const soundId = audio.src
+  const lastTime = lastTriggerTime.get(soundId) ?? 0
+  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
+  lastTriggerTime.set(soundId, now)
 
-  const camPos = new THREE.Vector3()
-  core.camera.getWorldPosition(camPos)
-  const toSource = sourcePos.clone().sub(camPos)
-  const distance = toSource.length()
-  // Always audible: smooth inverse-distance style falloff with a quiet floor.
-  const normalized = distance / Math.max(1, maxDistance)
-  const attenuation = 1 / (1 + normalized * normalized * 2.5)
-  const minAudible = 0.045
+  const currentCount = voiceCount.get(type) ?? 0
+  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
 
   const master = settingsUI.volumes.master
   const typeVol = settingsUI.volumes[type]
-  const volume = Math.max(minAudible, Math.min(1, baseVolume * attenuation * master * typeVol))
+  const finalBaseVolume = Math.max(0, Math.min(1, baseVolume * master * typeVol))
 
   const layer = new Audio(audio.src)
-  layer.volume = volume
+  layer.volume = finalBaseVolume // Base volume before spatial attenuation
   layer.playbackRate = audio.playbackRate
   layer.preservesPitch = audio.preservesPitch
   layer.currentTime = 0
@@ -1764,17 +1836,55 @@ function playSpatialSfxAt(
     voiceCount.set(type, Math.max(0, c - 1))
   }
 
-  if (audioCtx && typeof (window as any).StereoPannerNode !== 'undefined') {
+  if (audioCtx) {
     try {
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(core.camera.quaternion).normalize()
-      const dir = toSource.normalize()
-      const pan = Math.max(-1, Math.min(1, dir.dot(right)))
+      if (audioCtx.state === 'suspended') void audioCtx.resume()
+
+      const panner = audioCtx.createPanner()
+      panner.panningModel = 'HRTF'
+      panner.distanceModel = 'inverse'
+      panner.refDistance = 5
+      panner.maxDistance = maxDistance
+      panner.rolloffFactor = 1.5
+      
+      panner.positionX.value = sourcePos.x
+      panner.positionY.value = sourcePos.y
+      panner.positionZ.value = sourcePos.z
+      
+      const camPos = _v1.setFromMatrixPosition(core.camera.matrixWorld)
+      const camQuat = _q1.setFromRotationMatrix(core.camera.matrixWorld)
+      const forward = _v2.set(0, 0, -1).applyQuaternion(camQuat)
+      const up = _v3.set(0, 1, 0).applyQuaternion(camQuat)
+      
+      const listener = audioCtx.listener
+      if (listener.positionX) {
+        listener.positionX.setTargetAtTime(camPos.x, audioCtx.currentTime, 0.05)
+        listener.positionY.setTargetAtTime(camPos.y, audioCtx.currentTime, 0.05)
+        listener.positionZ.setTargetAtTime(camPos.z, audioCtx.currentTime, 0.05)
+        listener.forwardX.setTargetAtTime(forward.x, audioCtx.currentTime, 0.05)
+        listener.forwardY.setTargetAtTime(forward.y, audioCtx.currentTime, 0.05)
+        listener.forwardZ.setTargetAtTime(forward.z, audioCtx.currentTime, 0.05)
+        listener.upX.setTargetAtTime(up.x, audioCtx.currentTime, 0.05)
+        listener.upY.setTargetAtTime(up.y, audioCtx.currentTime, 0.05)
+        listener.upZ.setTargetAtTime(up.z, audioCtx.currentTime, 0.05)
+      } else {
+        listener.setPosition(camPos.x, camPos.y, camPos.z)
+        listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z)
+      }
+
       const src = audioCtx.createMediaElementSource(layer)
-      const panner = audioCtx.createStereoPanner()
-      panner.pan.value = pan
-      src.connect(panner).connect(audioCtx.destination)
+      if (masterBus) {
+        src.connect(panner).connect(masterBus)
+      } else {
+        src.connect(panner).connect(audioCtx.destination)
+      }
     } catch {
-      // fall back to plain playback
+      // Fallback: manual volume attenuation if WebAudio spatial fails
+      const camPos = new THREE.Vector3().setFromMatrixPosition(core.camera.matrixWorld)
+      const dist = sourcePos.distanceTo(camPos)
+      const norm = dist / Math.max(1, maxDistance)
+      const atten = 1 / (1 + norm * norm * 2.5)
+      layer.volume = Math.max(0.045, Math.min(1, finalBaseVolume * atten))
     }
   }
 
@@ -1805,6 +1915,14 @@ function weaponLabelFromSlot(slot: number): string {
   if (slot === SHOTGUN_SLOT) return 'Shotgun'
   if (slot === GRENADE_SLOT) return 'Grenade'
   return 'Unknown'
+}
+
+function slotFromWeaponName(name: string): number {
+  const n = name.toLowerCase()
+  if (n.includes('ak')) return AK_SLOT
+  if (n.includes('shotgun')) return SHOTGUN_SLOT
+  if (n.includes('grenade')) return GRENADE_SLOT
+  return 0
 }
 
 function updateHeartbeatByHealth(health: number, maxHealth: number) {
@@ -1845,11 +1963,11 @@ function shoot() {
     playerModel.anims.triggerFire(cfg.fireRate)
   }
   if (slot === SHOTGUN_SLOT) {
-    playSfx(shotgunSfx, 1.0, 'gun')
+    playSfx(shotgunSfx, 1.0, 'gun', true)
     multiplayer.sendSound('shotgun', player.playerGroup.position, 1)
   }
   if (slot === AK_SLOT) {
-    playSfx(akSfx, 1.0, 'gun')
+    playSfx(akSfx, 1.0, 'gun', true)
     multiplayer.sendSound('ak', player.playerGroup.position, 1)
   }
 
@@ -1916,7 +2034,7 @@ function shoot() {
           }
 
           if (!playedImpactThisShot) {
-            playSfx(impactSfx, 1.0, 'impact')
+            playSfx(impactSfx, 1.0, 'impact', true)
             playedImpactThisShot = true
           }
           blood.spawn(h.point, hitDir, 4)
@@ -1927,11 +2045,13 @@ function shoot() {
           if (damageRes.killed) {
             awardKillCoins()
             rewardAmmoOnKill()
-            myBotKills++
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
-            if (multiplayer.isConnected()) multiplayer.notifyBotKill()
+            // stats will be synced via player_killed message from server
             updateLeaderboard()
             killFeed.push(damageRes.name, weaponLabelFromSlot(slot))
+          }
+          if (multiplayer.isConnected()) {
+            multiplayer.sendDamage(`bot_${damageRes.targetIdx}`, cfg.damage, weaponLabelFromSlot(slot), _shotDir)
           }
         } else if (h.object === mesh || h.object.name.toLowerCase().includes('tent') || h.object.parent?.name.toLowerCase().includes('tent')) {
           // World or Tent hit
@@ -1946,7 +2066,7 @@ function shoot() {
         const hitDir = _v1.copy(_shotDir).negate().normalize()
 
         if (!playedImpactThisShot) {
-          playSfx(impactSfx, 1.0, 'impact')
+          playSfx(impactSfx, 1.0, 'impact', true)
           playedImpactThisShot = true
         }
 
@@ -2847,7 +2967,7 @@ function animate() {
         reloadStartedAt = performance.now()
       }
       if (s < 3 && s !== GRENADE_SLOT && isReloading) {
-        playSfx(reloadSfx)
+        playSfx(reloadSfx, 1.0, 'ui', true)
         multiplayer.sendSound('reload', player.playerGroup.position, 1)
       }
     }

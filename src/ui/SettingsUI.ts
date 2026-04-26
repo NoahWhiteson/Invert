@@ -4,7 +4,7 @@ import { ECONOMY_RELOADED_EVENT, trySyncEconomyFromApi } from '../net/invertEcon
 import { Crosshair } from './Crosshair'
 import { ringTextShadow } from './textOutline'
 
-export type SoundType = 'master' | 'gun' | 'impact' | 'explosion'
+export type SoundType = 'master' | 'gun' | 'impact' | 'explosion' | 'ui'
 export type GraphicOption = 'grass' | 'blood' | 'bulletHoles' | 'killLeaderMsg' | 'trainNoise'
 
 export class SettingsUI {
@@ -44,10 +44,11 @@ export class SettingsUI {
     master: 1.0,
     gun: 0.75,
     impact: 1.0,
-    explosion: 1.0
+    explosion: 1.0,
+    ui: 1.0
   }
-  private volumeTracks: Record<SoundType, HTMLDivElement | null> = { master: null, gun: null, impact: null, explosion: null }
-  private volumeNotches: Record<SoundType, HTMLDivElement | null> = { master: null, gun: null, impact: null, explosion: null }
+  private volumeTracks: Record<SoundType, HTMLDivElement | null> = { master: null, gun: null, impact: null, explosion: null, ui: null }
+  private volumeNotches: Record<SoundType, HTMLDivElement | null> = { master: null, gun: null, impact: null, explosion: null, ui: null }
   private draggingType: SoundType | null = null
 
   // Graphics state
@@ -194,6 +195,7 @@ export class SettingsUI {
           ${this.renderVolumeSlider('GUN', 'gun')}
           ${this.renderVolumeSlider('IMPACT', 'impact')}
           ${this.renderVolumeSlider('EXPLOSION', 'explosion')}
+          ${this.renderVolumeSlider('UI', 'ui')}
         </div>
 
         <!-- GRAPHICS SECTION -->
@@ -243,6 +245,8 @@ export class SettingsUI {
     this.volumeNotches.impact = this.menu.querySelector('#notch-impact')
     this.volumeTracks.explosion = this.menu.querySelector('#track-explosion')
     this.volumeNotches.explosion = this.menu.querySelector('#notch-explosion')
+    this.volumeTracks.ui = this.menu.querySelector('#track-ui')
+    this.volumeNotches.ui = this.menu.querySelector('#notch-ui')
 
     // Graphic refs
     this.graphicButtons.grass = this.menu.querySelector('#btn-grass')
@@ -463,7 +467,7 @@ export class SettingsUI {
       }
     }
     this.fovNotch.style.left = `${this.fovPercent * 100}%`
-    for (const key of ['master', 'gun', 'impact', 'explosion'] as SoundType[]) {
+    for (const key of ['master', 'gun', 'impact', 'explosion', 'ui'] as SoundType[]) {
       this.volumeNotches[key]!.style.left = `${this.volumes[key] * 100}%`
     }
   }
@@ -570,7 +574,7 @@ export class SettingsUI {
     this.fovPercent = 0.8
     this.fovNotch.style.left = '80%'
 
-    for (const key of ['master', 'gun', 'impact', 'explosion'] as SoundType[]) {
+    for (const key of ['master', 'gun', 'impact', 'explosion', 'ui'] as SoundType[]) {
       this.volumes[key] = 1.0
       this.volumeNotches[key]!.style.left = '100%'
     }
@@ -591,7 +595,7 @@ export class SettingsUI {
 
   private playClick() {
     const s = new Audio(this.clickSfx.src)
-    s.volume = 0.5 * this.volumes.master
+    s.volume = 0.5 * this.volumes.master * this.volumes.ui
     void s.play()
   }
 
@@ -674,7 +678,7 @@ export class SettingsUI {
         }
       }
 
-      for (const key of ['master', 'gun', 'impact', 'explosion'] as SoundType[]) {
+      for (const key of ['master', 'gun', 'impact', 'explosion', 'ui'] as SoundType[]) {
         const t = this.volumeTracks[key]!
         const r = t.getBoundingClientRect()
         const isOver = this.isOpen && (mx >= r.left - 10 && mx <= r.right + 10 && my >= r.top - 10 && my <= r.top + 28 + 10)

@@ -7,4 +7,5 @@ export interface Env {
    * Set in wrangler.json `vars` or Workers dashboard → Settings → Variables.
    */
   CORS_ORIGIN?: string
+  DISCORD_WEBHOOK_URL?: string
 }

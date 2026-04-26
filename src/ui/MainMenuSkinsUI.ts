@@ -1,5 +1,6 @@
 import { ringTextShadow } from './textOutline'
 import { patchEconomyEquipment } from '../net/invertEconomySync'
+import { SettingsUI } from './SettingsUI'
 import {
   readOwnedAkGunSkins,
   readOwnedSkinIds,
@@ -103,8 +104,10 @@ export class MainMenuSkinsUI {
   private gridHost: HTMLDivElement
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private onAkGunSkinEquip?: (skin: EquippedAkSkin) => void
+  private settingsUI: SettingsUI
 
   private async applyCharacterEquipment(skinId: string | null): Promise<void> {
+    this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
     void this.clickSfx.play().catch(() => { })
     const synced = await patchEconomyEquipment({ equippedCharacterSkin: skinId })
     if (!synced) writeEquippedSkinId(skinId)
@@ -112,6 +115,7 @@ export class MainMenuSkinsUI {
   }
 
   private async applyGunEquipment(skin: EquippedAkSkin): Promise<void> {
+    this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
     void this.clickSfx.play().catch(() => { })
     const synced = await patchEconomyEquipment({ equippedAkSkin: skin })
     if (!synced) setEquippedAkSkin(skin)
@@ -119,7 +123,8 @@ export class MainMenuSkinsUI {
     this.refresh()
   }
 
-  constructor(callbacks?: MainMenuSkinsCallbacks) {
+  constructor(settingsUI: SettingsUI, callbacks?: MainMenuSkinsCallbacks) {
+    this.settingsUI = settingsUI
     this.onAkGunSkinEquip = callbacks?.onAkGunSkinEquip
     this.root = document.createElement('div')
     this.root.style.position = 'fixed'

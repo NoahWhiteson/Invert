@@ -18,10 +18,12 @@ import {
   sanitizeUsername,
   sanitizeVec3,
   sanitizeViewYaw,
-  sanitizeViewPitch,
-  sanitizeVolume,
-  sanitizeWeapon,
-  isValidPlayerId,
+	sanitizeViewPitch,
+	sanitizeVolume,
+	sanitizeWeapon,
+	isValidPlayerId,
+	MAX_BULLET_DIST,
+	FIRE_WINDOW_MS,
 } from "./validation";
 
 export type { Env } from "./env";
@@ -41,8 +43,17 @@ type PlayerRecord = {
 	health: number;
 	maxHealth: number;
 	lastUpdate: number;
+	lastFireAt: number;
 	lastDamageWeapon?: string;
 	lastRespawnAt?: number;
+};
+
+type BotRecord = {
+	id: string;
+	health: number;
+	maxHealth: number;
+	pos: { x: number; y: number; z: number };
+	lastRespawnAt: number;
 };
 
 function playerPublic(p: PlayerRecord): Record<string, unknown> {
@@ -116,8 +127,10 @@ export default {
 const MATCH_DURATION_MS = 3 * 60 * 1000;
 const RESET_DELAY_MS = 10000;
 
-export class GameRoom extends DurableObject {
+export class GameRoom extends DurableObject<Env> {
+	private env: Env;
 	private players = new Map<string, PlayerRecord>();
+	private bots = new Map<string, BotRecord>();
 	private sessions = new Set<WebSocket>();
 	private playerSockets = new Map<string, WebSocket>();
 	private matchStartTime: number;
@@ -135,10 +148,23 @@ export class GameRoom extends DurableObject {
 
 	constructor(state: DurableObjectState, env: Env) {
 		super(state, env);
+		this.env = env;
 		this.matchStartTime = Date.now();
 		this.treeLayout = this.generateTreeLayout(80, 50, 8);
 		this.tentLayout = this.generateTentLayout(3, 50, 8);
 		this.initialTrainPhase = Math.random() * Math.PI * 2;
+		
+		// Initialize bots
+		for (let i = 0; i < 12; i++) {
+			const id = `bot_${i}`;
+			this.bots.set(id, {
+				id,
+				health: 100,
+				maxHealth: 100,
+				pos: { x: 0, y: -50, z: 0 },
+				lastRespawnAt: 0
+			});
+		}
 	}
 
 	private generateTentLayout(count: number, sphereRadius: number, safeZoneRadius: number) {
@@ -308,7 +334,16 @@ export class GameRoom extends DurableObject {
 		this.joinTimes.set(playerId, Date.now());
 		ws.accept();
 
-		void this.sendDiscordNotification(`🎮 **Player joined Undersphere!** (ID: \`${playerId.slice(0, 8)}\`)`);
+		void this.sendDiscordNotification(
+			"🎮 Player Joined",
+			`A new player has entered the sphere.`,
+			0x44ff44,
+			[
+				{ name: "Player ID", value: `\`${playerId.slice(0, 8)}\``, inline: true },
+				{ name: "Room", value: `\`${roomName}\``, inline: true },
+				{ name: "Players in Room", value: `\`${this.players.size}/8\``, inline: true }
+			]
+		);
 
 		ws.addEventListener("error", (e) => {
 			console.error("WebSocket error", playerId, e);
@@ -329,8 +364,20 @@ export class GameRoom extends DurableObject {
 			health: 100,
 			maxHealth: 100,
 			lastUpdate: Date.now(),
+			lastFireAt: 0,
 		};
 		this.players.set(playerId, initial);
+
+		void this.sendDiscordNotification(
+			"🎮 Player Joined",
+			`A new player has entered the sphere.`,
+			0x44ff44,
+			[
+				{ name: "Player ID", value: `\`${playerId.slice(0, 8)}\``, inline: true },
+				{ name: "Room", value: `\`${roomName}\``, inline: true },
+				{ name: "Players in Room", value: `\`${this.players.size}/8\``, inline: true }
+			]
+		);
 
 		// If this is the 2nd player, start the match timer now for PvP
 		if (this.players.size === 2) {
@@ -382,9 +429,18 @@ export class GameRoom extends DurableObject {
 			const durationSec = Math.floor((Date.now() - joinTime) / 1000);
 			const durationStr = durationSec > 60 ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` : `${durationSec}s`;
 
-			void this.sendDiscordNotification(`👋 **Player left:** \`${username}\` (Played for ${durationStr})`);
+		void this.sendDiscordNotification(
+			"👋 Player Left",
+			`A player has exited the sphere.`,
+			0xff4444,
+			[
+				{ name: "Username", value: `\`${username}\``, inline: true },
+				{ name: "Play Time", value: `\`${durationStr}\``, inline: true },
+				{ name: "Players Remaining", value: `\`${this.players.size - 1}/8\``, inline: true }
+			]
+		);
 
-			this.players.delete(playerId);
+		this.players.delete(playerId);
 			this.sessions.delete(ws);
 			this.playerSockets.delete(playerId);
 			this.joinTimes.delete(playerId);
@@ -413,9 +469,6 @@ export class GameRoom extends DurableObject {
 					break;
 				case "damage":
 					this.handleDamage(playerId, d);
-					break;
-				case "bot_kill":
-					this.handleBotKill(playerId);
 					break;
 				case "blood":
 					this.handleBlood(playerId, d, ws);
@@ -463,6 +516,9 @@ export class GameRoom extends DurableObject {
 		p.viewYaw = sanitizeViewYaw(d.viewYaw);
 		p.viewPitch = sanitizeViewPitch(d.viewPitch);
 		p.anim = sanitizeAnim(d.anim);
+		if (p.anim === "firing") {
+			p.lastFireAt = Date.now();
+		}
 		p.slot = sanitizeSlot(d.slot);
 		p.atMenu = !!d.atMenu;
 		p.lastUpdate = Date.now();
@@ -483,25 +539,21 @@ export class GameRoom extends DurableObject {
 		}, ws);
 	}
 
-	private handleBotKill(playerId: string) {
-		if (!this.allowBotKill(playerId)) return;
-		const p = this.players.get(playerId);
-		if (!p) return;
-		p.botKills += 1;
-		p.lastUpdate = Date.now();
-		this.players.set(playerId, p);
-		this.broadcast({
-			type: "player_stats",
-			playerId,
-			kills: p.kills,
-			botKills: p.botKills,
-		});
-	}
-
 	private handleDamage(attackerId: string, d: Record<string, unknown>) {
-		if (!isValidPlayerId(d.targetId)) return;
-		const targetId = d.targetId;
+		const targetId = String(d.targetId);
 		if (targetId === attackerId) return;
+
+		const attacker = this.players.get(attackerId);
+		if (!attacker) return;
+
+		// 1. Fire Window Check
+		const now = Date.now();
+		const timeSinceFire = now - attacker.lastFireAt;
+		// Special case: Grenades/Melee might not have an "anim: firing" at the exact moment
+		// but for Undersphere, shots are frequent. We allow a 1.2s window.
+		if (timeSinceFire > FIRE_WINDOW_MS) {
+			return; // Reject damage if attacker hasn't "fired" recently
+		}
 
 		const dmg = sanitizeDamage(d.damage);
 		if (dmg <= 0) return;
@@ -509,22 +561,52 @@ export class GameRoom extends DurableObject {
 		if (!this.allowDamage(attackerId)) return;
 
 		const pairKey = `${attackerId}:${targetId}`;
-		const now = Date.now();
 		const last = this.lastDamagePairMs.get(pairKey) ?? 0;
 		if (now - last < DAMAGE_COOLDOWN_MS) return;
 		this.lastDamagePairMs.set(pairKey, now);
 
-		const target = this.players.get(targetId);
-		if (!target) return;
+		const isBot = targetId.startsWith("bot_");
+		let prevHealth = 0;
+		let nextHealth = 0;
+		let maxHealth = 100;
+		let username = "Unknown";
 
-		const fromBot = d.fromBot === true;
+		if (isBot) {
+			const bot = this.bots.get(targetId);
+			if (!bot) return;
+			prevHealth = bot.health;
+			nextHealth = Math.max(0, prevHealth - dmg);
+			bot.health = nextHealth;
+			maxHealth = bot.maxHealth;
+			username = targetId.toUpperCase().replace("_", "-");
+			// If bot was killed, we'll respawn it in a bit (client usually handles, but we track health)
+			if (nextHealth <= 0 && prevHealth > 0) {
+				bot.lastRespawnAt = now;
+				// Auto-respawn bot health after 5s so it can be killed again authoritative-ly
+				setTimeout(() => {
+					bot.health = bot.maxHealth;
+				}, 5000);
+			}
+		} else {
+			const target = this.players.get(targetId);
+			if (!target) return;
+			
+			// 2. Distance Check (PvP only)
+			const distSq = Math.pow(attacker.pos.x - target.pos.x, 2) + 
+			               Math.pow(attacker.pos.y - target.pos.y, 2) + 
+						   Math.pow(attacker.pos.z - target.pos.z, 2);
+			if (distSq > MAX_BULLET_DIST * MAX_BULLET_DIST) {
+				return; // Target too far
+			}
 
-		const prevHealth = target.health;
-		const nextHealth = Math.max(0, prevHealth - dmg);
-		target.health = nextHealth;
-		target.lastDamageWeapon = sanitizeWeapon(d.weapon);
-		target.lastUpdate = Date.now();
-		this.players.set(targetId, target);
+			prevHealth = target.health;
+			nextHealth = Math.max(0, prevHealth - dmg);
+			target.health = nextHealth;
+			target.lastDamageWeapon = sanitizeWeapon(d.weapon);
+			target.lastUpdate = now;
+			maxHealth = target.maxHealth;
+			username = target.username;
+		}
 
 		let incoming: { x: number; y: number; z: number } | undefined;
 		if (d.incoming && typeof d.incoming === "object") {
@@ -533,50 +615,53 @@ export class GameRoom extends DurableObject {
 			if (v) incoming = v;
 		}
 
-		const damageAttackerId = fromBot ? null : attackerId;
 		this.broadcast({
 			type: "player_damaged",
-			attackerId: damageAttackerId,
+			attackerId,
 			targetId,
 			damage: dmg,
 			health: nextHealth,
-			maxHealth: target.maxHealth,
+			maxHealth: maxHealth,
 			...(incoming ? { incoming } : {}),
 		});
 
 		if (nextHealth <= 0 && prevHealth > 0) {
-			const weapon = target.lastDamageWeapon ?? "unknown";
-			const victimName = target.username ?? "Unknown";
+			const weapon = sanitizeWeapon(d.weapon) || "unknown";
+			const victimName = username;
 
-			if (fromBot) {
-				this.broadcast({
-					type: "player_killed",
-					attackerId: null,
-					targetId,
-					killerName: "Bot",
-					victimName,
-					weapon,
-					...(incoming ? { deathIncoming: incoming } : {}),
-				});
-			} else {
-				const killer = this.players.get(attackerId);
-				let killerKills = 0;
-				if (killer) {
-					killer.kills += 1;
-					killerKills = killer.kills;
-					killer.lastUpdate = Date.now();
-					this.players.set(attackerId, killer);
-				}
-				const killerName = killer?.username ?? "Unknown";
+			if (isBot) {
+				attacker.botKills += 1;
+				attacker.lastUpdate = now;
 				this.broadcast({
 					type: "player_killed",
 					attackerId,
 					targetId,
-					killerName,
+					killerName: attacker.username,
 					victimName,
 					weapon,
-					killerKills,
-					killerBotKills: killer?.botKills ?? 0,
+					killerKills: attacker.kills,
+					killerBotKills: attacker.botKills,
+					...(incoming ? { deathIncoming: incoming } : {}),
+				});
+				// Sync updated stats
+				this.broadcast({
+					type: "player_stats",
+					playerId: attackerId,
+					kills: attacker.kills,
+					botKills: attacker.botKills,
+				});
+			} else {
+				attacker.kills += 1;
+				attacker.lastUpdate = now;
+				this.broadcast({
+					type: "player_killed",
+					attackerId,
+					targetId,
+					killerName: attacker.username,
+					victimName,
+					weapon,
+					killerKills: attacker.kills,
+					killerBotKills: attacker.botKills,
 					...(incoming ? { deathIncoming: incoming } : {}),
 				});
 			}
@@ -721,15 +806,23 @@ export class GameRoom extends DurableObject {
 		}
 	}
 
-	private async sendDiscordNotification(content: string) {
-		const url = "https://discord.com/api/webhooks/1498064799458922587/N8BUDVjPH204jTirtmH2IZjMJl0Z57ISixEaMEkFIqUic4vx5RrLlP78bOhQ9H7qVsTh";
+	private async sendDiscordNotification(title: string, description: string, color: number, fields: { name: string; value: string; inline?: boolean }[]) {
+		const url = this.env.DISCORD_WEBHOOK_URL;
+		if (!url) return;
 		try {
 			await fetch(url, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
-					content,
 					username: "Undersphere Logs",
+					embeds: [{
+						title,
+						description,
+						color,
+						fields,
+						timestamp: new Date().toISOString(),
+						footer: { text: "Undersphere Match Server" }
+					}],
 				}),
 			});
 		} catch (err) {

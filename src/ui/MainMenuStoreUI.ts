@@ -4,6 +4,7 @@ import {
   purchaseLootCrateViaApi,
   trySyncEconomyFromApi,
 } from '../net/invertEconomySync'
+import { SettingsUI } from './SettingsUI'
 import {
   AK_GUN_SKIN_PRICE,
   type AkGunSkinId,
@@ -122,8 +123,10 @@ export class MainMenuStoreUI {
   private onPurchased?: () => void
   private onSkinSwatchPreview?: (skin: EquippedAkSkin) => void
   private onGunSkinPurchase?: (skinId: AkGunSkinId) => void
+  private settingsUI: SettingsUI
 
-  constructor(callbacks?: MainMenuStoreCallbacks) {
+  constructor(settingsUI: SettingsUI, callbacks?: MainMenuStoreCallbacks) {
+    this.settingsUI = settingsUI
     this.onPurchased = callbacks?.onPurchased
     this.onSkinSwatchPreview = callbacks?.onSkinSwatchPreview
     this.onGunSkinPurchase = callbacks?.onGunSkinPurchase
@@ -263,6 +266,7 @@ export class MainMenuStoreUI {
       if (ownsAkGunSkin(sid)) return
       const price = AK_GUN_SKIN_PRICE[sid]
       if (getCoins() < price) return
+      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
       void this.clickSfx.play().catch(() => {})
       void (async () => {
         const ok = await purchaseAkGunSkinViaApi(sid)
@@ -398,6 +402,7 @@ export class MainMenuStoreUI {
     btn.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
+      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
       void this.clickSfx.play().catch(() => {})
       this.storePreviewSkin = skinId
       this.onSkinSwatchPreview?.(skinId)
@@ -503,6 +508,7 @@ export class MainMenuStoreUI {
     btn.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
+      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
       void this.clickSfx.play().catch(() => {})
       this.storePreviewSkin = 'default'
       this.onSkinSwatchPreview?.('default')
@@ -697,6 +703,7 @@ export class MainMenuStoreUI {
       e.stopPropagation()
       e.preventDefault()
       if (btn.disabled) return
+      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
       void this.clickSfx.play().catch(() => {})
       void (async () => {
         const r = await purchaseLootCrateViaApi(crate.id)

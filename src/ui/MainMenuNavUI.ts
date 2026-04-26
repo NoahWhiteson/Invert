@@ -1,4 +1,5 @@
 import { ringTextShadow } from './textOutline'
+import { SettingsUI } from './SettingsUI'
 
 /** Fixed slot + 4-way cardinal drop-shadow so mixed PNG canvas sizes read the same and pop on bright BG. */
 const ICON_SLOT_PX = 52
@@ -26,8 +27,10 @@ export class MainMenuNavUI {
   private readonly buttons: HTMLButtonElement[] = []
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private titleElement: HTMLDivElement
+  private settingsUI: SettingsUI
 
-  constructor(handlers: MainMenuNavHandlers) {
+  constructor(handlers: MainMenuNavHandlers, settingsUI: SettingsUI) {
+    this.settingsUI = settingsUI
     this.wrap = document.createElement('div')
     this.wrap.style.position = 'fixed'
     this.wrap.style.top = '20px'
@@ -165,6 +168,7 @@ export class MainMenuNavUI {
       btn.addEventListener('click', (e) => {
         e.stopPropagation()
         e.preventDefault()
+        this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
         void this.clickSfx.play().catch(() => {})
         onClick()
       })

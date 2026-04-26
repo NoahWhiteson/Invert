@@ -1,12 +1,15 @@
 import { ringTextShadow } from './textOutline'
+import { SettingsUI } from './SettingsUI'
 
 export class MainMenuPlayUI {
   private wrap: HTMLDivElement
   private btn: HTMLButtonElement
   private onPlay: (() => void) | null = null
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
+  private settingsUI: SettingsUI
 
-  constructor() {
+  constructor(settingsUI: SettingsUI) {
+    this.settingsUI = settingsUI
     this.wrap = document.createElement('div')
     this.wrap.style.position = 'fixed'
     this.wrap.style.left = '24px'
@@ -59,6 +62,7 @@ export class MainMenuPlayUI {
     this.btn.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
+      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
       void this.clickSfx.play().catch(() => {})
       this.onPlay?.()
     })

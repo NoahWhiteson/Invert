@@ -836,11 +836,6 @@ export class MultiplayerSystem {
     })
   }
 
-  /** Tell the server you scored a bot kill (authoritative count broadcast to everyone). */
-  public notifyBotKill() {
-    this.safeSend({ type: "bot_kill" })
-  }
-
   public sendBlood(point: THREE.Vector3, dir: THREE.Vector3, count: number = 4) {
     this.safeSend({
       type: "blood",

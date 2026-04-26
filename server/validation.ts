@@ -18,6 +18,11 @@ export const MAX_JSON_BYTES = 12_000
 /** Max inbound messages per connected player per rolling second (all types). */
 export const MAX_MESSAGES_PER_SEC = 80
 
+/** Max distance a bullet can travel and still count (sync with VISION_MAX_DIST + buffer) */
+export const MAX_BULLET_DIST = 65
+/** How long after a "firing" animation a damage event is valid (ms) */
+export const FIRE_WINDOW_MS = 1200
+
 export const ALLOWED_ANIMS = new Set([
   'idle',
   'walk',
