@@ -39,15 +39,16 @@ export class WeaponUI {
       icon.style.left = '50%'
       icon.style.transform = 'translate(-50%, -50%)'
       // Fill more of the slot and boost brightness for visibility
-      icon.style.width = '46px'
-      icon.style.height = '46px'
+      icon.style.width = i === 2 ? '41px' : '46px' // Grenade (i=2) is 10% smaller
+      icon.style.height = i === 2 ? '41px' : '46px'
       icon.style.backgroundImage = `url('${icons[i]}')`
       icon.style.backgroundSize = 'contain'
       icon.style.backgroundRepeat = 'no-repeat'
       icon.style.backgroundPosition = 'center'
       icon.style.imageRendering = 'pixelated'
-      // High brightness and contrast to ensure they stand out
+    // High brightness and contrast + 15 degree tilt
       icon.style.filter = 'brightness(1.8) contrast(1.1)' 
+      icon.style.transform = 'translate(-50%, -50%) rotate(-15deg)'
       slot.appendChild(icon)
 
       this.container.appendChild(slot)

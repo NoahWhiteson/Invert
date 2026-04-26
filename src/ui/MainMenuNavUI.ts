@@ -18,26 +18,36 @@ export type MainMenuNavHandlers = {
   onSkins: () => void
   onStore: () => void
   onSettings: () => void
+  onCredits: () => void
 }
 
 export class MainMenuNavUI {
   private wrap: HTMLDivElement
   private readonly buttons: HTMLButtonElement[] = []
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
+  private titleElement: HTMLDivElement
 
   constructor(handlers: MainMenuNavHandlers) {
     this.wrap = document.createElement('div')
     this.wrap.style.position = 'fixed'
     this.wrap.style.top = '20px'
-    this.wrap.style.left = '0'
-    this.wrap.style.right = '0'
+    this.wrap.style.left = '20px'
+    this.wrap.style.right = '20px'
     this.wrap.style.display = 'none'
-    this.wrap.style.justifyContent = 'center'
+    this.wrap.style.justifyContent = 'center' // Center the tabs
     this.wrap.style.alignItems = 'center'
-    this.wrap.style.gap = '28px'
-    this.wrap.style.flexWrap = 'wrap'
     this.wrap.style.zIndex = '1200'
     this.wrap.style.pointerEvents = 'none'
+
+    this.titleElement = document.createElement('div')
+    this.titleElement.textContent = 'UNDERSPHERE'
+    this.titleElement.style.position = 'absolute'
+    this.titleElement.style.left = '30px'
+    this.titleElement.style.fontFamily = "'m6x11', monospace"
+    this.titleElement.style.fontSize = `${NAV_LABEL_FONT_PX}px`
+    this.titleElement.style.color = '#fff'
+    this.titleElement.style.textShadow = ringTextShadow(NAV_LABEL_OUTLINE_R)
+    this.wrap.appendChild(this.titleElement)
 
     const row = document.createElement('div')
     row.style.display = 'flex'
@@ -82,6 +92,13 @@ export class MainMenuNavUI {
         iconRotateDeg: 0,
         onClick: handlers.onSettings,
       },
+      {
+        label: 'CREDITS',
+        icon: new URL('../assets/icons/credits.png', import.meta.url).href,
+        iconSlotPx: 42, // Way bigger (was ICON_SLOT_PX = 52)
+        iconRotateDeg: 0,
+        onClick: handlers.onCredits,
+      },
     ]
 
     for (const { label, icon, iconSlotPx, iconRotateDeg, onClick } of items) {
@@ -111,10 +128,9 @@ export class MainMenuNavUI {
       img.src = icon
       img.alt = ''
       img.draggable = false
-      img.style.maxWidth = '100%'
-      img.style.maxHeight = '100%'
-      img.style.width = 'auto'
-      img.style.height = 'auto'
+      // Use explicit scaling for the image content itself
+      img.style.width = '100%'
+      img.style.height = '100%'
       img.style.objectFit = 'contain'
       img.style.imageRendering = 'pixelated'
       img.style.pointerEvents = 'none'

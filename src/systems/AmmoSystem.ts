@@ -8,7 +8,7 @@ export type WeaponAmmoSpec = {
 export const DEFAULT_WEAPON_AMMO_SPECS: WeaponAmmoSpec[] = [
   { magazineSize: 30, startingReserve: 90 },
   { magazineSize: 6, startingReserve: 18 },
-  { magazineSize: 1, startingReserve: 3 },
+  { magazineSize: 1, startingReserve: 2 },
 ]
 
 export class AmmoSystem {
@@ -73,6 +73,16 @@ export class AmmoSystem {
     this.mag[i]! += take
     this.reserve[i]! -= take
     return take > 0
+  }
+
+  public addAmmo(slot: number, amount: number) {
+    const spec = this.getSpec(slot)
+    if (!spec) return
+    const maxTotal = spec.magazineSize + spec.startingReserve
+    const currentTotal = this.mag[slot]! + this.reserve[slot]!
+    const canAdd = Math.max(0, maxTotal - currentTotal)
+    const actualAdd = Math.min(amount, canAdd)
+    this.reserve[slot]! += actualAdd
   }
 
   /** Full mags + starting reserves (e.g. respawn). */

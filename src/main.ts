@@ -114,6 +114,13 @@ function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
 }
 
+function rewardAmmoOnKill() {
+  // AK: 10, Shotgun: 4, Grenade: 1
+  ammoSystem.addAmmo(AK_SLOT, 10)
+  ammoSystem.addAmmo(SHOTGUN_SLOT, 4)
+  ammoSystem.addAmmo(GRENADE_SLOT, 1)
+}
+
 const core = new SceneSetup()
 const sphereRadius = 50
 
@@ -218,12 +225,14 @@ function returnToMainMenu() {
   mainMenuNameUI.setVisible(true)
   mainMenuSkinsUI.setVisible(true)
   mainMenuStoreUI.setVisible(true)
+  creditsUI.setVisible(false)
   mainMenuPlayUI.setOpacity(1)
   mainMenuNavUI.setOpacity(1)
   mainMenuDevblogUI.setOpacity(1)
   mainMenuNameUI.setOpacity(1)
   mainMenuSkinsUI.setOpacity(1)
   mainMenuStoreUI.setOpacity(1)
+  creditsUI.setVisible(false)
   
   // Hide game UI
   leaderboardUI.setVisible(false)
@@ -303,7 +312,7 @@ let mainMenuDevblogUI!: MainMenuDevblogUI
 let mainMenuNameUI!: MainMenuNameInputUI
 let mainMenuSkinsUI!: MainMenuSkinsUI
 let mainMenuStoreUI!: MainMenuStoreUI
-let mainMenuView: 'home' | 'skins' | 'store' = 'home'
+let mainMenuView: 'home' | 'skins' | 'store' | 'credits' = 'home'
 let isPlayTransitioning = false
 /** Player on inner shell during menu; camera target stays strictly inside the sphere (camera is child of playerGroup). */
 const _mainMenuShell = new THREE.Vector3(0, 0, -sphereRadius)
@@ -347,6 +356,7 @@ function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number
   mainMenuNameUI.setOpacity(m)
   mainMenuSkinsUI.setOpacity(m)
   mainMenuStoreUI.setOpacity(m)
+  creditsUI.setVisible(m > 0.1 && mainMenuView === 'credits')
   coinsHUD.setOpacity(m)
   roomIdUI.setVisible(m > 0.1)
   leaderboardUI.setOpacity(g)
@@ -754,6 +764,7 @@ void Promise.all([
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
+      rewardAmmoOnKill()
       if (typeof killerKills === 'number') {
         myPvpKills = killerKills
       } else {
@@ -966,6 +977,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 
         if (res.killed) {
           awardKillCoins()
+          rewardAmmoOnKill()
           myBotKills++
           discoveredPlayers.add(`bot_${idx}`)
           if (multiplayer.isConnected()) multiplayer.notifyBotKill()
@@ -1123,6 +1135,7 @@ async function beginPlayFromMenu() {
   mainMenuNameUI.setVisible(false)
   mainMenuSkinsUI.setVisible(false)
   mainMenuStoreUI.setVisible(false)
+  creditsUI.setVisible(false)
   mainMenuPlayUI.setOpacity(1)
   mainMenuNavUI.setOpacity(1)
   mainMenuDevblogUI.setOpacity(1)
@@ -1166,11 +1179,15 @@ mainMenuPlayUI.setOnPlay(() => {
   }
 })
 
+import { CreditsUI } from './ui/CreditsUI'
+const creditsUI = new CreditsUI()
+
 mainMenuNavUI = new MainMenuNavUI({
   onHome: () => setMainMenuView('home'),
   onSkins: () => setMainMenuView('skins'),
   onStore: () => setMainMenuView('store'),
   onSettings: () => settingsUI.toggleFromNav(),
+  onCredits: () => setMainMenuView('credits'),
 })
 
 mainMenuDevblogUI = new MainMenuDevblogUI()
@@ -1210,8 +1227,10 @@ function syncMainMenuPanelChrome() {
   if (!atMainMenu || isDead) return
   const home = mainMenuView === 'home'
   const isStore = mainMenuView === 'store'
+  const isCredits = mainMenuView === 'credits'
   mainMenuNameUI.setVisible(home)
-  menuCharacterHolder.visible = true
+  // Hide character holder in credits view
+  menuCharacterHolder.visible = !isCredits
   if (home) {
     menuCharacterHolder.position.set(0, MENU_CHAR_LOCAL_POS.y, MENU_CHAR_LOCAL_POS.z)
   } else {
@@ -1219,7 +1238,11 @@ function syncMainMenuPanelChrome() {
   }
   mainMenuSkinsUI.setVisible(mainMenuView === 'skins')
   mainMenuStoreUI.setVisible(isStore)
+  creditsUI.setVisible(isCredits)
   mainMenuDevblogUI.setVisible(home)
+  
+  // Hide coins HUD in credits view
+  coinsHUD.setOpacity(isCredits ? 0 : 1)
 
   if (wasMainMenuStoreView !== isStore) {
     applyEquippedOwnedAkGunSkin()
@@ -1227,7 +1250,7 @@ function syncMainMenuPanelChrome() {
   wasMainMenuStoreView = isStore
 }
 
-function setMainMenuView(view: 'home' | 'skins' | 'store') {
+function setMainMenuView(view: 'home' | 'skins' | 'store' | 'credits') {
   mainMenuView = view
   syncMainMenuPanelChrome()
 }
@@ -1903,6 +1926,7 @@ function shoot() {
 
           if (damageRes.killed) {
             awardKillCoins()
+            rewardAmmoOnKill()
             myBotKills++
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
             if (multiplayer.isConnected()) multiplayer.notifyBotKill()
