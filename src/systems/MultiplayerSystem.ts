@@ -13,6 +13,7 @@ const _netViewQuatScratch = new THREE.Quaternion()
 export type WorldState = {
   matchStartTime: number
   treeLayout: Array<{ phi: number; theta: number; scale: number }>
+  tentLayout: Array<{ phi: number; theta: number }>
   trainPhase?: number
 }
 
@@ -92,6 +93,7 @@ export class MultiplayerSystem {
   /** Server-resolved display name (unique in room; init or after collision fix). */
   public onLocalUsername?: (username: string) => void
   public onMatchReset?: () => void
+  public onRoomId?: (roomId: string) => void
   public onBloodSpawn?: (point: THREE.Vector3, dir: THREE.Vector3, count: number) => void
   public onRemoteFired?: (position: THREE.Vector3, slot: number) => void
   public onRemoteSound?: (
@@ -265,9 +267,13 @@ export class MultiplayerSystem {
       case "init":
         this.clearRemotePlayers()
         this.localPlayerId = data.playerId
+        if (typeof data.roomId === 'string') {
+          this.onRoomId?.(data.roomId)
+        }
         this.worldState = {
           matchStartTime: data.matchStartTime ?? Date.now(),
           treeLayout: Array.isArray(data.treeLayout) ? data.treeLayout : [],
+          tentLayout: Array.isArray(data.tentLayout) ? data.tentLayout : [],
           trainPhase: typeof data.trainPhase === 'number' ? data.trainPhase : undefined,
         }
         this.onWorldState?.(this.worldState)

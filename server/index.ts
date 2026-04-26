@@ -78,11 +78,35 @@ export default {
 			return handleApiRequest(request, env);
 		}
 
-		const roomName = url.searchParams.get("room") || "global";
-		const id = env.GAME_ROOM.idFromName(roomName);
+		// Sequential Room Filling Logic (max 8 per room)
+		let roomToJoin = "room_1";
+		for (let i = 1; i <= 100; i++) {
+			const roomName = `room_${i}`;
+			const id = env.GAME_ROOM.idFromName(roomName);
+			const room = env.GAME_ROOM.get(id);
+			
+			try {
+				const countRes = await room.fetch("http://game/player-count");
+				const count = parseInt(await countRes.text());
+				if (count < 8) {
+					roomToJoin = roomName;
+					break;
+				}
+			} catch {
+				// If room fails to respond, assume it's new/empty or just join it
+				roomToJoin = roomName;
+				break;
+			}
+		}
+
+		const id = env.GAME_ROOM.idFromName(roomToJoin);
 		const room = env.GAME_ROOM.get(id);
 
-		return room.fetch(request);
+		// Clone request to add room name header
+		const newReq = new Request(request);
+		newReq.headers.set("X-Room-Name", roomToJoin);
+
+		return room.fetch(newReq);
 	},
 };
 
@@ -99,6 +123,7 @@ export class GameRoom extends DurableObject {
 	private matchStartTime: number;
 	private readonly treeLayout: Array<{ phi: number; theta: number; scale: number }>;
 	private readonly initialTrainPhase: number;
+	private readonly tentLayout: Array<{ phi: number; theta: number }>;
 	/** General inbound rate: timestamps (ms) in the last 1s per player */
 	private inboundTs = new Map<string, number[]>();
 	/** Damage events per attacker per rolling second */
@@ -111,7 +136,34 @@ export class GameRoom extends DurableObject {
 		super(state, env);
 		this.matchStartTime = Date.now();
 		this.treeLayout = this.generateTreeLayout(80, 50, 8);
+		this.tentLayout = this.generateTentLayout(3, 50, 8);
 		this.initialTrainPhase = Math.random() * Math.PI * 2;
+	}
+
+	private generateTentLayout(count: number, sphereRadius: number, safeZoneRadius: number) {
+		const tents: Array<{ phi: number; theta: number }> = [];
+		const spawnPos = { x: 0, y: -sphereRadius, z: 0 };
+		const trainPhi = Math.PI / 2;
+		const trainHalfWidth = 0.36;
+
+		while (tents.length < count) {
+			const phi = Math.random() * Math.PI;
+			const theta = Math.random() * Math.PI * 2;
+			if (Math.abs(phi - trainPhi) < trainHalfWidth) continue;
+			
+			const x = sphereRadius * Math.sin(phi) * Math.cos(theta);
+			const y = sphereRadius * Math.cos(phi);
+			const z = sphereRadius * Math.sin(phi) * Math.sin(theta);
+			
+			const dx = x - spawnPos.x;
+			const dy = y - spawnPos.y;
+			const dz = z - spawnPos.z;
+			const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+			if (dist < safeZoneRadius) continue;
+
+			tents.push({ phi, theta });
+		}
+		return tents;
 	}
 
 	private getCurrentTrainPhase(): number {
@@ -123,13 +175,20 @@ export class GameRoom extends DurableObject {
 
 	async fetch(request: Request): Promise<Response> {
 		try {
+			const url = new URL(request.url);
+			if (url.pathname === "/player-count") {
+				return new Response(this.players.size.toString());
+			}
+
+			const roomName = request.headers.get("X-Room-Name") ?? "global";
+
 			const upgradeHeader = request.headers.get("Upgrade");
 			if (!upgradeHeader || upgradeHeader !== "websocket") {
 				return new Response("Expected Upgrade: websocket", { status: 426 });
 			}
 
 			const [client, server] = new WebSocketPair();
-			this.handleSession(server);
+			this.handleSession(server, roomName);
 
 			return new Response(null, {
 				status: 101,
@@ -241,7 +300,7 @@ export class GameRoom extends DurableObject {
 		return this.emergencyUsername(excludePlayerId);
 	}
 
-	handleSession(ws: WebSocket) {
+	handleSession(ws: WebSocket, roomName: string) {
 		const playerId = crypto.randomUUID();
 		this.sessions.add(ws);
 		this.playerSockets.set(playerId, ws);
@@ -283,9 +342,11 @@ export class GameRoom extends DurableObject {
 			ws.send(JSON.stringify({
 				type: "init",
 				playerId,
+				roomId: roomName,
 				players: Array.from(this.players.entries()).map(([id, p]) => [id, playerPublic(p)]),
 				matchStartTime: this.matchStartTime,
 				treeLayout: this.treeLayout,
+				tentLayout: this.tentLayout,
 				trainPhase: this.getCurrentTrainPhase(),
 			}));
 		} catch (err) {

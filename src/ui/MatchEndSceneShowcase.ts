@@ -36,7 +36,7 @@ export class MatchEndSceneShowcase {
   private static readonly MENU_Z = -5.1
   /** Same per-character scale as `menuCharacterHolder.scale.setScalar(3)`. */
   private static readonly MENU_SCALE = 2.4
-  private static readonly SLOT_X = [-1.85, 0, 1.85]
+  private static readonly SLOT_X = [-2.5, 0, 2.5]
 
   private nameLabels: HTMLDivElement[] = []
   private targetScale: number[] = [0, 0, 0]

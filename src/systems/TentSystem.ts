@@ -115,6 +115,11 @@ export class TentSystem {
 
   public update(_time: number) {}
 
+  public clear() {
+    this.container.clear()
+    this.tentsData = []
+  }
+
   public spawn(phi: number, theta: number, scaleOverride?: number) {
     if (!this.sourceTent) return
     const tent = cloneSkinningHierarchy(this.sourceTent) as THREE.Group

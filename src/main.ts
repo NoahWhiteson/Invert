@@ -67,6 +67,7 @@ import { DeathUI } from './ui/DeathUI'
 import { MatchEndUI } from './ui/MatchEndUI'
 import { MatchEndSceneShowcase } from './ui/MatchEndSceneShowcase'
 import { CoinsHUDUI } from './ui/CoinsHUDUI'
+import { RoomIDUI } from './ui/RoomIDUI'
 import {
   ECONOMY_RELOADED_EVENT,
   schedulePushCoinsToServer,
@@ -263,6 +264,7 @@ function returnToMainMenu() {
   // Reset bots
   targetPlayers.resetAll()
   targetPlayers.setSuppressedByRealPlayers(false)
+  roomIdUI.setVisible(true)
   syncMainMenuPanelChrome()
 }
 
@@ -346,6 +348,7 @@ function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number
   mainMenuSkinsUI.setOpacity(m)
   mainMenuStoreUI.setOpacity(m)
   coinsHUD.setOpacity(m)
+  roomIdUI.setVisible(m > 0.1)
   leaderboardUI.setOpacity(g)
   timerUI.setOpacity(g)
   healthUI.setOpacity(g)
@@ -655,11 +658,6 @@ void Promise.all([
 ]).then(() => {
   void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
   
-  for (let i = 0; i < 3; i++) {
-    const p = randomPhiThetaClearOfTrainTrack()
-    tents.spawn(p.phi, p.theta)
-  }
-
   multiplayer.onWorldState = (state) => {
     timerUI.setStartTime(state.matchStartTime)
     if (state.treeLayout.length > 0) {
@@ -667,6 +665,12 @@ void Promise.all([
       void trees.init(
         filtered.length > 0 ? filtered : createFallbackTreeLayout(80, sphereRadius, 8)
       )
+    }
+    if (state.tentLayout.length > 0) {
+      tents.clear()
+      for (const t of state.tentLayout) {
+        tents.spawn(t.phi, t.theta)
+      }
     }
     if (typeof state.trainPhase === 'number' && !trainPhaseSynced) {
       trainPhaseSynced = true
@@ -790,6 +794,10 @@ void Promise.all([
   multiplayer.onMatchReset = () => {
     returnToMainMenu()
   }
+
+  multiplayer.onRoomId = (id) => {
+    roomIdUI.setRoomId(id)
+  }
 })
 function resolveMatchEndPortraitSource(id: string): THREE.Group | null {
   if (id === 'me') {
@@ -839,6 +847,7 @@ const coinsHUD = new CoinsHUDUI()
 const damageIndicator = new DamageIndicator()
 const weaponUI = new WeaponUI()
 const killFeed = new KillFeedUI()
+const roomIdUI = new RoomIDUI()
 
 const _worldUp = new THREE.Vector3(0, 1, 0)
 
@@ -893,6 +902,7 @@ function applyMainMenuView() {
   leaderboardUI.setVisible(false)
   timerUI.setVisible(false)
   coinsHUD.setPlayMode(false)
+  roomIdUI.setVisible(true)
 }
 
 const _v1 = new THREE.Vector3()
@@ -1136,6 +1146,7 @@ async function beginPlayFromMenu() {
   crosshair.setVisible(true)
   coinsHUD.setPlayMode(true)
   coinsHUD.setOpacity(1)
+  roomIdUI.setVisible(false)
   localSpawnInvulnUntilMs = performance.now() + LOCAL_SPAWN_DAMAGE_INVULN_MS
   ammoSystem.refillAllToStarting()
   for (let s = 0; s < 3; s++) {
