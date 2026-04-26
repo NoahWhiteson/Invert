@@ -15,7 +15,13 @@ export class WeaponUI {
     this.container.style.transition = 'opacity 220ms ease'
     document.body.appendChild(this.container)
 
-    for (let i = 0; i < 4; i++) {
+    const icons = [
+      new URL('../assets/icons/weps/ak.png', import.meta.url).href,
+      new URL('../assets/icons/weps/shotgun.png', import.meta.url).href,
+      new URL('../assets/icons/weps/grenade.png', import.meta.url).href,
+    ]
+
+    for (let i = 0; i < 3; i++) {
       const slot = document.createElement('div')
       slot.style.width = '64px'
       slot.style.height = '64px'
@@ -25,6 +31,24 @@ export class WeaponUI {
       slot.style.backgroundPosition = 'center'
       slot.style.imageRendering = 'pixelated'
       slot.style.transition = 'all 0.1s ease-out'
+      slot.style.position = 'relative'
+
+      const icon = document.createElement('div')
+      icon.style.position = 'absolute'
+      icon.style.top = '50%'
+      icon.style.left = '50%'
+      icon.style.transform = 'translate(-50%, -50%)'
+      // Fill more of the slot and boost brightness for visibility
+      icon.style.width = '46px'
+      icon.style.height = '46px'
+      icon.style.backgroundImage = `url('${icons[i]}')`
+      icon.style.backgroundSize = 'contain'
+      icon.style.backgroundRepeat = 'no-repeat'
+      icon.style.backgroundPosition = 'center'
+      icon.style.imageRendering = 'pixelated'
+      // High brightness and contrast to ensure they stand out
+      icon.style.filter = 'brightness(1.8) contrast(1.1)' 
+      slot.appendChild(icon)
 
       this.container.appendChild(slot)
       this.slots.push(slot)

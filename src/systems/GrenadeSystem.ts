@@ -1,7 +1,5 @@
 import * as THREE from 'three'
 
-const _grenadeDown = new THREE.Vector3()
-
 export class ExplosionEffect {
   public group: THREE.Group
   public active = true
@@ -109,14 +107,9 @@ export class Grenade {
       return
     }
 
-    const p = this.obj.position
-    const lenSq = p.lengthSq()
-    if (lenSq > 1e-10) {
-      _grenadeDown.copy(p).multiplyScalar(1 / Math.sqrt(lenSq))
-    } else {
-      _grenadeDown.set(0, 1, 0)
-    }
-    this.velocity.add(_grenadeDown.multiplyScalar(gravity * 60 * dt))
+    const downDir = this.obj.position.clone().normalize()
+    // Reduced gravity multiplier (0.7x player gravity) for a floatier throw
+    this.velocity.add(downDir.clone().multiplyScalar(gravity * 0.7 * 60 * dt))
     this.velocity.multiplyScalar(this.friction)
     this.obj.position.add(this.velocity)
 
@@ -162,8 +155,9 @@ export class GrenadeSystem {
     this.onDamageTrigger = onDamage
   }
 
-  public setModel(model: THREE.Object3D | null) {
-    if (!model) return
+  public setModel(model: THREE.Object3D) {
+    // Keep a reference to the source model but don't hide it here,
+    // as it's the same model used for the first-person view.
     this.model = model
   }
 

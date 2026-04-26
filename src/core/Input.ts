@@ -2,6 +2,7 @@ export class InputManager {
   private keys: { [key: string]: boolean } = {}
   public isSimulatedUnlocked: boolean = false
   public virtualMousePos: { x: number, y: number } = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  private _wheelDelta: number = 0
 
   constructor() {
     window.addEventListener('keydown', (e) => {
@@ -25,6 +26,10 @@ export class InputManager {
     })
 
     window.addEventListener('keyup', (e) => (this.keys[e.code] = false))
+
+    window.addEventListener('wheel', (e) => {
+      this._wheelDelta += e.deltaY
+    }, { passive: true })
 
     const releaseAllKeys = () => {
       for (const k of Object.keys(this.keys)) this.keys[k] = false
@@ -60,5 +65,11 @@ export class InputManager {
 
   public getKeys() {
     return this.keys
+  }
+
+  public consumeWheelDelta(): number {
+    const d = this._wheelDelta
+    this._wheelDelta = 0
+    return d
   }
 }

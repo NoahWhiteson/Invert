@@ -179,7 +179,7 @@ const SLOT_CONFIG: SlotConfig[] = [
     aimRot: AIM_STRAIGHT.clone(),
     muzzleLocal: new THREE.Vector3(0.02, -0.06, -0.22),
     uniformScale: 0.012,
-    fireRate: 1500,
+    fireRate: 800, // Faster than 1500 for better feel
     damage: 100,
     isAutomatic: false,
     spread: 0,

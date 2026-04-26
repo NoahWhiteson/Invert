@@ -906,6 +906,7 @@ function applyMainMenuView() {
 }
 
 const _v1 = new THREE.Vector3()
+const _v2 = new THREE.Vector3()
 const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
   let playedImpactThisExplosion = false
   playSpatialSfxAt(explosionSfx, params.pos, 1.2, 120, 'explosion')
@@ -1444,6 +1445,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
 const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
 const _trainHitAway = new THREE.Vector3()
+
 let lastTrainPlayerHitMs = -Infinity
 const lastTrainBotHitMs: number[] = new Array(12).fill(-Infinity)
 let isLeftMouseDown = false
@@ -1677,7 +1679,14 @@ function syncMuzzleFlashParent() {
   }
 }
 
+// Voice limiting to prevent sound clipping/merging issues
+const voiceCount = new Map<string, number>()
+const MAX_VOICES_PER_TYPE = 8
+
 function playSfx(audio: HTMLAudioElement, volume: number = 1.0, type: 'master' | 'gun' | 'impact' | 'explosion' = 'master') {
+  const currentCount = voiceCount.get(type) ?? 0
+  if (currentCount >= MAX_VOICES_PER_TYPE) return
+
   const layer = new Audio(audio.src)
   const master = settingsUI.volumes.master
   const typeVol = settingsUI.volumes[type]
@@ -1685,6 +1694,13 @@ function playSfx(audio: HTMLAudioElement, volume: number = 1.0, type: 'master' |
   layer.playbackRate = audio.playbackRate
   layer.preservesPitch = audio.preservesPitch
   layer.currentTime = 0
+  
+  voiceCount.set(type, currentCount + 1)
+  layer.onended = () => {
+    const c = voiceCount.get(type) ?? 1
+    voiceCount.set(type, Math.max(0, c - 1))
+  }
+
   void layer.play()
 }
 
@@ -1697,6 +1713,9 @@ function playSpatialSfxAt(
   maxDistance: number = 80,
   type: 'master' | 'gun' | 'impact' | 'explosion' = 'master'
 ) {
+  const currentCount = voiceCount.get(type) ?? 0
+  if (currentCount >= MAX_VOICES_PER_TYPE) return
+
   const camPos = new THREE.Vector3()
   core.camera.getWorldPosition(camPos)
   const toSource = sourcePos.clone().sub(camPos)
@@ -1715,6 +1734,12 @@ function playSpatialSfxAt(
   layer.playbackRate = audio.playbackRate
   layer.preservesPitch = audio.preservesPitch
   layer.currentTime = 0
+
+  voiceCount.set(type, currentCount + 1)
+  layer.onended = () => {
+    const c = voiceCount.get(type) ?? 1
+    voiceCount.set(type, Math.max(0, c - 1))
+  }
 
   if (audioCtx && typeof (window as any).StereoPannerNode !== 'undefined') {
     try {
@@ -1803,6 +1828,11 @@ function shoot() {
   if (slot === AK_SLOT) {
     playSfx(akSfx, 1.0, 'gun')
     multiplayer.sendSound('ak', player.playerGroup.position, 1)
+  }
+
+  // No muzzle flash or bullet logic for grenades (they are thrown instead)
+  if (slot === GRENADE_SLOT) {
+    return
   }
 
   // Restore muzzle flash for non-grenade weapons
@@ -1920,13 +1950,40 @@ function shoot() {
   }
 }
 
-function throwGrenade(charge: number) {
+function getGrenadeThrowParams(charge: number) {
   const cfg = heldWeapons.currentConfig
-  if (!cfg) return
+  if (!cfg) return null
 
   const cam = core.camera
   cam.getWorldPosition(_worldPos)
   cam.getWorldDirection(muzzleDir)
+
+  // Grenade Aim Assist: Find nearby bots/players to slightly bias the throw
+  let bestTargetPos: THREE.Vector3 | null = null
+  let bestScore = -Infinity
+  const bodies = [
+    ...targetPlayers.getCollisionBodies(),
+    ...multiplayer.getCollisionBodies()
+  ]
+  for (const b of bodies) {
+    _v2.copy(b.position).sub(_worldPos).normalize()
+    const dot = muzzleDir.dot(_v2)
+    // Only bias if target is roughly within view (30 degrees) and within reasonable range
+    if (dot > 0.86) { 
+      const dist = b.position.distanceTo(_worldPos)
+      if (dist < 40) {
+        const score = dot * (1.0 - dist / 80)
+        if (score > bestScore) {
+          bestScore = score
+          bestTargetPos = b.position
+        }
+      }
+    }
+  }
+  if (bestTargetPos) {
+    const targetDir = _v2.copy(bestTargetPos).sub(_worldPos).normalize()
+    muzzleDir.lerp(targetDir, 0.18).normalize() // Subtle 18% bias toward the target
+  }
 
   const muzzlePos = new THREE.Vector3()
   const anchor = heldWeapons.getMuzzleFlashAnchor()
@@ -1937,20 +1994,31 @@ function throwGrenade(charge: number) {
     muzzlePos.addScaledVector(muzzleDir, 0.55)
   }
 
+  // Power scales derived from charge (0 to 1) - reduced speeds for "throw" feel
+  const baseSpeed = 0.05
+  const maxSpeed = 0.45
+  const throwSpeed = baseSpeed + (maxSpeed - baseSpeed) * charge
+
+  // Muzzle Dir is the look direction
+  const throwVel = muzzleDir.clone().setLength(throwSpeed)
+  
+  // Add player velocity inheritance (muted for stability)
+  const inheritVel = _tmpKb.copy(player.state.velocity).multiplyScalar(0.4)
+  throwVel.add(inheritVel)
+
+  return { muzzlePos, throwVel, scale: cfg.uniformScale }
+}
+
+function throwGrenade(charge: number) {
+  const params = getGrenadeThrowParams(charge)
+  if (!params) return
+
   const mdl = heldWeapons.getWeaponModel(GRENADE_SLOT)
   if (mdl) {
     grenadeSystem.setModel(mdl)
   }
 
-  // Power scales derived from charge (0 to 1)
-  const baseSpeed = 0.18
-  const maxSpeed = 1.15
-  const throwSpeed = baseSpeed + (maxSpeed - baseSpeed) * charge
-
-  const throwVel = muzzleDir.clone().setLength(throwSpeed)
-  throwVel.add(player.state.velocity)
-
-  grenadeSystem.throw(muzzlePos, throwVel, cfg.uniformScale)
+  grenadeSystem.throw(params.muzzlePos, params.throwVel, params.scale)
 }
 
 function updateCrosshairEnemyHover() {
@@ -2329,15 +2397,21 @@ function animate() {
         if (isLeftMouseDown && hasAmmo) {
           grenadeCharge = Math.min(1.0, grenadeCharge + dt * 1.5)
           player.state.shakeIntensity = Math.max(player.state.shakeIntensity, grenadeCharge * 0.12)
-        } else if (wasLeftMouseDownLastFrame && grenadeCharge > 0.05) {
-          if (heldWeapons.canFire(currentTime) && ammoSystem.canSpend(activeSlot)) {
-            throwGrenade(grenadeCharge)
-            heldWeapons.triggerFire(currentTime)
-            ammoSystem.tryConsume(activeSlot)
-            // Hide the grenade from hand immediately after throw
-            heldWeapons.setModelVisibility(activeSlot, false)
+        } else if (wasLeftMouseDownLastFrame) {
+          if (grenadeCharge > 0.01) {
+            if (heldWeapons.canFire(currentTime) && ammoSystem.canSpend(activeSlot)) {
+              throwGrenade(grenadeCharge)
+              heldWeapons.triggerFire(currentTime)
+              ammoSystem.tryConsume(activeSlot)
+              heldWeapons.setModelVisibility(activeSlot, false)
+              grenadeCharge = 0
+            } else {
+              // Not ready or no ammo, keep charge or just reset if no ammo
+              if (!hasAmmo) grenadeCharge = 0
+            }
+          } else {
+            grenadeCharge = 0
           }
-          grenadeCharge = 0
         } else {
           grenadeCharge = 0
         }
@@ -2529,7 +2603,7 @@ function animate() {
       : null
     targetPlayers.update(dt, botBrain)
 
-    // Fixed timestep update for grenades (match player physics)
+    // REVERTED TO FIXED TIMESTEP LOOP: This is much more reliable for physics/ground hits
     const frameEquivNade = dt * 60
     const stepCountNade = Math.max(1, Math.min(Math.floor(frameEquivNade + 1e-9), 120))
     const stepDtNade = 1 / 60
@@ -2544,8 +2618,9 @@ function animate() {
     damageTexts.update(dt, core.camera)
 
     if (!isDead && isLeftMouseDown && player.controls.isLocked) {
+      const activeSlotForShooting = heldWeapons.getActiveSlot()
       const cfg = heldWeapons.currentConfig
-      if (cfg) {
+      if (cfg && activeSlotForShooting !== GRENADE_SLOT) {
         if (cfg.isAutomatic || !wasLeftMouseDownLastFrame) {
           shoot()
         }
@@ -2633,6 +2708,7 @@ function animate() {
     ) {
       animForNet = 'firing'
     }
+    const finalActiveSlot = heldWeapons.getActiveSlot()
     multiplayer.update(
       dt,
       player.playerGroup.position,
@@ -2642,7 +2718,7 @@ function animate() {
       myUsername,
       myBotKills + myPvpKills,
       isDead ? 'idle' : animForNet,
-      heldWeapons.getActiveSlot(),
+      finalActiveSlot,
       atMainMenu,
       isDead
     )
@@ -2708,6 +2784,20 @@ function animate() {
 
     damageIndicator.setLowHealth(player.state.health <= 20)
 
+    const wheelDelta = input.consumeWheelDelta()
+    if (!isDead && !matchEndedFreeze && Math.abs(wheelDelta) > 0) {
+      const current = heldWeapons.getActiveSlot()
+      const direction = wheelDelta > 0 ? 1 : -1
+      let next = (current + direction) % 3
+      if (next < 0) next = 2
+      weaponUI.updateActiveSlot(next)
+      heldWeapons.setActiveSlot(next)
+      if (next === 2) {
+        const st = ammoSystem.getState(2)
+        heldWeapons.setModelVisibility(2, (st?.mag ?? 0) > 0)
+      }
+    }
+
     if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit1')) {
       weaponUI.updateActiveSlot(0)
       heldWeapons.setActiveSlot(0)
@@ -2722,10 +2812,6 @@ function animate() {
       // Check if we should show the grenade
       const st = ammoSystem.getState(2)
       heldWeapons.setModelVisibility(2, (st?.mag ?? 0) > 0)
-    }
-    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit4')) {
-      weaponUI.updateActiveSlot(3)
-      heldWeapons.setActiveSlot(3)
     }
 
     const reloadDown = input.isKeyDown('KeyR')
