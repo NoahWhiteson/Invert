@@ -605,9 +605,9 @@ export class AnimationManager {
     
     // Negate the pitch to fix inversion (looking up was looking down)
     // Scale and clamp to reasonable human limits
-    // Add a strong positive offset (+1.65) to pull the gaze down to level. 
-    // Base FBX animations have a very steep upward tilt that requires a large counter-rotation.
-    const targetPitch = THREE.MathUtils.clamp((-this.lookPitch + 1.65) * 0.65, -1.1, 1.1)
+    // Add a positive offset (+0.4) to pull the gaze down to level. 
+    // Base FBX animations have an upward tilt, but 1.65 was far too extreme (bending them in half).
+    const targetPitch = THREE.MathUtils.clamp((-this.lookPitch + 0.4) * 0.65, -1.1, 1.1)
     
     // Smooth the pitch change to prevent snapping
     const lerpFactor = 1 - Math.exp(-18 * dt)
