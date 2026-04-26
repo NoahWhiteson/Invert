@@ -117,6 +117,7 @@ export class AnimationManager {
   private animOpRing: AnimOpEntry[] = []
   private readonly ANIM_OP_RING_CAP = 56
 
+  /* --- ARCHIVED: Upper Body Features ---
   private spineBones: THREE.Bone[] = []
   private spineDefaultQuats: THREE.Quaternion[] = []
   private lookPitch = 0
@@ -124,6 +125,7 @@ export class AnimationManager {
   private readonly _scratchAxisX = new THREE.Vector3(1, 0, 0)
   private currentAppliedPitch = 0
   private pitchInitialized = false
+  -------------------------------------- */
 
   private readonly JUMP_HOLD_START = 20 / 30
   private readonly JUMP_HOLD_END = 22 / 30
@@ -155,11 +157,10 @@ export class AnimationManager {
     this.mixer = new THREE.AnimationMixer(model)
     AnimationManager.allMixers.add(this)
 
-    // Find upper body bones for aim-pitch offsets
+    /* --- ARCHIVED: Upper Body Discovery ---
     model.traverse((o) => {
       if ((o as THREE.Bone).isBone) {
         const n = o.name.toLowerCase()
-        // Standard Mixamo-like spine bones, plus neck and head
         if (
           (n.includes('spine') || n.includes('chest') || n.includes('neck') || n.includes('head')) &&
           !n.includes('leaf') &&
@@ -170,14 +171,10 @@ export class AnimationManager {
         }
       }
     })
-    // No sorting needed - traverse is already root-to-leaf (depth-first)
-    // which is perfect for hierarchical rotation distribution.
-    // We don't slice anymore to ensure the whole chain (spine -> head) is covered.
-
-    // Capture default poses so we can reset them before mixer.update (prevents cumulative spin)
     for (const b of this.spineBones) {
       this.spineDefaultQuats.push(b.quaternion.clone())
     }
+    -------------------------------------- */
   }
 
   public setDebugLabel(label: string) {
@@ -346,7 +343,7 @@ export class AnimationManager {
     this.trace('loadAll:complete', { actionCount: this.actions.size })
   }
 
-  public setState(state: AnimationState, duration: number = 0.2) {
+  public setState(state: AnimationState, duration: number = 0.28) {
     if (this.currentState === state) return
 
     const from = this.currentState
@@ -595,51 +592,40 @@ export class AnimationManager {
   }
 
   public setPitch(pitchRadians: number) {
+    /* --- ARCHIVED ---
     this.lookPitch = pitchRadians
     if (!this.pitchInitialized) {
       this.pitchInitialized = true
       this.currentAppliedPitch = THREE.MathUtils.clamp(-this.lookPitch * 0.65, -1.1, 1.1)
     }
+    ----------------- */
+    void pitchRadians
   }
 
   private applyLookPitch(dt: number) {
-    if (this.spineBones.length === 0 || this.ragdollFrozen || this.isBot) return
-    
-    // Negate the pitch to fix inversion (looking up was looking down)
-    // Scale and clamp to reasonable human limits
-    // Add a positive offset (+0.4) to pull the gaze down to level. 
-    // Base FBX animations have an upward tilt, but 1.65 was far too extreme (bending them in half).
-    const targetPitch = THREE.MathUtils.clamp((-this.lookPitch + 0.4) * 0.65, -1.1, 1.1)
-    
-    // Smooth the pitch change to prevent snapping
+    /* --- ARCHIVED ---
+    if (this.spineBones.length === 0 || this.ragdollFrozen) return
+    const lookContribution = this.isBot ? 0 : -this.lookPitch
+    const targetPitch = THREE.MathUtils.clamp((lookContribution - 0.45) * 0.65, -1.1, 1.1)
     const lerpFactor = 1 - Math.exp(-18 * dt)
     this.currentAppliedPitch += (targetPitch - this.currentAppliedPitch) * lerpFactor
     const perBone = this.currentAppliedPitch / this.spineBones.length
-    
-    const now = Date.now()
-    const lastDebug = AnimationManager.rotationDebugAt.get(this.debugLabel) ?? 0
-    if (AnimationManager.tposeDebug && now - lastDebug > 2000) {
-      AnimationManager.rotationDebugAt.set(this.debugLabel, now)
-      console.info(`[anim] torso-aim: label="${this.debugLabel}" pitch=${this.lookPitch.toFixed(3)} (applied total=${this.currentAppliedPitch.toFixed(3)}) boneCount=${this.spineBones.length}`)
-    }
-
     for (const b of this.spineBones) {
-      // Create a rotation around the bone's local X axis
       this._scratchQuat.setFromAxisAngle(this._scratchAxisX, perBone)
-      // Apply it to the current quaternion
       b.quaternion.multiply(this._scratchQuat)
     }
+    ----------------- */
+    void dt
   }
 
   public update(dt: number) {
     if (this.ragdollFrozen) return
 
-    // Pre-mixer: Reset spine bones to their original bind pose.
-    // This is the "clean" state that the mixer will then update if it has tracks for these bones.
-    // This prevents accumulation on bones without tracks and ensures smooth movement.
+    /* --- ARCHIVED: Upper Body Reset ---
     for (let i = 0; i < this.spineBones.length; i++) {
       this.spineBones[i]!.quaternion.copy(this.spineDefaultQuats[i]!)
     }
+    ----------------------------------- */
 
     const jumpAction = this.actions.get('jump')
     if (this.currentState === 'jump' && jumpAction) {
@@ -743,8 +729,10 @@ export class AnimationManager {
     this.mixer.timeScale = 1
     this.mixer.stopAllAction()
     this.pendingLocomotion = 'idle'
+    /* --- ARCHIVED ---
     this.currentAppliedPitch = 0
     this.pitchInitialized = false
+    ----------------- */
     const idle = this.actions.get('idle')
     if (idle) {
       idle.reset().setEffectiveWeight(1).play()

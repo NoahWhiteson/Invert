@@ -1352,6 +1352,7 @@ const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
 const _trainHitAway = new THREE.Vector3()
 let lastTrainPlayerHitMs = -Infinity
+const lastTrainBotHitMs: number[] = new Array(12).fill(-Infinity)
 let isLeftMouseDown = false
 let isRightMouseDown = false
 let wasLeftMouseDownLastFrame = false
@@ -2370,11 +2371,30 @@ function animate() {
             if (player.state.health <= 0) {
               handleLocalDeathFromTrain(_trainHitAway)
             } else {
-              player.applyImpulse(_tmpKb.copy(_trainHitAway).multiplyScalar(TRAIN_PLAYER_HIT_KNOCKBACK))
-            }
+            player.applyImpulse(_tmpKb.copy(_trainHitAway).multiplyScalar(TRAIN_PLAYER_HIT_KNOCKBACK))
           }
         }
       }
+
+      // Train vs Bots collision
+      const botCount = targetPlayers.getTargetList().length
+      for (let i = 0; i < botCount; i++) {
+        const bot = targetPlayers.getTargetById(`bot_${i}`)
+        if (!bot || bot.despawnedForPvP || bot.ragdoll || bot.health <= 0) continue
+        
+        const now = performance.now()
+        if (now - lastTrainBotHitMs[i]! >= TRAIN_PLAYER_HIT_COOLDOWN_MS) {
+          const botPos = bot.container.position
+          const botRadius = 0.65
+          if (trainTrack.testPlayerTrainCollision(botPos, botRadius, _trainHitAway)) {
+            lastTrainBotHitMs[i] = now
+            _trainHitAway.normalize()
+            targetPlayers.inflictDirectDamage(i, TRAIN_PLAYER_HIT_DAMAGE, _tmpKb.copy(_trainHitAway).multiplyScalar(TRAIN_PLAYER_HIT_KNOCKBACK))
+            playSfx(impactSfx, 1.0, 'impact')
+          }
+        }
+      }
+    }
     }
     if (player.state.onGround) shotgunMidairKnockbackUsed = false
 

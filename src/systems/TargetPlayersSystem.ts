@@ -58,8 +58,8 @@ const BOT_WALK_SPEED = 0.092
 const BOT_SPRINT_MULT = 1.38
 const BOT_FRICTION_GROUND = 0.1
 const BOT_MOMENTUM_AIR = 0.985
-const BOT_YAW_SMOOTH_RAD_PER_SEC = 11
-const BOT_STEER_SMOOTH = 4.2
+const BOT_YAW_SMOOTH_RAD_PER_SEC = 8
+const BOT_STEER_SMOOTH = 2.8
 const BOT_JUMP_INTERVAL_MIN_MS = 2800
 const BOT_JUMP_INTERVAL_MAX_MS = 6200
 const BOT_SKIN_HEX = 0x7a8fa6
@@ -274,6 +274,40 @@ export class TargetPlayersSystem {
     if (t) t.kills++
   }
 
+  public inflictDirectDamage(index: number, damage: number, impulseWorld?: THREE.Vector3) {
+    const t = this.targets[index]
+    if (!t || t.despawnedForPvP || t.health <= 0) return
+
+    const prevHealth = t.health
+    t.health -= damage
+    t.flashTimer = 0.15
+
+    if (impulseWorld) {
+      t.velocity.add(impulseWorld)
+      t.onGround = false
+    }
+
+    if (t.health <= 0) {
+      t.health = 0
+      if (prevHealth > 0) {
+        const impulse = impulseWorld ? impulseWorld.clone().normalize().multiplyScalar(5) : undefined
+        t.ragdoll = tryCreateSkeletonRagdoll(t.model, t.anims, impulse)
+        
+        const nameTag = t.container.getObjectByName('nameTag')
+        if (nameTag) nameTag.visible = false
+
+        for (const gun of t.thirdPersonGuns) {
+          if (gun) gun.visible = false
+        }
+
+        setTimeout(() => {
+          t.ragdoll = undefined
+          this.respawnTarget(index)
+        }, 10000)
+      }
+    }
+  }
+
   private groundRadius(): number {
     return this.sphereRadius - BOT_BODY_HALF
   }
@@ -288,13 +322,13 @@ export class TargetPlayersSystem {
     this._qInv.copy(t.container.quaternion).invert()
     flat.applyQuaternion(this._qInv)
 
-    // Remove the +PI offset - the model naturally faces forward (+Z) in local space
+    // Standard orientation: model +Z faces the target direction
     t.facingYawTarget = Math.atan2(flat.x, flat.z)
   }
 
   /** Tangent "forward" from model yaw + surface frame (for vision cone). */
   private getBotForwardWorld(t: TargetState, out: THREE.Vector3): void {
-    // Model naturally faces +Z
+    // Standard forward is +Z
     this._fwdScratch.set(0, 0, 1)
     this._fwdScratch.applyQuaternion(t.model.quaternion)
     this._fwdScratch.applyQuaternion(t.container.quaternion)
@@ -435,7 +469,9 @@ export class TargetPlayersSystem {
     }
 
     const frameEquiv = dt * 60
-    const stepCount = Math.max(1, Math.min(Math.floor(frameEquiv + 1e-9), 120))
+    // Use rounding for stepCount to be more stable at high frame rates, and floor at 1 to ensure at least one physics pass.
+    const stepCount = Math.max(1, Math.min(Math.round(frameEquiv), 120))
+    const stepDt = dt / stepCount
 
     if (
       t.onGround &&
@@ -458,30 +494,36 @@ export class TargetPlayersSystem {
       const pos = t.shellPoint
       const downDir = this._vD.copy(pos).normalize()
 
+      // Scale acceleration and gravity by the actual time elapsed in this sub-step (relative to 1/60s)
+      const forceScale = stepDt * 60
+
       if (t.onGround && wantMove && t.steerDir.lengthSq() > 1e-12) {
-        const push = this._vB.copy(t.steerDir).normalize().multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10)
+        const push = this._vB.copy(t.steerDir).normalize().multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10 * forceScale)
         t.velocity.add(push)
       } else if (!t.onGround && wantMove && t.steerDir.lengthSq() > 1e-12) {
         const push = this._vB
           .copy(t.steerDir)
           .normalize()
-          .multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10 * 0.38)
+          .multiplyScalar(BOT_MOVE_ACCEL * targetSpeed * 10 * 0.38 * forceScale)
         t.velocity.add(push)
       }
 
       if (t.onGround) {
-        t.velocity.multiplyScalar(1 - BOT_FRICTION_GROUND)
+        // Friction is also time-scaled
+        t.velocity.multiplyScalar(Math.pow(1 - BOT_FRICTION_GROUND, forceScale))
         const n = this._vD.copy(pos).normalize()
         const radialSp = t.velocity.dot(n)
         const tang = this._vB.copy(t.velocity).addScaledVector(n, -radialSp)
         if (tang.length() > targetSpeed) tang.setLength(targetSpeed)
         t.velocity.copy(n.multiplyScalar(radialSp).add(tang))
       } else {
-        t.velocity.multiplyScalar(BOT_MOMENTUM_AIR)
+        t.velocity.multiplyScalar(Math.pow(BOT_MOMENTUM_AIR, forceScale))
       }
 
-      t.velocity.add(this._vC.copy(downDir).multiplyScalar(BOT_GRAVITY))
-      pos.add(t.velocity)
+      t.velocity.add(this._vC.copy(downDir).multiplyScalar(BOT_GRAVITY * forceScale))
+      
+      // IMPORTANT: Velocity is units-per-frame (1/60s). We must scale it by how much of a "frame" this sub-step is.
+      pos.addScaledVector(t.velocity, forceScale)
 
       const dist = pos.length()
       if (dist >= groundR - 1e-5) {
@@ -532,11 +574,11 @@ export class TargetPlayersSystem {
         if (verticalVel > 0.04 && distToGround < 1.25) {
           t.anims.setJumpLandingTrigger()
         }
-        t.anims.setState('jump', 0.08)
+        t.anims.setState('jump', 0.1)
       } else if (wantMove) {
-        t.anims.setState(wantSprint ? 'sprint' : 'walk', 0.14)
+        t.anims.setState(wantSprint ? 'sprint' : 'walk', 0.28)
       } else {
-        t.anims.setState('idle', 0.18)
+        t.anims.setState('idle', 0.32)
       }
 
       if (visible && ctx.nowMs - t.lastBotFireMs >= BOT_AK_FIRE_INTERVAL_MS) {
@@ -581,8 +623,9 @@ export class TargetPlayersSystem {
       }
 
       if (brain && t.health > 0) {
-        this.updateBotBrain(t, brain, ti, dt)
+        // Smooth facing yaw BEFORE brain update so applyShellPlacement uses current orientation
         this.smoothFacingYaw(t, dt)
+        this.updateBotBrain(t, brain, ti, dt)
       }
 
       if (t.anims && t.health > 0) {
@@ -631,6 +674,8 @@ export class TargetPlayersSystem {
         t.chasing = false
         t.velocity.set(0, 0, 0)
         t.steerDir.set(0, 0, 0)
+        t.container.visible = false
+        t.model.visible = false
       }
       return
     }

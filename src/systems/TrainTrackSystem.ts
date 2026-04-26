@@ -266,6 +266,14 @@ export class TrainTrackSystem {
     if (!this.trainFrontAlign || this.trainCartsAligns.length === 0) return false
 
     let n = 0
+    
+    // Cover the front of the locomotive (pivot is often at the center or rear)
+    const locoLength = 1.2 // Reduced from 2.5 to fix "early" damage
+    const _vFront = new THREE.Vector3(0, 0, locoLength)
+    this.trainFrontAlign.localToWorld(_vFront)
+    this._hitPathPool[n]!.copy(_vFront)
+    n++
+
     this.trainFrontAlign.getWorldPosition(this._hitPathPool[n]!)
     n++
     // Insert interpolated midpoints between front and each cart for wider coverage
@@ -281,6 +289,14 @@ export class TrainTrackSystem {
       n++
       _p0.copy(_p1)
     }
+
+    // Cover the rear of the last cart
+    const cartLength = 1.0 // Reduced from 2.2
+    const lastCart = this.trainCartsAligns[this.trainCartsAligns.length - 1]!
+    const _vRear = new THREE.Vector3(0, 0, -cartLength)
+    lastCart.localToWorld(_vRear)
+    this._hitPathPool[n]!.copy(_vRear)
+    n++
 
     const thresh = this.trainHitTubeRadius + playerBodyRadius
     const threshSq = thresh * thresh
@@ -574,8 +590,8 @@ export class TrainTrackSystem {
       dMax = Math.max(dMax, this._hitMeasureB.distanceTo(this._hitMeasureC))
     }
     // Use half the inter-cart step as radius, but ensure it's always wide enough
-    // to cover the physical cart body (minimum 5 world units)
-    this.trainHitTubeRadius = Math.max(5.0, dMax * 0.55)
+    // to cover the physical cart body (minimum 2.2 world units)
+    this.trainHitTubeRadius = Math.max(2.2, dMax * 0.35)
   }
 
   /**

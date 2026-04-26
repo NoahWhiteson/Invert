@@ -325,17 +325,18 @@ export class PlayerController {
       }
     }
 
+    // Use the latest position to determine the new surface normal (upDir)
+    const freshUpDir = this.playerGroup.position.clone().normalize().multiplyScalar(-1)
     const currentUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.playerGroup.quaternion)
     
     // Check if we actually need to rotate (prevent precision snaps)
-    const dot = currentUp.dot(upDir)
+    const dot = currentUp.dot(freshUpDir)
     if (dot < 0.999999) {
-      const rotationQuat = new THREE.Quaternion().setFromUnitVectors(currentUp, upDir)
+      const rotationQuat = new THREE.Quaternion().setFromUnitVectors(currentUp, freshUpDir)
       this.playerGroup.quaternion.premultiply(rotationQuat)
       this.playerGroup.quaternion.normalize()
       
       // Rotate velocity to match the new surface orientation
-      // This keeps "upward" knockback pointing "out" as we move around the sphere
       this.state.velocity.applyQuaternion(rotationQuat)
     }
   }
