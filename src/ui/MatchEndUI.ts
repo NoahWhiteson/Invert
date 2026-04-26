@@ -54,6 +54,7 @@ export class MatchEndUI {
     this.nameLine = document.createElement('div')
     this.nameLine.style.marginTop = '18px'
     this.nameLine.style.fontSize = '44px'
+    this.nameLine.style.color = '#ffd700'
     this.nameLine.style.textShadow = `${this.thickOutline}, ${ringTextShadow(3)}`
     this.card.appendChild(this.nameLine)
 
@@ -67,7 +68,7 @@ export class MatchEndUI {
     this.place2 = document.createElement('div')
     this.place2.style.marginTop = '22px'
     this.place2.style.fontSize = '22px'
-    this.place2.style.color = '#b8bcc6'
+    this.place2.style.color = '#c0c0c0'
     this.place2.style.letterSpacing = '1px'
     this.place2.style.textShadow = this.thickOutline
     this.card.appendChild(this.place2)
@@ -75,7 +76,7 @@ export class MatchEndUI {
     this.place3 = document.createElement('div')
     this.place3.style.marginTop = '8px'
     this.place3.style.fontSize = '22px'
-    this.place3.style.color = '#a0a4ae'
+    this.place3.style.color = '#cd7f32'
     this.place3.style.letterSpacing = '1px'
     this.place3.style.textShadow = this.thickOutline
     this.card.appendChild(this.place3)

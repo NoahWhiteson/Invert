@@ -274,6 +274,17 @@ export class TargetPlayersSystem {
     if (t) t.kills++
   }
 
+  public resetAll() {
+    for (let i = 0; i < this.targets.length; i++) {
+      const t = this.targets[i]!
+      t.health = t.maxHealth
+      t.kills = 0
+      t.ragdoll = undefined
+      t.despawnedForPvP = false
+      this.respawnTarget(i)
+    }
+  }
+
   public inflictDirectDamage(index: number, damage: number, impulseWorld?: THREE.Vector3) {
     const t = this.targets[index]
     if (!t || t.despawnedForPvP || t.health <= 0) return
@@ -323,13 +334,13 @@ export class TargetPlayersSystem {
     flat.applyQuaternion(this._qInv)
 
     // Standard orientation: model +Z faces the target direction
-    t.facingYawTarget = Math.atan2(flat.x, flat.z)
+    t.facingYawTarget = Math.atan2(flat.x, flat.z) + Math.PI
   }
 
   /** Tangent "forward" from model yaw + surface frame (for vision cone). */
   private getBotForwardWorld(t: TargetState, out: THREE.Vector3): void {
-    // Standard forward is +Z
-    this._fwdScratch.set(0, 0, 1)
+    // Standard forward is -Z for the mesh now that we flipped the yaw
+    this._fwdScratch.set(0, 0, -1)
     this._fwdScratch.applyQuaternion(t.model.quaternion)
     this._fwdScratch.applyQuaternion(t.container.quaternion)
     const radial = this._vA.copy(t.shellPoint).normalize()

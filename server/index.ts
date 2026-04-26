@@ -89,6 +89,9 @@ export default {
 /**
  * Durable Object: GameRoom
  */
+const MATCH_DURATION_MS = 3 * 60 * 1000;
+const RESET_DELAY_MS = 10000;
+
 export class GameRoom extends DurableObject {
 	private players = new Map<string, PlayerRecord>();
 	private sessions = new Set<WebSocket>();
@@ -321,6 +324,7 @@ export class GameRoom extends DurableObject {
 
 	handleMessage(playerId: string, data: unknown, ws: WebSocket) {
 		try {
+			this.checkMatchLifecycle();
 			if (!this.allowInbound(playerId)) return;
 			if (Math.random() < 0.05) this.pruneStalePlayers();
 
@@ -570,6 +574,28 @@ export class GameRoom extends DurableObject {
 			health: me.health,
 			maxHealth: me.maxHealth,
 			pos: me.pos
+		});
+	}
+
+	private checkMatchLifecycle() {
+		if (this.matchStartTime <= 0) return;
+		const elapsed = Date.now() - this.matchStartTime;
+		if (elapsed > MATCH_DURATION_MS + RESET_DELAY_MS) {
+			this.resetMatch();
+		}
+	}
+
+	private resetMatch() {
+		this.matchStartTime = 0;
+		for (const p of this.players.values()) {
+			p.kills = 0;
+			p.botKills = 0;
+			p.health = 100;
+			p.atMenu = true;
+		}
+		this.broadcast({
+			type: "match_reset",
+			matchStartTime: 0
 		});
 	}
 

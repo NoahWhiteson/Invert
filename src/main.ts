@@ -189,6 +189,83 @@ function persistMyUsernameToLocalStorage() {
   }
 }
 
+function returnToMainMenu() {
+  if (atMainMenu) return
+  atMainMenu = true
+  matchEndedFreeze = false
+  matchEndedByDebug = false
+  isDead = false
+  matchEndTopThreeCache = null
+  
+  if (matchEndTimeout) {
+    clearTimeout(matchEndTimeout)
+    matchEndTimeout = null
+  }
+  
+  // Reset local scores
+  myBotKills = 0
+  myPvpKills = 0
+  updateLeaderboard()
+  
+  // UI resets
+  matchEndUI.hide()
+  matchEndShowcase.clear()
+  mainMenuPlayUI.getPlayButton().style.pointerEvents = 'auto'
+  mainMenuPlayUI.setVisible(true)
+  mainMenuNavUI.setVisible(true)
+  mainMenuDevblogUI.setVisible(true)
+  mainMenuNameUI.setVisible(true)
+  mainMenuSkinsUI.setVisible(true)
+  mainMenuStoreUI.setVisible(true)
+  mainMenuPlayUI.setOpacity(1)
+  mainMenuNavUI.setOpacity(1)
+  mainMenuDevblogUI.setOpacity(1)
+  mainMenuNameUI.setOpacity(1)
+  mainMenuSkinsUI.setOpacity(1)
+  mainMenuStoreUI.setOpacity(1)
+  
+  // Hide game UI
+  leaderboardUI.setVisible(false)
+  timerUI.setVisible(false)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  crosshair.setVisible(false)
+  coinsHUD.setPlayMode(false)
+  staminaUI.setSuppressForMenu(true)
+  
+  // Reset player state
+  player.state.health = 100
+  player.state.velocity.set(0, 0, 0)
+  ammoSystem.refillAllToStarting()
+  player.setPointerLockAllowed(false)
+  try {
+    player.controls.unlock()
+  } catch {}
+  player.controls.enabled = false
+  
+  // Return character to menu holder
+  if (playerModel.root) {
+    menuCharacterHolder.add(playerModel.root)
+    playerModel.root.position.set(0, 0, 0)
+    playerModel.root.quaternion.set(0, 0, 0, 1)
+  }
+  playerModel.setOutlineVisible(true)
+  playerModel.setCharacterCastShadow(true)
+
+  // Notify server
+  multiplayer.update(
+    0, player.playerGroup.position, player.playerGroup.quaternion, 
+    0, 0, myUsername, 0, 'idle', 0, true, false
+  )
+  
+  // Reset bots
+  targetPlayers.resetAll()
+  targetPlayers.setSuppressedByRealPlayers(false)
+  syncMainMenuPanelChrome()
+}
+
 window.addEventListener('pagehide', persistMyUsernameToLocalStorage)
 
 let lastFirstPlaceId: string | null = null
@@ -197,6 +274,7 @@ let currentFov = 75
 /** PvP match timer hit zero: blur overlay, no move/shoot/look until humans drop below 2. */
 let matchEndedFreeze = false
 let matchEndTopThreeCache: LeaderboardEntry[] | null = null
+let matchEndTimeout: ReturnType<typeof setTimeout> | null = null
 /** When true, hold end screen even if the match clock is not running (e.g. `game.fireEndRound()` solo). */
 let matchEndedByDebug = false
 let pendingDebugMatchEnd = false
@@ -707,6 +785,10 @@ void Promise.all([
     } else if (sound === 'reload') {
       playSpatialSfxAt(reloadSfx, position, 0.85 * volume, 75, 'gun')
     }
+  }
+
+  multiplayer.onMatchReset = () => {
+    returnToMainMenu()
   }
 })
 function resolveMatchEndPortraitSource(id: string): THREE.Group | null {
@@ -2193,6 +2275,12 @@ function animate() {
 
           matchEndUI.show(matchEndTopThreeCache)
           matchEndShowcase.syncFromEntries(matchEndTopThreeCache)
+
+          // Auto-reset back to lobby after 5 seconds
+          if (matchEndTimeout) clearTimeout(matchEndTimeout)
+          matchEndTimeout = setTimeout(() => {
+            returnToMainMenu()
+          }, 5000)
         }
       } else if (matchEndedFreeze) {
         matchEndedFreeze = false

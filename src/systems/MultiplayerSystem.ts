@@ -91,6 +91,7 @@ export class MultiplayerSystem {
   public onPlayerStatsUpdate?: () => void
   /** Server-resolved display name (unique in room; init or after collision fix). */
   public onLocalUsername?: (username: string) => void
+  public onMatchReset?: () => void
   public onBloodSpawn?: (point: THREE.Vector3, dir: THREE.Vector3, count: number) => void
   public onRemoteFired?: (position: THREE.Vector3, slot: number) => void
   public onRemoteSound?: (
@@ -298,6 +299,15 @@ export class MultiplayerSystem {
           this.worldState.matchStartTime = data.matchStartTime
           this.onWorldState?.(this.worldState)
         }
+        break
+
+      case "match_reset":
+        if (this.worldState) {
+          this.worldState.matchStartTime = 0
+          this.onWorldState?.(this.worldState)
+        }
+        // Notify local game to reset
+        this.onMatchReset?.()
         break
 
       case "player_moved":
@@ -760,7 +770,7 @@ export class MultiplayerSystem {
       // Shortest-angle interpolation to avoid wrap spins around +/-PI
       const yawDelta = Math.atan2(Math.sin(p.targetViewYaw - p.viewYaw), Math.cos(p.targetViewYaw - p.viewYaw))
       p.viewYaw += yawDelta * 0.2
-      _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw)
+      _netViewQuatScratch.setFromAxisAngle(_netYawAxis, p.viewYaw + Math.PI)
       p.model.quaternion.multiply(_netViewQuatScratch)
 
       // Smoothly interpolate view pitch
