@@ -101,7 +101,7 @@ export class AnimationManager {
     const list = [...AnimationManager.allMixers]
     console.groupCollapsed(`[anim] dump ${list.length} AnimationManager(s)`)
     for (const m of list) {
-      console.log('—', m.debugLabel, { state: m.currentState, pitch: m.lookPitch })
+      console.log('—', m.debugLabel, { state: m.currentState })
     }
     console.groupEnd()
     return list.length
@@ -112,7 +112,6 @@ export class AnimationManager {
   private currentState: AnimationState = 'idle'
   private ragdollFrozen = false
   private debugLabel = 'anim'
-  private isBot = false
   private missingAnimLogAt = new Map<string, number>()
   private animOpRing: AnimOpEntry[] = []
   private readonly ANIM_OP_RING_CAP = 56
@@ -179,7 +178,6 @@ export class AnimationManager {
 
   public setDebugLabel(label: string) {
     this.debugLabel = label
-    this.isBot = label.startsWith('bot-')
   }
 
   private trace(op: string, detail?: Record<string, unknown>) {
