@@ -112,6 +112,7 @@ export class AnimationManager {
   private currentState: AnimationState = 'idle'
   private ragdollFrozen = false
   private debugLabel = 'anim'
+  private isBot = false
   private missingAnimLogAt = new Map<string, number>()
   private animOpRing: AnimOpEntry[] = []
   private readonly ANIM_OP_RING_CAP = 56
@@ -181,6 +182,7 @@ export class AnimationManager {
 
   public setDebugLabel(label: string) {
     this.debugLabel = label
+    this.isBot = label.startsWith('bot-')
   }
 
   private trace(op: string, detail?: Record<string, unknown>) {
@@ -601,7 +603,7 @@ export class AnimationManager {
   }
 
   private applyLookPitch(dt: number) {
-    if (this.spineBones.length === 0 || this.ragdollFrozen) return
+    if (this.spineBones.length === 0 || this.ragdollFrozen || this.isBot) return
     
     // Negate the pitch to fix inversion (looking up was looking down)
     // Scale and clamp to reasonable human limits

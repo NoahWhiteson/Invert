@@ -526,21 +526,6 @@ export class TargetPlayersSystem {
     }
 
     if (t.anims && t.health > 0) {
-      // Calculate look pitch for bots
-      const radialUp = this._vA.copy(t.shellPoint).normalize()
-      const toTarget = this._vC.copy(t.lastAimWorld).sub(t.shellPoint)
-      const distToTarget = toTarget.length()
-      if (distToTarget > 0.1) {
-        toTarget.normalize()
-        // Pitch is the angle between the target direction and the horizon (tangent plane)
-        // A dot product with the "up" vector gives the sine of the pitch
-        const dotUp = toTarget.dot(radialUp)
-        const botPitch = -Math.asin(THREE.MathUtils.clamp(dotUp, -0.99, 0.99))
-        t.anims.setPitch(botPitch)
-      } else {
-        t.anims.setPitch(0)
-      }
-
       if (!t.onGround) {
         const distToGround = groundR - t.shellPoint.length()
         const verticalVel = t.velocity.dot(this._vD.copy(t.shellPoint).normalize())
