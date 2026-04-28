@@ -25,3 +25,5 @@ A massive, high speed train circles the planet on a set track. It is a constant 
 As you rack up kills, you earn coins that can be spent in the shop. We designed a variety of weapon skins, from clean marble to glowing lava patterns, so you can stand out while you are dominating the leaderboard.
 
 Undersphere is a project born out of a love for tight movement, satisfying physics, and the weirdness of small scale gravity. Step onto the sphere and see for yourself.
+
+** This game was made for 2026 Vibejam to test AI's skill. This entire project was made with AI **
