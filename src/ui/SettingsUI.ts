@@ -62,8 +62,6 @@ export class SettingsUI {
   public onGraphicsChange: (key: GraphicOption, on: boolean) => void = () => { }
   private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null, killLeaderMsg: null, trainNoise: null }
 
-  private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
-
   // Crosshair Style
   private crosshair: Crosshair
   private currentCrosshairStyle: 'circle' | 'plus' = 'circle'
@@ -73,6 +71,8 @@ export class SettingsUI {
   private circleIcon_Dot!: HTMLDivElement
   private plusIconV!: HTMLDivElement
   private plusIconH!: HTMLDivElement
+  private controlsRoot: HTMLDivElement | null = null
+  private controlsBody: HTMLDivElement | null = null
 
   constructor(crosshair: Crosshair) {
     this.crosshair = crosshair
@@ -124,7 +124,7 @@ export class SettingsUI {
     this.menu.style.left = '50%'
     this.menu.style.transform = 'translate(-50%, -50%)'
     this.menu.style.width = '420px'
-    this.menu.style.height = '650px'
+    this.menu.style.height = '680px'
     this.menu.style.backgroundColor = 'white'
     this.menu.style.border = '4px solid black'
     this.menu.style.borderRadius = '4px'
@@ -198,6 +198,15 @@ export class SettingsUI {
           ${this.renderVolumeSlider('UI', 'ui')}
         </div>
 
+        <div id="settings-controls-root" style="display: none;">
+          <div style="padding: 32px 30px 16px 30px; display: flex; align-items: center; justify-content: center; gap: 12px;">
+            <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+            <span style="font-family: 'm6x11', monospace; font-size: 24px; color: #888; letter-spacing: 1.5px;">CONTROLS</span>
+            <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
+          </div>
+          <div id="settings-controls-body" style="padding: 0 36px 8px 36px; display: flex; flex-direction: column; gap: 0;"></div>
+        </div>
+
         <!-- GRAPHICS SECTION -->
         <div style="padding: 32px 30px 16px 30px; display: flex; align-items: center; justify-content: center; gap: 12px;">
           <div style="flex: 1; height: 1px; background-color: #ddd;"></div>
@@ -254,6 +263,12 @@ export class SettingsUI {
     this.graphicButtons.bulletHoles = this.menu.querySelector('#btn-bulletHoles')
     this.graphicButtons.killLeaderMsg = this.menu.querySelector('#btn-killLeaderMsg')
     this.graphicButtons.trainNoise = this.menu.querySelector('#btn-trainNoise')
+
+    this.controlsRoot = this.menu.querySelector('#settings-controls-root')
+    this.controlsBody = this.menu.querySelector('#settings-controls-body')
+    window.addEventListener('gamepadconnected', () => this.updateGamepadControlsSection())
+    window.addEventListener('gamepaddisconnected', () => this.updateGamepadControlsSection())
+    this.updateGamepadControlsSection()
 
     // 5. Title (Above Card)
     this.title = document.createElement('h2')
@@ -491,6 +506,37 @@ export class SettingsUI {
     localStorage.setItem('invert_settings', JSON.stringify(data))
   }
 
+  private anyGamepadConnected(): boolean {
+    const pads = navigator.getGamepads()
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i]) return true
+    }
+    return false
+  }
+
+  private updateGamepadControlsSection() {
+    if (!this.controlsRoot || !this.controlsBody) return
+    const show = this.anyGamepadConnected()
+    this.controlsRoot.style.display = show ? 'block' : 'none'
+    if (show) this.controlsBody.innerHTML = this.renderGamepadControlsHtml()
+  }
+
+  private renderGamepadControlsHtml(): string {
+    const line = (t: string) =>
+      `<div style="font-family: 'm6x11', monospace; font-size: 15px; color: #333; line-height: 1.35; padding-left: 2px; margin-bottom: 8px;">${t}</div>`
+    return [
+      line('Left stick — move'),
+      line('Right stick — look'),
+      line('RT / RB — shoot'),
+      line('LT / LB — aim'),
+      line('A — jump · B — crouch'),
+      line('X — reload · LS click — sprint'),
+      line('Y — cycle weapon'),
+      line('D-pad Up / Left — AK · Down — Grenade · Right — Shotgun'),
+      line('Start / Options — toggle view'),
+    ].join('')
+  }
+
   private renderTicks() {
     let ticks = ''
     for (let i = 0; i <= 10; i++) {
@@ -531,6 +577,7 @@ export class SettingsUI {
       this.isDraggingFov = false
       this.draggingType = null
       this.refreshAccountUuidLabel()
+      this.updateGamepadControlsSection()
       this.menu.style.opacity = '1'
       this.menu.style.pointerEvents = 'auto'
       this.overlay.style.opacity = '1'
@@ -594,9 +641,9 @@ export class SettingsUI {
   }
 
   private playClick() {
-    const s = new Audio(this.clickSfx.src)
-    s.volume = 0.5 * this.volumes.master * this.volumes.ui
-    void s.play()
+    if ((window as any).playSfx) {
+      ;(window as any).playSfx('click', 0.5, 'ui')
+    }
   }
 
   private updateStyleButtons() {

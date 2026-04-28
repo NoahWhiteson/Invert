@@ -17,6 +17,7 @@ declare global {
       tposeDebug: (on: boolean) => string
       animDebugLocal: () => Record<string, unknown> | null
       animDebugDump: () => string
+      setBarrierScale: (s: number) => string
       updateLeaderboard: (data: LeaderboardEntry[], myRank?: LeaderboardEntry) => string
       setUsername: (name: string) => string
       fireEndRound: () => string

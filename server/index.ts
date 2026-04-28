@@ -137,6 +137,7 @@ export class GameRoom extends DurableObject<Env> {
 	private readonly treeLayout: Array<{ phi: number; theta: number; scale: number }>;
 	private readonly initialTrainPhase: number;
 	private readonly tentLayout: Array<{ phi: number; theta: number }>;
+	private readonly barrierLayout: Array<{ phi: number; theta: number }>;
 	/** General inbound rate: timestamps (ms) in the last 1s per player */
 	private inboundTs = new Map<string, number[]>();
 	/** Damage events per attacker per rolling second */
@@ -152,6 +153,7 @@ export class GameRoom extends DurableObject<Env> {
 		this.matchStartTime = Date.now();
 		this.treeLayout = this.generateTreeLayout(80, 50, 8);
 		this.tentLayout = this.generateTentLayout(3, 50, 8);
+		this.barrierLayout = this.generateBarrierLayout(6, 50, 8);
 		this.initialTrainPhase = Math.random() * Math.PI * 2;
 		
 		// Initialize bots
@@ -191,6 +193,32 @@ export class GameRoom extends DurableObject<Env> {
 			tents.push({ phi, theta });
 		}
 		return tents;
+	}
+
+	private generateBarrierLayout(count: number, sphereRadius: number, safeZoneRadius: number) {
+		const barriers: Array<{ phi: number; theta: number }> = [];
+		const spawnPos = { x: 0, y: -sphereRadius, z: 0 };
+		const trainPhi = Math.PI / 2;
+		const trainHalfWidth = 0.36;
+
+		while (barriers.length < count) {
+			const phi = Math.random() * Math.PI;
+			const theta = Math.random() * Math.PI * 2;
+			if (Math.abs(phi - trainPhi) < trainHalfWidth) continue;
+
+			const x = sphereRadius * Math.sin(phi) * Math.cos(theta);
+			const y = sphereRadius * Math.cos(phi);
+			const z = sphereRadius * Math.sin(phi) * Math.sin(theta);
+
+			const dx = x - spawnPos.x;
+			const dy = y - spawnPos.y;
+			const dz = z - spawnPos.z;
+			const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+			if (dist < safeZoneRadius) continue;
+
+			barriers.push({ phi, theta });
+		}
+		return barriers;
 	}
 
 	private getCurrentTrainPhase(): number {
@@ -398,6 +426,7 @@ export class GameRoom extends DurableObject<Env> {
 				matchStartTime: this.matchStartTime,
 				treeLayout: this.treeLayout,
 				tentLayout: this.tentLayout,
+				barrierLayout: this.barrierLayout,
 				trainPhase: this.getCurrentTrainPhase(),
 			}));
 		} catch (err) {

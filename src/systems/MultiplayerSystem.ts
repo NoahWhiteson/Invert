@@ -14,6 +14,7 @@ export type WorldState = {
   matchStartTime: number
   treeLayout: Array<{ phi: number; theta: number; scale: number }>
   tentLayout: Array<{ phi: number; theta: number }>
+  barrierLayout?: Array<{ phi: number; theta: number }>
   trainPhase?: number
 }
 
@@ -274,6 +275,7 @@ export class MultiplayerSystem {
           matchStartTime: data.matchStartTime ?? Date.now(),
           treeLayout: Array.isArray(data.treeLayout) ? data.treeLayout : [],
           tentLayout: Array.isArray(data.tentLayout) ? data.tentLayout : [],
+          barrierLayout: Array.isArray(data.barrierLayout) ? data.barrierLayout : [],
           trainPhase: typeof data.trainPhase === 'number' ? data.trainPhase : undefined,
         }
         this.onWorldState?.(this.worldState)

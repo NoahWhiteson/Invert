@@ -75,6 +75,7 @@ import {
 } from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
 import { TentSystem } from './systems/TentSystem'
+import { BarrierSystem } from './systems/BarrierSystem'
 
 
 void (async () => {
@@ -140,6 +141,7 @@ const grass = new GrassSystem(core.scene, sphereRadius)
 const trees = new TreeSystem(core.scene, sphereRadius)
 const trainTrack = new TrainTrackSystem(core.scene, sphereRadius)
 const tents = new TentSystem(core.scene, sphereRadius)
+const barriers = new BarrierSystem(core.scene, sphereRadius)
 
 
 const player = new PlayerController(core.scene, core.camera, sphereRadius, core.renderer.domElement)
@@ -323,6 +325,44 @@ const PLAY_MENU_TRANSITION_MS = 880
 const _playCamEndPos = new THREE.Vector3(0, 0, 0)
 const _playCamEndQuat = new THREE.Quaternion()
 
+/** Menu→game blend driven by main `animate` (single rAF — avoids fighting `player.update` + duplicate simulation). */
+let playTransitionPending: {
+  resolve: () => void
+  startMs: number
+  fromPos: THREE.Vector3
+  fromQuat: THREE.Quaternion
+  toPos: THREE.Vector3
+  toQuat: THREE.Quaternion
+  fromCamPos: THREE.Vector3
+  fromCamQuat: THREE.Quaternion
+} | null = null
+
+function advancePlayTransition(): void {
+  const p = playTransitionPending
+  if (!p) return
+  const nowMs = performance.now()
+  const t = (nowMs - p.startMs) / PLAY_MENU_TRANSITION_MS
+  const tClamped = Math.min(1, t)
+  const eased = smoothStep01(tClamped)
+  player.playerGroup.position.lerpVectors(p.fromPos, p.toPos, eased)
+  player.playerGroup.quaternion.copy(p.fromQuat).slerp(p.toQuat, eased)
+  core.camera.position.lerpVectors(p.fromCamPos, _playCamEndPos, eased)
+  core.camera.quaternion.copy(p.fromCamQuat).slerp(_playCamEndQuat, eased)
+  const ui = playTransitionMenuGameUiOpacities(tClamped)
+  applyPlayTransitionUiCrossfade(ui.menu, ui.game)
+  if (tClamped >= 1) {
+    player.playerGroup.position.copy(p.toPos)
+    player.playerGroup.quaternion.copy(p.toQuat)
+    core.camera.position.set(0, 0, 0)
+    core.camera.quaternion.identity()
+    core.camera.rotation.set(0, 0, 0)
+    core.camera.up.set(0, 1, 0)
+    applyPlayTransitionUiCrossfade(0, 1)
+    playTransitionPending = null
+    p.resolve()
+  }
+}
+
 function smoothStep01(t: number): number {
   const x = THREE.MathUtils.clamp(t, 0, 1)
   return x * x * (3 - 2 * x)
@@ -366,43 +406,6 @@ function applyPlayTransitionUiCrossfade(menuOpacity: number, gameOpacity: number
   weaponUI.setOpacity(g)
   killFeed.setOpacity(g)
   crosshair.setOpacity(g)
-}
-
-function playMenuToGameTransition(
-  fromPos: THREE.Vector3,
-  fromQuat: THREE.Quaternion,
-  toPos: THREE.Vector3,
-  toQuat: THREE.Quaternion,
-  fromCamPos: THREE.Vector3,
-  fromCamQuat: THREE.Quaternion
-): Promise<void> {
-  const transitionStartMs = performance.now()
-  return new Promise((resolve) => {
-    const tick = (nowMs: number) => {
-      const t = (nowMs - transitionStartMs) / PLAY_MENU_TRANSITION_MS
-      const tClamped = Math.min(1, t)
-      const eased = smoothStep01(tClamped)
-      player.playerGroup.position.lerpVectors(fromPos, toPos, eased)
-      player.playerGroup.quaternion.copy(fromQuat).slerp(toQuat, eased)
-      core.camera.position.lerpVectors(fromCamPos, _playCamEndPos, eased)
-      core.camera.quaternion.copy(fromCamQuat).slerp(_playCamEndQuat, eased)
-      const ui = playTransitionMenuGameUiOpacities(tClamped)
-      applyPlayTransitionUiCrossfade(ui.menu, ui.game)
-      if (t >= 1) {
-        player.playerGroup.position.copy(toPos)
-        player.playerGroup.quaternion.copy(toQuat)
-        core.camera.position.set(0, 0, 0)
-        core.camera.quaternion.identity()
-        core.camera.rotation.set(0, 0, 0)
-        core.camera.up.set(0, 1, 0)
-        applyPlayTransitionUiCrossfade(0, 1)
-        resolve()
-        return
-      }
-      requestAnimationFrame(tick)
-    }
-    requestAnimationFrame(tick)
-  })
 }
 
 window.addEventListener(
@@ -640,7 +643,7 @@ function updateLeaderboard() {
   if (topOne && topOne.kills > 0) {
     if (lastFirstPlaceId !== topOne.id) {
       if (settingsUI.graphics.killLeaderMsg) {
-        playSfx(newKillLeaderSfx, 1.0, 'ui')
+        playSfx('newKillLeader', 1.0, 'ui')
         announcementUI.show('NEW KILL LEADER')
       }
     }
@@ -658,14 +661,73 @@ function updateLeaderboard() {
 // Update leaderboard more frequently for responsiveness
 setInterval(updateLeaderboard, 100)
 
+// ── Audio preload (must run before startup Promise.all — initAllSfx reads soundUrls) ──
+const soundBuffers = new Map<string, AudioBuffer>()
+const soundUrls = {
+  ak: new URL('./assets/audio/ak.mp3', import.meta.url).href,
+  shotgun: new URL('./assets/audio/shotgun.mp3', import.meta.url).href,
+  reload: new URL('./assets/audio/reload.mp3', import.meta.url).href,
+  impact: new URL('./assets/audio/impact.mp3', import.meta.url).href,
+  explosion: new URL('./assets/audio/explosion.mp3', import.meta.url).href,
+  newKillLeader: new URL('./assets/leaderboard/newkillleader.mp3', import.meta.url).href,
+  heartbeat: new URL('./assets/audio/heartbeat.mp3', import.meta.url).href,
+  oneMinute: new URL('./assets/audio/1 Minute.mp3', import.meta.url).href,
+  click: new URL('./assets/audio/click.mp3', import.meta.url).href,
+  trainHorn: new URL('./assets/audio/trainhorn.mp3', import.meta.url).href,
+}
+
+const audioCtx = typeof window !== 'undefined'
+  ? new ((window as any).AudioContext || (window as any).webkitAudioContext)()
+  : null
+
+let masterBus: GainNode | null = null
+
+if (audioCtx) {
+  const limiter = audioCtx.createDynamicsCompressor()
+  limiter.threshold.setValueAtTime(-18, audioCtx.currentTime)
+  limiter.knee.setValueAtTime(10, audioCtx.currentTime)
+  limiter.ratio.setValueAtTime(15, audioCtx.currentTime)
+  limiter.attack.setValueAtTime(0.002, audioCtx.currentTime)
+  limiter.release.setValueAtTime(0.15, audioCtx.currentTime)
+
+  const bus = audioCtx.createGain()
+  bus.gain.setValueAtTime(0.75, audioCtx.currentTime)
+  masterBus = bus
+
+  bus.connect(limiter).connect(audioCtx.destination)
+}
+
+async function loadAudioBuffer(url: string): Promise<AudioBuffer | null> {
+  if (!audioCtx) return null
+  try {
+    const resp = await fetch(url)
+    const arrayBuf = await resp.arrayBuffer()
+    return await audioCtx.decodeAudioData(arrayBuf)
+  } catch (e) {
+    console.warn(`[audio] failed to load ${url}`, e)
+    return null
+  }
+}
+
+async function initAllSfx() {
+  const tasks = Object.entries(soundUrls).map(async ([key, url]) => {
+    const buf = await loadAudioBuffer(url)
+    if (buf) soundBuffers.set(key, buf)
+  })
+  await Promise.all(tasks)
+}
+
 void Promise.all([
   targetPlayers.init(),
   multiplayer.init(),
   trainTrack.init(),
   tents.init(),
+  barriers.init(),
   AnimationManager.preloadAll(),
   heldWeapons.loadAll(),
+  initAllSfx(),
 ]).then(() => {
+  timerUI.onOneMinuteRemaining = () => playSfx('oneMinute', 1, 'ui')
   void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
   
   multiplayer.onWorldState = (state) => {
@@ -680,6 +742,12 @@ void Promise.all([
       tents.clear()
       for (const t of state.tentLayout) {
         tents.spawn(t.phi, t.theta)
+      }
+    }
+    if (state.barrierLayout && state.barrierLayout.length > 0) {
+      barriers.clear()
+      for (const b of state.barrierLayout) {
+        barriers.spawn(b.phi, b.theta)
       }
     }
     if (typeof state.trainPhase === 'number' && !trainPhaseSynced) {
@@ -818,11 +886,11 @@ void Promise.all([
 
   multiplayer.onRemoteSound = (sound, position, volume) => {
     if (sound === 'ak') {
-      playSpatialSfxAt(akSfx, position, 0.95 * volume, 95, 'gun')
+      playSpatialSfxAt('ak', position, 0.95 * volume, 95, 'gun')
     } else if (sound === 'shotgun') {
-      playSpatialSfxAt(shotgunSfx, position, 1.0 * volume, 105, 'gun')
+      playSpatialSfxAt('shotgun', position, 1.0 * volume, 105, 'gun')
     } else if (sound === 'reload') {
-      playSpatialSfxAt(reloadSfx, position, 0.85 * volume, 75, 'gun')
+      playSpatialSfxAt('reload', position, 0.85 * volume, 75, 'gun')
     }
   }
 
@@ -946,7 +1014,7 @@ const _v3 = new THREE.Vector3()
 const _q1 = new THREE.Quaternion()
 const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
   let playedImpactThisExplosion = false
-  playSpatialSfxAt(explosionSfx, params.pos, 1.2, 120, 'explosion')
+  playSpatialSfxAt('explosion', params.pos, 1.2, 120, 'explosion')
 
   // Handle ALL explosion logic here: Damage, Knockback, Visuals
   const distToPlayer = player.playerGroup.position.distanceTo(params.pos)
@@ -955,13 +1023,13 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
     const power = 1 - (distToPlayer / params.damageRadius)
     // 10 max damage for self-damage, scaled by distance
     const dmg = params.playerSelfDamage * power
-    if (dmg >= 1) {
-      player.inflictDamage(dmg)
-      if (!playedImpactThisExplosion) {
-        playSfx(impactSfx, 1.0, 'impact', true)
-        playedImpactThisExplosion = true
+      if (dmg >= 1) {
+        player.inflictDamage(dmg)
+        if (!playedImpactThisExplosion) {
+          playSfx('impact', 1.0, 'impact', true)
+          playedImpactThisExplosion = true
+        }
       }
-    }
 
     const kbDir = _v1.copy(player.playerGroup.position).sub(params.pos)
     const kbLen = kbDir.length()
@@ -996,7 +1064,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
       if (res && res.damaged) {
         hitIndices.add(idx)
         if (!playedImpactThisExplosion) {
-          playSfx(impactSfx, 1.0, 'impact', true)
+          playSfx('impact', 1.0, 'impact', true)
           playedImpactThisExplosion = true
         }
         damageTexts.spawn(res.pos, Math.round(dmg), idx)
@@ -1036,10 +1104,10 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
       const finalDmg = params.maxDamage * power
       multiplayer.sendDamage(p.id, finalDmg, 'Grenade', _v1)
 
-        if (!playedImpactThisExplosion) {
-          playSfx(impactSfx, 1.0, 'impact', true)
-          playedImpactThisExplosion = true
-        }
+      if (!playedImpactThisExplosion) {
+        playSfx('impact', 1.0, 'impact', true)
+        playedImpactThisExplosion = true
+      }
 
       // Show damage text above head
       const headPos = p.model.position.clone()
@@ -1142,7 +1210,18 @@ async function beginPlayFromMenu() {
   killFeed.setOpacity(0)
   crosshair.setOpacity(0)
 
-  await playMenuToGameTransition(startPos, startQuat, spawnPos, endQuat, startCamPos, startCamQuat)
+  await new Promise<void>((resolve) => {
+    playTransitionPending = {
+      resolve,
+      startMs: performance.now(),
+      fromPos: startPos.clone(),
+      fromQuat: startQuat.clone(),
+      toPos: spawnPos.clone(),
+      toQuat: endQuat.clone(),
+      fromCamPos: startCamPos.clone(),
+      fromCamQuat: startCamQuat.clone(),
+    }
+  })
   atMainMenu = false // State change AFTER transition
   player.state.velocity.set(0, 0, 0)
 
@@ -1334,12 +1413,14 @@ function pickShootIntersection(
   sphereR: number,
   humanPlayers: THREE.Object3D[],
   netPlayers: THREE.Object3D[],
-  tents: THREE.Object3D[]
+  tents: THREE.Object3D[],
+  barriers: THREE.Object3D[]
 ): THREE.Intersection | null {
   _entityRayBuffer.length = 0
   for (let i = 0; i < humanPlayers.length; i++) _entityRayBuffer.push(humanPlayers[i]!)
   for (let i = 0; i < netPlayers.length; i++) _entityRayBuffer.push(netPlayers[i]!)
   for (let i = 0; i < tents.length; i++) _entityRayBuffer.push(tents[i]!)
+  for (let i = 0; i < barriers.length; i++) _entityRayBuffer.push(barriers[i]!)
 
   raycaster.set(origin, dir)
   const entityHits = raycaster.intersectObjects(_entityRayBuffer, true)
@@ -1418,14 +1499,14 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
 
   const shooterBot = targetPlayers.getTargetById(`bot_${botIndex}`)
   const soundPos = shooterBot?.container.position ?? eye
-  playSpatialSfxAt(akSfx, soundPos, 0.9, 95, 'gun')
+  playSpatialSfxAt('ak', soundPos, 0.9, 95, 'gun')
   multiplayer.sendSound('ak', soundPos, 1)
 
   const botTargets = targetPlayers.getRaycastTargets().filter(
     (o) => typeof o.userData.targetIdx !== 'number' || o.userData.targetIdx !== botIndex
   )
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
   const hitDist = h?.distance ?? Infinity
 
   const spawnGraceActive = localSpawnDamageInvulnerable()
@@ -1437,7 +1518,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   if (tPlayer !== null && tPlayer < hitDist) {
     const incoming = _tmpKb.copy(_shotDir).multiplyScalar(-1).normalize()
     player.inflictDamage(BOT_AK_DAMAGE, incoming)
-    playSfx(impactSfx, 0.85, 'impact')
+    playSfx('impact', 0.85, 'impact')
     const headPos = player.playerGroup.position.clone()
     const dmgUp = headPos.clone().normalize().multiplyScalar(-1)
     headPos.addScaledVector(dmgUp, 1.2)
@@ -1459,7 +1540,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   if (h.object.userData.networkPlayerId) {
     const targetId = h.object.userData.networkPlayerId as string
     const hitDir = _v1.copy(_shotDir).negate().normalize()
-    playSfx(impactSfx, 1.0, 'impact')
+    playSfx('impact', 1.0, 'impact')
     blood.spawn(h.point, hitDir, 4)
     multiplayer.sendBlood(h.point, hitDir, 4)
     multiplayer.sendDamage(targetId, BOT_AK_DAMAGE, 'AK-47', _shotDir, { fromBot: true })
@@ -1479,7 +1560,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
   const hitDir = _v1.copy(_shotDir).negate().normalize()
   const damageRes = targetPlayers.damageFromHitObject(h.object as THREE.Mesh, BOT_AK_DAMAGE, _shotDir)
   if (!damageRes?.damaged) return
-  playSpatialSfxAt(impactSfx, h.point, 0.4, 48, 'impact')
+  playSpatialSfxAt('impact', h.point, 0.4, 48, 'impact')
   blood.spawn(h.point, hitDir, 4)
   multiplayer.sendBlood(h.point, hitDir, 4)
   damageTexts.spawn(damageRes.pos, BOT_AK_DAMAGE, damageRes.targetIdx)
@@ -1502,7 +1583,10 @@ let lastTrainPlayerHitMs = -Infinity
 const lastTrainBotHitMs: number[] = new Array(12).fill(-Infinity)
 let isLeftMouseDown = false
 let isRightMouseDown = false
+let isLeftMouseDownOnGamepad = false
+let isRightMouseDownOnGamepad = false
 let wasLeftMouseDownLastFrame = false
+let wasGamepadButton3DownLastFrame = false
 let grenadeCharge = 0
 
 const SHOTGUN_SLOT = 1
@@ -1514,75 +1598,193 @@ let shotgunMidairKnockbackUsed = false
 let isReloading = false
 let reloadSlot = -1
 let reloadStartedAt = 0
-const akSfx = new Audio(new URL('./assets/audio/ak.mp3', import.meta.url).href)
-const shotgunSfx = new Audio(new URL('./assets/audio/shotgun.mp3', import.meta.url).href)
-const reloadSfx = new Audio(new URL('./assets/audio/reload.mp3', import.meta.url).href)
-const impactSfx = new Audio(new URL('./assets/audio/impact.mp3', import.meta.url).href)
-const explosionSfx = new Audio(new URL('./assets/audio/explosion.mp3', import.meta.url).href)
-const newKillLeaderSfx = new Audio(new URL('./assets/leaderboard/newkillleader.mp3', import.meta.url).href)
-const heartbeatSfx = new Audio(new URL('./assets/audio/heartbeat.mp3', import.meta.url).href)
-heartbeatSfx.loop = true
-heartbeatSfx.volume = 0
-const oneMinuteSfx = new Audio(new URL('./assets/audio/1 Minute.mp3', import.meta.url).href)
 
-const audioCtx = typeof window !== 'undefined'
-  ? new ((window as any).AudioContext || (window as any).webkitAudioContext)()
-  : null
+// Looping heartbeat state
+let heartbeatSource: AudioBufferSourceNode | null = null
+let heartbeatGain: GainNode | null = null
 
-// Master Limiter / Compressor to prevent "breaking the sound barrier" (digital clipping)
-let masterBus: GainNode | null = null
+function updateHeartbeatByHealth(health: number, maxHealth: number) {
+  if (!audioCtx || !masterBus) return
+  const buf = soundBuffers.get('heartbeat')
+  if (!buf) return
 
-if (audioCtx) {
-  const limiter = audioCtx.createDynamicsCompressor()
-  limiter.threshold.setValueAtTime(-3, audioCtx.currentTime) // Duck early
-  limiter.knee.setValueAtTime(12, audioCtx.currentTime)
-  limiter.ratio.setValueAtTime(20, audioCtx.currentTime) // Hard limit
-  limiter.attack.setValueAtTime(0.003, audioCtx.currentTime)
-  limiter.release.setValueAtTime(0.1, audioCtx.currentTime)
+  if (isDead) {
+    if (heartbeatGain) heartbeatGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1)
+    return
+  }
 
-  const bus = audioCtx.createGain()
-  bus.gain.setValueAtTime(0.85, audioCtx.currentTime) // Slight head-room
-  masterBus = bus
+  const hp01 = Math.max(0, Math.min(1, health / Math.max(1, maxHealth)))
+  const low = 1 - hp01
+  const master = settingsUI.volumes.master
 
-  bus.connect(limiter).connect(audioCtx.destination)
+  if (low < 0.25) {
+    if (heartbeatGain) heartbeatGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.2)
+    return
+  }
+
+  if (!heartbeatSource) {
+    const src = audioCtx.createBufferSource()
+    src.buffer = buf
+    src.loop = true
+    const g = audioCtx.createGain()
+    g.gain.value = 0
+    src.connect(g).connect(masterBus)
+    src.start()
+    heartbeatSource = src
+    heartbeatGain = g
+  }
+
+  const t = (low - 0.25) / 0.75
+  const targetVol = (0.1 + t * 0.7) * master
+  if (heartbeatGain) heartbeatGain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.1)
+  if (heartbeatSource) heartbeatSource.playbackRate.setTargetAtTime(1 + t * 0.8, audioCtx.currentTime, 0.1)
 }
 
-// ── Train Spatial Audio ────────────────────────────────────────────────────
-// We use WebAudio so we can:
-//   • Perfectly loop exactly 0–6 s with loopStart / loopEnd (no gap)
-//   • Update gain each frame based on camera↔train distance (spatial)
-//   • Respect the trainNoise settings toggle
+// SFX management
+const voiceCount = new Map<string, number>()
+const lastTriggerTime = new Map<string, number>()
+const MAX_VOICES_PER_TYPE = 12
+const MIN_RETRIGGER_GAP_MS = 40
 
-const TRAIN_CROSSFADE_AT = 4.0  // start next loop at 4s
-const TRAIN_LOOP_DUR    = 6.0  // full clip length
-const TRAIN_MAX_DIST    = 35   // world units — only audible up close
-const TRAIN_BASE_VOL    = 0.35 // max volume right next to train
+function playSfx(
+  key: string,
+  volume: number = 1.0,
+  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
+  bypassLimit: boolean = false
+) {
+  if (!audioCtx || !masterBus) return
+  const buf = soundBuffers.get(key)
+  if (!buf) return
+
+  const now = performance.now()
+  const lastTime = lastTriggerTime.get(key) ?? 0
+  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
+  lastTriggerTime.set(key, now)
+
+  const currentCount = voiceCount.get(type) ?? 0
+  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
+
+  const source = audioCtx.createBufferSource()
+  source.buffer = buf
+  
+  const gain = audioCtx.createGain()
+  const master = settingsUI.volumes.master
+  const typeVol = settingsUI.volumes[type]
+  gain.gain.value = Math.max(0, Math.min(1.5, volume * master * typeVol))
+  
+  source.connect(gain).connect(masterBus)
+  
+  voiceCount.set(type, currentCount + 1)
+  source.onended = () => {
+    voiceCount.set(type, Math.max(0, (voiceCount.get(type) ?? 1) - 1))
+    source.disconnect()
+    gain.disconnect()
+  }
+
+  source.start()
+}
+
+function playSpatialSfxAt(
+  key: string,
+  sourcePos: THREE.Vector3,
+  baseVolume: number = 1.0,
+  maxDistance: number = 80,
+  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
+  bypassLimit: boolean = false
+) {
+  if (!audioCtx || !masterBus) return
+  const buf = soundBuffers.get(key)
+  if (!buf) return
+
+  const now = performance.now()
+  const lastTime = lastTriggerTime.get(key) ?? 0
+  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
+  lastTriggerTime.set(key, now)
+
+  const currentCount = voiceCount.get(type) ?? 0
+  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
+
+  const source = audioCtx.createBufferSource()
+  source.buffer = buf
+
+  const panner = audioCtx.createPanner()
+  panner.panningModel = 'HRTF'
+  panner.distanceModel = 'inverse'
+  panner.refDistance = 5
+  panner.maxDistance = maxDistance
+  panner.rolloffFactor = 1.8 
+  panner.positionX.value = sourcePos.x
+  panner.positionY.value = sourcePos.y
+  panner.positionZ.value = sourcePos.z
+
+  const gain = audioCtx.createGain()
+  const master = settingsUI.volumes.master
+  const typeVol = settingsUI.volumes[type]
+  gain.gain.value = Math.max(0, Math.min(1.5, baseVolume * master * typeVol))
+
+  source.connect(gain).connect(panner).connect(masterBus)
+
+  voiceCount.set(type, currentCount + 1)
+  source.onended = () => {
+    voiceCount.set(type, Math.max(0, (voiceCount.get(type) ?? 1) - 1))
+    source.disconnect()
+    gain.disconnect()
+    panner.disconnect()
+  }
+
+  source.start()
+}
+
+function updateAudioListener() {
+  if (!audioCtx) return
+  const camPos = _v1.setFromMatrixPosition(core.camera.matrixWorld)
+  const camQuat = _q1.setFromRotationMatrix(core.camera.matrixWorld)
+  const forward = _v2.set(0, 0, -1).applyQuaternion(camQuat)
+  const up = _v3.set(0, 1, 0).applyQuaternion(camQuat)
+  
+  const listener = audioCtx.listener
+  const time = audioCtx.currentTime
+  if (listener.positionX) {
+    listener.positionX.setTargetAtTime(camPos.x, time, 0.05)
+    listener.positionY.setTargetAtTime(camPos.y, time, 0.05)
+    listener.positionZ.setTargetAtTime(camPos.z, time, 0.05)
+    listener.forwardX.setTargetAtTime(forward.x, time, 0.05)
+    listener.forwardY.setTargetAtTime(forward.y, time, 0.05)
+    listener.forwardZ.setTargetAtTime(forward.z, time, 0.05)
+    listener.upX.setTargetAtTime(up.x, time, 0.05)
+    listener.upY.setTargetAtTime(up.y, time, 0.05)
+    listener.upZ.setTargetAtTime(up.z, time, 0.05)
+  } else {
+    listener.setPosition(camPos.x, camPos.y, camPos.z)
+    listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z)
+  }
+}
+
+// Expose for other modules
+;(window as any).playSfx = playSfx
+;(window as any).playSpatialSfxAt = playSpatialSfxAt
+
+// ── Train Spatial Audio ────────────────────────────────────────────────────
+const TRAIN_CROSSFADE_AT = 4.0
+const TRAIN_LOOP_DUR    = 6.0
+const TRAIN_MAX_DIST    = 35
+const TRAIN_BASE_VOL    = 0.35
 
 let trainAmbientGain: GainNode | null = null
 let trainAudioBuf: AudioBuffer | null = null
 let trainAudioReady = false
 
-/** Schedule a crossfade-loop pair from WebAudio clock `startAt`. */
 function _scheduleTrainLoop(startAt: number) {
   if (!audioCtx || !trainAudioBuf || !trainAmbientGain) return
   const gain = trainAmbientGain
-
-  // Primary source — plays from 0
   const src = audioCtx.createBufferSource()
   src.buffer = trainAudioBuf
   src.connect(gain)
   src.start(startAt, 0)
   src.stop(startAt + TRAIN_LOOP_DUR)
 
-  // At CROSSFADE_AT seconds schedule the next loop (overlaps for clean handoff)
-  src.addEventListener('ended', () => {
-    // already kicked off next at crossfade point
-  })
-
-  // Schedule next instance to start at startAt + CROSSFADE_AT (while this one is still playing)
   const nextStart = startAt + TRAIN_CROSSFADE_AT
-  // Use setTimeout to schedule recursively (deltaTime = crossfade offset in ms)
-  const msTill = (nextStart - audioCtx.currentTime) * 1000 - 50 // fire 50ms early
+  const msTill = (nextStart - audioCtx.currentTime) * 1000 - 50
   setTimeout(() => {
     if (!trainAudioReady || !trainAmbientGain) return
     _scheduleTrainLoop(nextStart)
@@ -1595,52 +1797,24 @@ async function initTrainAudio() {
     const resp = await fetch(new URL('./assets/audio/train.mp3', import.meta.url).href)
     const arrayBuf = await resp.arrayBuffer()
     trainAudioBuf = await audioCtx.decodeAudioData(arrayBuf)
-
     const gainNode = audioCtx.createGain()
     gainNode.gain.value = 0
-    gainNode.connect(audioCtx.destination)
+    if (masterBus) gainNode.connect(masterBus)
+    else gainNode.connect(audioCtx.destination)
     trainAmbientGain = gainNode
     trainAudioReady = true
-
     _scheduleTrainLoop(audioCtx.currentTime)
   } catch (e) {
     console.warn('[train audio] init failed', e)
   }
 }
 
-// ── Train Horn — use plain HTMLAudioElement (reliable across browsers) ──────
-const _trainHornEl = new Audio(new URL('./assets/audio/trainhorn.mp3', import.meta.url).href)
-let lastTrainHornMs = -Infinity
-
 function playTrainHornSpatial(trainPos: THREE.Vector3) {
   if (!settingsUI.graphics.trainNoise) return
-  const camPos = new THREE.Vector3()
-  core.camera.getWorldPosition(camPos)
-  const dist = camPos.distanceTo(trainPos)
-  const norm = dist / Math.max(1, TRAIN_MAX_DIST * 8) // horn heard further than rumble
-  const atten = 1 / (1 + norm * norm * 1.5)
-  const vol = Math.max(0, Math.min(1, 0.9 * atten * settingsUI.volumes.master))
-  const horn = new Audio(_trainHornEl.src)
-  horn.volume = vol
-  void horn.play().catch(() => { /* blocked */ })
-
-  // Fade out at 3 seconds over 500ms
-  setTimeout(() => {
-    const fadeSteps = 20
-    const fadeMs = 500
-    const startVol = horn.volume
-    let step = 0
-    const id = setInterval(() => {
-      step++
-      horn.volume = Math.max(0, startVol * (1 - step / fadeSteps))
-      if (step >= fadeSteps) {
-        clearInterval(id)
-        horn.pause()
-      }
-    }, fadeMs / fadeSteps)
-  }, 3000)
+  playSpatialSfxAt('trainHorn', trainPos, 0.9, 250, 'master')
 }
 
+let lastTrainHornMs = -Infinity
 function scheduleTrainHorn() {
   const delay = 30000 + Math.random() * 30000
   setTimeout(() => {
@@ -1656,7 +1830,6 @@ function scheduleTrainHorn() {
   }, delay)
 }
 
-// Resume AudioContext and kick off train audio on first user interaction
 const _resumeTrainAudio = () => {
   if (!audioCtx) return
   if (audioCtx.state === 'suspended') void audioCtx.resume()
@@ -1666,7 +1839,6 @@ const _resumeTrainAudio = () => {
 window.addEventListener('click', _resumeTrainAudio, { once: true })
 window.addEventListener('keydown', _resumeTrainAudio, { once: true })
 
-// Called each game frame — updates gain based on distance to train
 const _trainCamPos = new THREE.Vector3()
 const _trainPos = new THREE.Vector3()
 function updateTrainSpatialAudio() {
@@ -1682,12 +1854,10 @@ function updateTrainSpatialAudio() {
   core.camera.getWorldPosition(_trainCamPos)
   const dist = _trainCamPos.distanceTo(_trainPos)
   const norm = dist / Math.max(1, TRAIN_MAX_DIST)
-  // Steep falloff — very quiet beyond TRAIN_MAX_DIST
   const atten = 1 / (1 + norm * norm * 6)
   const target = TRAIN_BASE_VOL * atten * settingsUI.volumes.master
   trainAmbientGain.gain.setTargetAtTime(Math.max(0, target), audioCtx!.currentTime, 0.08)
 }
-
 
 function createFlashTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas')
@@ -1749,148 +1919,6 @@ function syncMuzzleFlashParent() {
   }
 }
 
-// Voice limiting to prevent sound clipping/merging issues
-const voiceCount = new Map<string, number>()
-const lastTriggerTime = new Map<string, number>()
-const MAX_VOICES_PER_TYPE = 16
-const MIN_RETRIGGER_GAP_MS = 25 // Prevent extreme "phasing" mash
-
-function playSfx(
-  audio: HTMLAudioElement,
-  volume: number = 1.0,
-  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
-  bypassLimit: boolean = false
-) {
-  const now = performance.now()
-  const soundId = audio.src
-  const lastTime = lastTriggerTime.get(soundId) ?? 0
-  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
-  lastTriggerTime.set(soundId, now)
-
-  const currentCount = voiceCount.get(type) ?? 0
-  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
-
-  const layer = new Audio(audio.src)
-  const master = settingsUI.volumes.master
-  const typeVol = settingsUI.volumes[type]
-  const finalVol = Math.max(0, Math.min(1, volume * master * typeVol))
-  
-  layer.volume = finalVol
-  layer.playbackRate = audio.playbackRate
-  layer.preservesPitch = audio.preservesPitch
-  layer.currentTime = 0
-  
-  voiceCount.set(type, currentCount + 1)
-  layer.onended = () => {
-    const c = voiceCount.get(type) ?? 1
-    voiceCount.set(type, Math.max(0, c - 1))
-  }
-
-  if (audioCtx) {
-    if (audioCtx.state === 'suspended') void audioCtx.resume()
-    if (masterBus) {
-      try {
-        const src = audioCtx.createMediaElementSource(layer)
-        src.connect(masterBus)
-      } catch {
-        // Fallback to direct volume if source binding fails
-      }
-    }
-  }
-
-  void layer.play()
-}
-
-timerUI.onOneMinuteRemaining = () => playSfx(oneMinuteSfx, 1, 'ui')
-
-function playSpatialSfxAt(
-  audio: HTMLAudioElement,
-  sourcePos: THREE.Vector3,
-  baseVolume: number = 1.0,
-  maxDistance: number = 80,
-  type: 'master' | 'gun' | 'impact' | 'explosion' | 'ui' = 'master',
-  bypassLimit: boolean = false
-) {
-  const now = performance.now()
-  const soundId = audio.src
-  const lastTime = lastTriggerTime.get(soundId) ?? 0
-  if (!bypassLimit && now - lastTime < MIN_RETRIGGER_GAP_MS) return
-  lastTriggerTime.set(soundId, now)
-
-  const currentCount = voiceCount.get(type) ?? 0
-  if (!bypassLimit && currentCount >= MAX_VOICES_PER_TYPE) return
-
-  const master = settingsUI.volumes.master
-  const typeVol = settingsUI.volumes[type]
-  const finalBaseVolume = Math.max(0, Math.min(1, baseVolume * master * typeVol))
-
-  const layer = new Audio(audio.src)
-  layer.volume = finalBaseVolume // Base volume before spatial attenuation
-  layer.playbackRate = audio.playbackRate
-  layer.preservesPitch = audio.preservesPitch
-  layer.currentTime = 0
-
-  voiceCount.set(type, currentCount + 1)
-  layer.onended = () => {
-    const c = voiceCount.get(type) ?? 1
-    voiceCount.set(type, Math.max(0, c - 1))
-  }
-
-  if (audioCtx) {
-    try {
-      if (audioCtx.state === 'suspended') void audioCtx.resume()
-
-      const panner = audioCtx.createPanner()
-      panner.panningModel = 'HRTF'
-      panner.distanceModel = 'inverse'
-      panner.refDistance = 5
-      panner.maxDistance = maxDistance
-      panner.rolloffFactor = 1.5
-      
-      panner.positionX.value = sourcePos.x
-      panner.positionY.value = sourcePos.y
-      panner.positionZ.value = sourcePos.z
-      
-      const camPos = _v1.setFromMatrixPosition(core.camera.matrixWorld)
-      const camQuat = _q1.setFromRotationMatrix(core.camera.matrixWorld)
-      const forward = _v2.set(0, 0, -1).applyQuaternion(camQuat)
-      const up = _v3.set(0, 1, 0).applyQuaternion(camQuat)
-      
-      const listener = audioCtx.listener
-      if (listener.positionX) {
-        listener.positionX.setTargetAtTime(camPos.x, audioCtx.currentTime, 0.05)
-        listener.positionY.setTargetAtTime(camPos.y, audioCtx.currentTime, 0.05)
-        listener.positionZ.setTargetAtTime(camPos.z, audioCtx.currentTime, 0.05)
-        listener.forwardX.setTargetAtTime(forward.x, audioCtx.currentTime, 0.05)
-        listener.forwardY.setTargetAtTime(forward.y, audioCtx.currentTime, 0.05)
-        listener.forwardZ.setTargetAtTime(forward.z, audioCtx.currentTime, 0.05)
-        listener.upX.setTargetAtTime(up.x, audioCtx.currentTime, 0.05)
-        listener.upY.setTargetAtTime(up.y, audioCtx.currentTime, 0.05)
-        listener.upZ.setTargetAtTime(up.z, audioCtx.currentTime, 0.05)
-      } else {
-        listener.setPosition(camPos.x, camPos.y, camPos.z)
-        listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z)
-      }
-
-      const src = audioCtx.createMediaElementSource(layer)
-      if (masterBus) {
-        src.connect(panner).connect(masterBus)
-      } else {
-        src.connect(panner).connect(audioCtx.destination)
-      }
-    } catch {
-      // Fallback: manual volume attenuation if WebAudio spatial fails
-      const camPos = new THREE.Vector3().setFromMatrixPosition(core.camera.matrixWorld)
-      const dist = sourcePos.distanceTo(camPos)
-      const norm = dist / Math.max(1, maxDistance)
-      const atten = 1 / (1 + norm * norm * 2.5)
-      layer.volume = Math.max(0.045, Math.min(1, finalBaseVolume * atten))
-    }
-  }
-
-  void layer.play()
-}
-
 window.addEventListener('mousedown', (e) => {
   if (e.button === 0) isLeftMouseDown = true
   if (e.button === 2) isRightMouseDown = true
@@ -1925,24 +1953,6 @@ function slotFromWeaponName(name: string): number {
   return 0
 }
 
-function updateHeartbeatByHealth(health: number, maxHealth: number) {
-  if (isDead) {
-    heartbeatSfx.volume = 0
-    return
-  }
-  const hp01 = Math.max(0, Math.min(1, health / Math.max(1, maxHealth)))
-  const low = 1 - hp01
-  if (low < 0.25) {
-    heartbeatSfx.volume = 0
-    return
-  }
-  const t = (low - 0.25) / 0.75
-  const master = settingsUI.volumes.master
-  heartbeatSfx.volume = Math.max(0, Math.min(1, (0.1 + t * 0.55) * master))
-  heartbeatSfx.playbackRate = 1 + t * 0.55
-  if (heartbeatSfx.paused) void heartbeatSfx.play()
-}
-
 function shoot() {
   if (isDead) return
   if (matchEndedFreeze) return
@@ -1963,11 +1973,11 @@ function shoot() {
     playerModel.anims.triggerFire(cfg.fireRate)
   }
   if (slot === SHOTGUN_SLOT) {
-    playSfx(shotgunSfx, 1.0, 'gun', true)
+    playSfx('shotgun', 1.0, 'gun', true)
     multiplayer.sendSound('shotgun', player.playerGroup.position, 1)
   }
   if (slot === AK_SLOT) {
-    playSfx(akSfx, 1.0, 'gun', true)
+    playSfx('ak', 1.0, 'gun', true)
     multiplayer.sendSound('ak', player.playerGroup.position, 1)
   }
 
@@ -2016,7 +2026,7 @@ function shoot() {
     }
     const targets = targetPlayers.getRaycastTargets()
     const netTargets = multiplayer.getRaycastTargets()
-    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets())
+    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
 
     if (h) {
       if (h.object === mesh || !h.object.userData.networkPlayerId) {
@@ -2034,7 +2044,7 @@ function shoot() {
           }
 
           if (!playedImpactThisShot) {
-            playSfx(impactSfx, 1.0, 'impact', true)
+            playSfx('impact', 1.0, 'impact', true)
             playedImpactThisShot = true
           }
           blood.spawn(h.point, hitDir, 4)
@@ -2066,7 +2076,7 @@ function shoot() {
         const hitDir = _v1.copy(_shotDir).negate().normalize()
 
         if (!playedImpactThisShot) {
-          playSfx(impactSfx, 1.0, 'impact', true)
+          playSfx('impact', 1.0, 'impact', true)
           playedImpactThisShot = true
         }
 
@@ -2178,7 +2188,7 @@ function updateCrosshairEnemyHover() {
   core.camera.getWorldDirection(muzzleDir)
   const targets = targetPlayers.getRaycastTargets()
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
   if (!h) {
     crosshair.setEnemyHover(false)
     return
@@ -2262,6 +2272,10 @@ window.game = {
     const n = AnimationManager.dumpAllMixersToConsole()
     return `Dumped ${n} AnimationManager(s) to console`
   },
+  setBarrierScale(s: number) {
+    barriers.updateScales(s)
+    return `Barrier scale set to ${s}`
+  },
   updateLeaderboard(data: LeaderboardEntry[], myRank?: LeaderboardEntry) {
     leaderboardUI.update(data, myRank)
     return 'Leaderboard updated'
@@ -2320,6 +2334,36 @@ const timer = new THREE.Timer()
 function animate() {
   requestAnimationFrame(animate)
 
+  input.update()
+  if (input.gamepadConnected) {
+    isLeftMouseDownOnGamepad = input.isGamepadButtonPressed(7) || input.isGamepadButtonPressed(5) // RT or RB
+    isRightMouseDownOnGamepad = input.isGamepadButtonPressed(6) || input.isGamepadButtonPressed(4) // LT or LB
+
+    // Handle Switch Weapon with Gamepad (Y/Triangle to cycle or D-pad)
+    if (input.isGamepadButtonPressed(3) && !wasGamepadButton3DownLastFrame) { // Y or Triangle
+      const current = heldWeapons.getActiveSlot()
+      const next = (current + 1) % 3
+      heldWeapons.setActiveSlot(next)
+    }
+    wasGamepadButton3DownLastFrame = input.isGamepadButtonPressed(3)
+
+    if (input.isGamepadButtonPressed(12)) { // D-pad Up -> AK
+      heldWeapons.setActiveSlot(AK_SLOT)
+    } else if (input.isGamepadButtonPressed(13)) { // D-pad Down -> Grenade
+      heldWeapons.setActiveSlot(GRENADE_SLOT)
+    } else if (input.isGamepadButtonPressed(14)) { // D-pad Left -> AK
+      heldWeapons.setActiveSlot(AK_SLOT)
+    } else if (input.isGamepadButtonPressed(15)) { // D-pad Right -> Shotgun
+      heldWeapons.setActiveSlot(SHOTGUN_SLOT)
+    }
+  } else {
+    isLeftMouseDownOnGamepad = false
+    isRightMouseDownOnGamepad = false
+  }
+
+  const effectiveLeftDown = isLeftMouseDown || isLeftMouseDownOnGamepad
+  const effectiveRightDown = isRightMouseDown || isRightMouseDownOnGamepad
+
   let lastFrameDt = 0
   if (!isFrozen) {
     timer.update()
@@ -2333,6 +2377,28 @@ function animate() {
     const time = performance.now() / 1000
     const currentTime = performance.now()
     simFrame++
+
+    updateAudioListener()
+    updateHeartbeatByHealth(player.state.health, player.state.maxHealth)
+
+    // Gamepad Look (Right Stick)
+    if (input.gamepadConnected && player.controls.isLocked) {
+      const lookX = input.getGamepadAxis(2)
+      const lookY = input.getGamepadAxis(3)
+      if (Math.abs(lookX) > 0.05 || Math.abs(lookY) > 0.05) {
+        const sensitivity = input.lookSensitivity * dt * 50
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ')
+        euler.setFromQuaternion(core.camera.quaternion)
+        euler.y -= lookX * sensitivity * 0.035
+        euler.x -= lookY * sensitivity * 0.035
+        
+        // Clamp pitch to prevent flipping
+        const PI_2 = Math.PI / 2 - 0.01
+        euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x))
+        
+        core.camera.quaternion.setFromEuler(euler)
+      }
+    }
 
     if (atMainMenu) {
       leaderboardUI.setVisible(false)
@@ -2434,6 +2500,39 @@ function animate() {
       return
     }
 
+    if (playTransitionPending) {
+      advancePlayTransition()
+      grass.update(time)
+      trees.update(time)
+      if (trainPhaseSynced) {
+        const speed = 1.0
+        const elapsed = (Date.now() - localSyncTimeForTrain) / 1000
+        const currentPhase = initialTrainPhaseForTrain - elapsed * speed
+        trainTrack.update(dt, currentPhase)
+      } else {
+        trainTrack.update(dt)
+      }
+      updateTrainSpatialAudio()
+      multiplayer.update(
+        dt,
+        player.playerGroup.position,
+        player.playerGroup.quaternion,
+        0,
+        0,
+        myUsername,
+        myBotKills + myPvpKills,
+        'idle',
+        heldWeapons.getActiveSlot(),
+        true,
+        false
+      )
+      settingsUI.update(input, false)
+      fpsCounter.update()
+      core.render()
+      matchEndShowcase.update(lastFrameDt, matchEndedFreeze && !atMainMenu && !isFrozen)
+      return
+    }
+
     grass.update(time)
     trees.update(time)
     
@@ -2531,14 +2630,14 @@ function animate() {
       const activeSlot = heldWeapons.getActiveSlot()
       const isGrenade = activeSlot === GRENADE_SLOT
 
-      const canAim = player.controls.isLocked && isRightMouseDown && !isGrenade
+      const canAim = player.controls.isLocked && effectiveRightDown && !isGrenade
       player.state.isAiming = canAim
       heldWeapons.setAiming(canAim)
 
       // GRENADE CHARGE ON LEFT CLICK
       if (isGrenade && player.controls.isLocked) {
         const hasAmmo = ammoSystem.canSpend(activeSlot)
-        if (isLeftMouseDown && hasAmmo) {
+        if (effectiveLeftDown && hasAmmo) {
           grenadeCharge = Math.min(1.0, grenadeCharge + dt * 1.5)
           player.state.shakeIntensity = Math.max(player.state.shakeIntensity, grenadeCharge * 0.12)
         } else if (wasLeftMouseDownLastFrame) {
@@ -2676,6 +2775,25 @@ function animate() {
         }
       }
 
+      // Prevent phasing through barriers
+      const barrierBodies = barriers.getCollisionBodies()
+      for (let i = 0; i < barrierBodies.length; i++) {
+        const b = barrierBodies[i]!
+        _colDelta.copy(myPos).sub(b.position)
+        const distSq = _colDelta.lengthSq()
+        if (distSq < 1e-8) continue
+        const minDist = myRadius + b.radius
+        if (distSq >= minDist * minDist) continue
+        const dist = Math.sqrt(distSq)
+        const push = minDist - dist + 1e-4
+        _colDelta.multiplyScalar(1 / dist)
+        myPos.addScaledVector(_colDelta, push)
+        const into = player.state.velocity.dot(_colDelta)
+        if (into < 0) {
+          player.state.velocity.addScaledVector(_colDelta, -into)
+        }
+      }
+
       const isProtected = localSpawnDamageInvulnerable()
       if (!atMainMenu && !isProtected) {
         const nowTrainHit = performance.now()
@@ -2684,7 +2802,7 @@ function animate() {
             lastTrainPlayerHitMs = nowTrainHit
             _trainHitAway.normalize()
             player.inflictDamage(TRAIN_PLAYER_HIT_DAMAGE, _trainHitAway)
-            playSfx(impactSfx, 1.0, 'impact')
+            playSfx('impact', 1.0, 'impact', true)
             if (player.state.health <= 0) {
               handleLocalDeathFromTrain(_trainHitAway)
             } else {
@@ -2707,7 +2825,7 @@ function animate() {
             lastTrainBotHitMs[i] = now
             _trainHitAway.normalize()
             targetPlayers.inflictDirectDamage(i, TRAIN_PLAYER_HIT_DAMAGE, _tmpKb.copy(_trainHitAway).multiplyScalar(TRAIN_PLAYER_HIT_KNOCKBACK))
-            playSfx(impactSfx, 1.0, 'impact')
+            playSfx('impact', 1.0, 'impact', true)
           }
         }
       }
@@ -2761,7 +2879,7 @@ function animate() {
     }
     damageTexts.update(dt, core.camera)
 
-    if (!isDead && isLeftMouseDown && player.controls.isLocked) {
+    if (!isDead && effectiveLeftDown && player.controls.isLocked) {
       const activeSlotForShooting = heldWeapons.getActiveSlot()
       const cfg = heldWeapons.currentConfig
       if (cfg && activeSlotForShooting !== GRENADE_SLOT) {
@@ -2770,7 +2888,7 @@ function animate() {
         }
       }
     }
-    wasLeftMouseDownLastFrame = isLeftMouseDown
+    wasLeftMouseDownLastFrame = effectiveLeftDown
 
     const vDown = input.isKeyDown('KeyV')
     if (!isDead && !matchEndedFreeze && vDown && !viewToggleKeyWasDown) {
@@ -2879,11 +2997,13 @@ function animate() {
     }
 
     settingsUI.update(input, isDead || matchEndedFreeze)
-    if (settingsWasOpenLastFrame && !settingsUI.isOpen && !atMainMenu && !isDead && !matchEndedFreeze) {
+    if (settingsWasOpenLastFrame && !settingsUI.isOpen) {
       input.isSimulatedUnlocked = false
-      player.setPointerLockAllowed(true)
-      input.centerVirtualMouse()
-      tryAutoLockCursor()
+      if (!atMainMenu && !isDead && !matchEndedFreeze) {
+        player.setPointerLockAllowed(true)
+        input.centerVirtualMouse()
+        tryAutoLockCursor()
+      }
     }
     settingsWasOpenLastFrame = settingsUI.isOpen
     fpsCounter.update()
@@ -2967,7 +3087,7 @@ function animate() {
         reloadStartedAt = performance.now()
       }
       if (s < 3 && s !== GRENADE_SLOT && isReloading) {
-        playSfx(reloadSfx, 1.0, 'ui', true)
+        playSfx('reload', 1.0, 'ui', true)
         multiplayer.sendSound('reload', player.playerGroup.position, 1)
       }
     }

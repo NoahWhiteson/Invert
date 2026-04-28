@@ -4,6 +4,15 @@ export class InputManager {
   public virtualMousePos: { x: number, y: number } = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   private _wheelDelta: number = 0
 
+  // Gamepad state
+  public gamepadConnected: boolean = false
+  public gamepadAxes: number[] = []
+  public gamepadButtons: { pressed: boolean }[] = []
+  private deadzone: number = 0.2
+
+  // Look sensitivity for controller
+  public lookSensitivity: number = 2.5
+
   constructor() {
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true
@@ -52,6 +61,40 @@ export class InputManager {
     window.addEventListener('contextmenu', (e) => {
       if (document.pointerLockElement) e.preventDefault()
     })
+
+    window.addEventListener('gamepadconnected', () => {
+      this.gamepadConnected = true
+    })
+
+    window.addEventListener('gamepaddisconnected', () => {
+      const pads = navigator.getGamepads()
+      this.gamepadConnected = pads.some(p => p !== null)
+    })
+  }
+
+  public update() {
+    const pads = navigator.getGamepads()
+    const pad = pads[0] // Primary gamepad
+
+    if (pad) {
+      this.gamepadConnected = true
+      this.gamepadAxes = [...pad.axes]
+      this.gamepadButtons = pad.buttons.map(b => ({ pressed: b.pressed }))
+    } else {
+      this.gamepadConnected = false
+    }
+  }
+
+  public getGamepadAxis(index: number): number {
+    if (!this.gamepadConnected || index >= this.gamepadAxes.length) return 0
+    const val = this.gamepadAxes[index]
+    if (Math.abs(val) < this.deadzone) return 0
+    return val
+  }
+
+  public isGamepadButtonPressed(index: number): boolean {
+    if (!this.gamepadConnected || index >= this.gamepadButtons.length) return false
+    return this.gamepadButtons[index].pressed
   }
 
   public centerVirtualMouse() {
@@ -60,7 +103,29 @@ export class InputManager {
   }
 
   public isKeyDown(code: string): boolean {
-    return this.keys[code] || false
+    // Map keyboard and common gamepad controls
+    if (this.keys[code]) return true
+
+    if (this.gamepadConnected) {
+      // Standard Mapping (Xbox/PlayStation)
+      switch (code) {
+        case 'KeyW': return this.getGamepadAxis(1) < -this.deadzone
+        case 'KeyS': return this.getGamepadAxis(1) > this.deadzone
+        case 'KeyA': return this.getGamepadAxis(0) < -this.deadzone
+        case 'KeyD': return this.getGamepadAxis(0) > this.deadzone
+        case 'Space': return this.isGamepadButtonPressed(0) // A or Cross
+        case 'ShiftLeft': return this.isGamepadButtonPressed(10) // Left Stick Click
+        case 'ControlLeft':
+        case 'KeyC': return this.isGamepadButtonPressed(1) // B or Circle
+        case 'KeyR': return this.isGamepadButtonPressed(2) // X or Square
+        case 'Digit1': return this.isGamepadButtonPressed(12) // D-pad Up
+        case 'Digit2': return this.isGamepadButtonPressed(13) // D-pad Down
+        case 'Digit3': return this.isGamepadButtonPressed(14) // D-pad Left
+        case 'KeyV': return this.isGamepadButtonPressed(9) // Start/Options for view toggle
+      }
+    }
+
+    return false
   }
 
   public getKeys() {
