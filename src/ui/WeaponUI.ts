@@ -2,8 +2,10 @@ export class WeaponUI {
   private container: HTMLDivElement
   private slots: HTMLDivElement[] = []
   private activeIndex: number = -1
+  private onSlotSelect?: (index: number) => void
 
-  constructor() {
+  constructor(onSlotSelect?: (index: number) => void) {
+    this.onSlotSelect = onSlotSelect
     this.container = document.createElement('div')
     this.container.style.position = 'absolute'
     this.container.style.bottom = '65px'
@@ -11,8 +13,10 @@ export class WeaponUI {
     this.container.style.transform = 'translateX(-50%)'
     this.container.style.display = 'flex'
     this.container.style.gap = '10px'
-    this.container.style.zIndex = '100'
+    this.container.style.zIndex = '1400'
     this.container.style.transition = 'opacity 220ms ease'
+    this.container.style.pointerEvents = 'auto'
+    this.container.style.touchAction = 'none'
     document.body.appendChild(this.container)
 
     const icons = [
@@ -32,6 +36,9 @@ export class WeaponUI {
       slot.style.imageRendering = 'pixelated'
       slot.style.transition = 'all 0.1s ease-out'
       slot.style.position = 'relative'
+      slot.style.pointerEvents = 'auto'
+      slot.style.touchAction = 'none'
+      slot.style.cursor = 'none'
 
       const icon = document.createElement('div')
       icon.style.position = 'absolute'
@@ -50,6 +57,11 @@ export class WeaponUI {
       icon.style.filter = 'brightness(1.8) contrast(1.1)' 
       icon.style.transform = 'translate(-50%, -50%) rotate(-15deg)'
       slot.appendChild(icon)
+      slot.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.onSlotSelect?.(i)
+      })
 
       this.container.appendChild(slot)
       this.slots.push(slot)

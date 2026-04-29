@@ -35,6 +35,7 @@ import { MainMenuDevblogUI } from './ui/MainMenuDevblogUI'
 import { MainMenuNameInputUI } from './ui/MainMenuNameInputUI'
 import { MainMenuSkinsUI } from './ui/MainMenuSkinsUI'
 import { MainMenuStoreUI } from './ui/MainMenuStoreUI'
+import { MobileControlsUI } from './ui/MobileControlsUI'
 import { loadProfanityList, textContainsProfanity, isProfanityListReady } from './utils/profanityFilter'
 import type { AkGunSkinId } from './store/skinEconomy'
 import {
@@ -113,13 +114,6 @@ const COINS_PER_KILL = 10
 
 function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
-}
-
-function rewardAmmoOnKill() {
-  // AK: 10, Shotgun: 4, Grenade: 1
-  ammoSystem.addAmmo(AK_SLOT, 10)
-  ammoSystem.addAmmo(SHOTGUN_SLOT, 4)
-  ammoSystem.addAmmo(GRENADE_SLOT, 1)
 }
 
 const core = new SceneSetup()
@@ -246,6 +240,7 @@ function returnToMainMenu() {
   crosshair.setVisible(false)
   coinsHUD.setPlayMode(false)
   staminaUI.setSuppressForMenu(true)
+  mobileControlsUI.setVisible(false)
   
   // Reset player state
   player.state.health = 100
@@ -496,6 +491,7 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   for (let s = 0; s < 3; s++) {
     heldWeapons.setModelVisibility(s, true)
   }
+  mobileControlsUI.setVisible(true)
 }
 
 function onDeathScreenConfirmRespawn() {
@@ -536,6 +532,7 @@ function handleLocalDeathFromBot(botIndex: number) {
 
   player.setPointerLockAllowed(false)
   player.controls.unlock()
+  mobileControlsUI.setVisible(false)
   crosshair.setVisible(false)
   healthUI.setOpacity(0)
   ammoUI.setOpacity(0)
@@ -569,6 +566,7 @@ function handleLocalDeathFromEnvironment(
 
   player.setPointerLockAllowed(false)
   player.controls.unlock()
+  mobileControlsUI.setVisible(false)
   crosshair.setVisible(false)
   healthUI.setOpacity(0)
   ammoUI.setOpacity(0)
@@ -847,6 +845,7 @@ void Promise.all([
 
       player.setPointerLockAllowed(false)
       player.controls.unlock()
+      mobileControlsUI.setVisible(false)
       crosshair.setVisible(false)
       healthUI.setOpacity(0)
       ammoUI.setOpacity(0)
@@ -856,7 +855,6 @@ void Promise.all([
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
-      rewardAmmoOnKill()
       if (typeof killerKills === 'number') {
         myPvpKills = killerKills
       } else {
@@ -939,6 +937,7 @@ const fpsCounter = new FPSCounterUI()
 const ammoUI = new AmmoUI()
 const ammoSystem = new AmmoSystem(DEFAULT_WEAPON_AMMO_SPECS)
 const settingsUI = new SettingsUI(crosshair)
+const mobileControlsUI = new MobileControlsUI(input)
 settingsUI.onGraphicsChange = (key, on) => {
   if (key === 'grass') grass.setVisible(on)
   if (key === 'blood') blood.setVisible(on)
@@ -948,7 +947,15 @@ settingsUI.syncSystems()
 const healthUI = new HealthUI()
 const coinsHUD = new CoinsHUDUI()
 const damageIndicator = new DamageIndicator()
-const weaponUI = new WeaponUI()
+const weaponUI = new WeaponUI((slot) => {
+  if (atMainMenu || isDead || matchEndedFreeze) return
+  weaponUI.updateActiveSlot(slot)
+  heldWeapons.setActiveSlot(slot)
+  if (slot === GRENADE_SLOT) {
+    const st = ammoSystem.getState(GRENADE_SLOT)
+    heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
+  }
+})
 const killFeed = new KillFeedUI()
 const roomIdUI = new RoomIDUI()
 
@@ -1071,7 +1078,6 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 
         if (res.killed) {
           awardKillCoins()
-          rewardAmmoOnKill()
           discoveredPlayers.add(`bot_${idx}`)
           // stats will be synced via player_killed message from server
           updateLeaderboard()
@@ -1272,9 +1278,10 @@ async function beginPlayFromMenu() {
   localSpawnInvulnUntilMs = performance.now() + LOCAL_SPAWN_DAMAGE_INVULN_MS
   ammoSystem.refillAllToStarting()
   for (let s = 0; s < 3; s++) {
-    heldWeapons.setModelVisibility(s, true)
+  heldWeapons.setModelVisibility(s, true)
   }
   isPlayTransitioning = false
+  mobileControlsUI.setVisible(true)
 }
 
 mainMenuPlayUI = new MainMenuPlayUI(settingsUI)
@@ -1313,7 +1320,6 @@ mainMenuSkinsUI = new MainMenuSkinsUI(settingsUI, {
   },
 })
 mainMenuStoreUI = new MainMenuStoreUI(settingsUI, {
-  onPurchased: () => mainMenuSkinsUI.refresh(),
   onSkinSwatchPreview: (skin) => {
     if (skin === 'default') applyDefaultAkGunLook()
     else applyAkGunSkin(skin)
@@ -2054,7 +2060,6 @@ function shoot() {
 
           if (damageRes.killed) {
             awardKillCoins()
-            rewardAmmoOnKill()
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
             // stats will be synced via player_killed message from server
             updateLeaderboard()
@@ -2220,6 +2225,14 @@ function tryAutoLockCursor() {
   }
 }
 
+function printUndersphereConsoleMessage() {
+  console.log(
+    '%cUndersphere — Message%c\n\nHey. Thanks for opening the console — and for playing.\n\nEvery player who boots this shell matters; hope the sphere treats you well.\nIf something glitches, a refresh usually snaps things back.\nSee you out there.',
+    'font:bold 14px system-ui,-apple-system,sans-serif;color:#e8e8e8;',
+    'font:12px system-ui,-apple-system,sans-serif;line-height:1.55;color:#a8a8a8;'
+  )
+}
+
 window.game = {
   /** Same object as `TRAIN_TRACK_PIECE_ROTATION` — tweak `.x/.y/.z` in **degrees** then `refreshTrainTrack()`. */
   trainTrackRotation: TRAIN_TRACK_PIECE_ROTATION,
@@ -2259,18 +2272,6 @@ window.game = {
   debugTargets(on: boolean) {
     targetPlayers.setDebug(on)
     return `Target debug ${on ? 'ON' : 'OFF'}`
-  },
-  /** Console: `[tpose-debug]` when mixer total weight drops (throttled per character). */
-  tposeDebug(on: boolean) {
-    AnimationManager.setTposeDebug(on)
-    return `T-pose debug ${on ? 'ON' : 'OFF'}`
-  },
-  animDebugLocal() {
-    return null
-  },
-  animDebugDump() {
-    const n = AnimationManager.dumpAllMixersToConsole()
-    return `Dumped ${n} AnimationManager(s) to console`
   },
   setBarrierScale(s: number) {
     barriers.updateScales(s)
@@ -2312,19 +2313,7 @@ window.game = {
   },
 }
 
-try {
-  const q =
-    typeof location !== 'undefined' && typeof URLSearchParams !== 'undefined'
-      ? new URLSearchParams(location.search)
-      : null
-  if (import.meta.env.DEV || (q && q.has('debugAnim'))) {
-    queueMicrotask(() => {
-      AnimationManager.setTposeDebug(true)
-    })
-  }
-} catch {
-  /* ignore */
-}
+printUndersphereConsoleMessage()
 
 let viewToggleKeyWasDown = false
 let reloadKeyWasDown = false
@@ -2361,8 +2350,9 @@ function animate() {
     isRightMouseDownOnGamepad = false
   }
 
-  const effectiveLeftDown = isLeftMouseDown || isLeftMouseDownOnGamepad
+  const effectiveLeftDown = isLeftMouseDown || isLeftMouseDownOnGamepad || input.isKeyDown('MouseLeft')
   const effectiveRightDown = isRightMouseDown || isRightMouseDownOnGamepad
+  const controlsActive = player.controls.isLocked || input.isMobileControlsActive()
 
   let lastFrameDt = 0
   if (!isFrozen) {
@@ -2381,8 +2371,19 @@ function animate() {
     updateAudioListener()
     updateHeartbeatByHealth(player.state.health, player.state.maxHealth)
 
+    const mobileLook = input.consumeVirtualLookDelta()
+    if (controlsActive && (mobileLook.x !== 0 || mobileLook.y !== 0)) {
+      const euler = new THREE.Euler(0, 0, 0, 'YXZ')
+      euler.setFromQuaternion(core.camera.quaternion)
+      euler.y -= mobileLook.x * 0.0032
+      euler.x -= mobileLook.y * 0.0032
+      const PI_2 = Math.PI / 2 - 0.01
+      euler.x = Math.max(-PI_2, Math.min(PI_2, euler.x))
+      core.camera.quaternion.setFromEuler(euler)
+    }
+
     // Gamepad Look (Right Stick)
-    if (input.gamepadConnected && player.controls.isLocked) {
+    if (input.gamepadConnected && controlsActive) {
       const lookX = input.getGamepadAxis(2)
       const lookY = input.getGamepadAxis(3)
       if (Math.abs(lookX) > 0.05 || Math.abs(lookY) > 0.05) {
@@ -2486,6 +2487,7 @@ function animate() {
         grenadeSystem.setModel(heldWeapons.getWeaponModel(GRENADE_SLOT)!)
       }
 
+      settingsUI.setTopRightButtonSuppressed(true)
       settingsUI.update(input, false)
       fpsCounter.update()
 
@@ -2526,6 +2528,7 @@ function animate() {
         true,
         false
       )
+      settingsUI.setTopRightButtonSuppressed(true)
       settingsUI.update(input, false)
       fpsCounter.update()
       core.render()
@@ -2533,6 +2536,7 @@ function animate() {
       return
     }
 
+    settingsUI.setTopRightButtonSuppressed(false)
     grass.update(time)
     trees.update(time)
     
@@ -2627,15 +2631,16 @@ function animate() {
     }
 
     if (!isDead && !matchEndedFreeze) {
+      if (settingsUI.isOpen) input.isSimulatedUnlocked = true
       const activeSlot = heldWeapons.getActiveSlot()
       const isGrenade = activeSlot === GRENADE_SLOT
 
-      const canAim = player.controls.isLocked && effectiveRightDown && !isGrenade
+      const canAim = controlsActive && effectiveRightDown && !isGrenade
       player.state.isAiming = canAim
       heldWeapons.setAiming(canAim)
 
       // GRENADE CHARGE ON LEFT CLICK
-      if (isGrenade && player.controls.isLocked) {
+      if (isGrenade && controlsActive) {
         const hasAmmo = ammoSystem.canSpend(activeSlot)
         if (effectiveLeftDown && hasAmmo) {
           grenadeCharge = Math.min(1.0, grenadeCharge + dt * 1.5)
@@ -2879,7 +2884,7 @@ function animate() {
     }
     damageTexts.update(dt, core.camera)
 
-    if (!isDead && effectiveLeftDown && player.controls.isLocked) {
+    if (!isDead && effectiveLeftDown && controlsActive) {
       const activeSlotForShooting = heldWeapons.getActiveSlot()
       const cfg = heldWeapons.currentConfig
       if (cfg && activeSlotForShooting !== GRENADE_SLOT) {
@@ -3016,7 +3021,6 @@ function animate() {
       const isActiveReload = isReloading && reloadSlot === slot
       ammoUI.update(
         st?.mag ?? 0,
-        st?.reserve ?? 0,
         st?.maxMag ?? 0,
         slot < 3 && st !== null,
         isActiveReload,
@@ -3079,7 +3083,7 @@ function animate() {
     }
 
     const reloadDown = input.isKeyDown('KeyR')
-    if (!isDead && !matchEndedFreeze && reloadDown && !reloadKeyWasDown && player.controls.isLocked && !isReloading) {
+    if (!isDead && !matchEndedFreeze && reloadDown && !reloadKeyWasDown && controlsActive && !isReloading) {
       const s = heldWeapons.getActiveSlot()
       if (s < 3 && ammoSystem.canReload(s)) {
         isReloading = true
@@ -3143,7 +3147,6 @@ function animate() {
     const isActiveReload = isReloading && reloadSlot === slot
     ammoUI.update(
       st?.mag ?? 0,
-      st?.reserve ?? 0,
       st?.maxMag ?? 0,
       slot < 3 && st !== null,
       isActiveReload,

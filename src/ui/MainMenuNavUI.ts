@@ -1,5 +1,6 @@
 import { ringTextShadow } from './textOutline'
 import { SettingsUI } from './SettingsUI'
+import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 
 /** Fixed slot + 4-way cardinal drop-shadow so mixed PNG canvas sizes read the same and pop on bright BG. */
 const ICON_SLOT_PX = 52
@@ -25,6 +26,8 @@ export type MainMenuNavHandlers = {
 export class MainMenuNavUI {
   private wrap: HTMLDivElement
   private readonly buttons: HTMLButtonElement[] = []
+  private readonly iconBasePx: number[] = []
+  private readonly navRow: HTMLDivElement
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private titleElement: HTMLDivElement
   private settingsUI: SettingsUI
@@ -34,11 +37,16 @@ export class MainMenuNavUI {
     this.wrap = document.createElement('div')
     this.wrap.style.position = 'fixed'
     this.wrap.style.top = '20px'
-    this.wrap.style.left = '20px'
-    this.wrap.style.right = '20px'
+    this.wrap.style.left = '12px'
+    this.wrap.style.right = '12px'
+    this.wrap.style.boxSizing = 'border-box'
+    this.wrap.style.paddingLeft = 'env(safe-area-inset-left, 0px)'
+    this.wrap.style.paddingRight = 'env(safe-area-inset-right, 0px)'
+    this.wrap.style.paddingTop = 'env(safe-area-inset-top, 0px)'
     this.wrap.style.display = 'none'
-    this.wrap.style.justifyContent = 'center' // Center the tabs
-    this.wrap.style.alignItems = 'center'
+    this.wrap.style.flexDirection = 'column'
+    this.wrap.style.justifyContent = 'flex-start'
+    this.wrap.style.alignItems = 'stretch'
     this.wrap.style.zIndex = '1200'
     this.wrap.style.pointerEvents = 'none'
 
@@ -52,13 +60,13 @@ export class MainMenuNavUI {
     this.titleElement.style.textShadow = ringTextShadow(NAV_LABEL_OUTLINE_R)
     this.wrap.appendChild(this.titleElement)
 
-    const row = document.createElement('div')
-    row.style.display = 'flex'
-    row.style.flexWrap = 'wrap'
-    row.style.justifyContent = 'center'
-    row.style.alignItems = 'center'
-    row.style.gap = '28px'
-    row.style.pointerEvents = 'none'
+    this.navRow = document.createElement('div')
+    this.navRow.style.display = 'flex'
+    this.navRow.style.flexWrap = 'wrap'
+    this.navRow.style.justifyContent = 'center'
+    this.navRow.style.alignItems = 'center'
+    this.navRow.style.gap = '28px'
+    this.navRow.style.pointerEvents = 'none'
 
     const items: {
       label: string
@@ -146,6 +154,7 @@ export class MainMenuNavUI {
       iconSlot.appendChild(img)
 
       const span = document.createElement('span')
+      span.className = 'main-menu-nav-label'
       span.textContent = label
       span.style.fontFamily = "'m6x11', monospace"
       span.style.fontStyle = 'normal'
@@ -174,11 +183,86 @@ export class MainMenuNavUI {
       })
 
       this.buttons.push(btn)
-      row.appendChild(btn)
+      this.iconBasePx.push(iconSlotPx)
+      this.navRow.appendChild(btn)
     }
 
-    this.wrap.appendChild(row)
+    this.wrap.appendChild(this.navRow)
     document.body.appendChild(this.wrap)
+
+    this.applyResponsiveLayout()
+    onMainMenuLayoutChange(() => this.applyResponsiveLayout())
+  }
+
+  private applyResponsiveLayout() {
+    const m = isMainMenuMobileWidth()
+    const vw = window.visualViewport?.width ?? window.innerWidth
+    const compact = m && vw <= 520
+    const padTop = m ? 'max(10px, env(safe-area-inset-top, 0px))' : '20px'
+    this.wrap.style.top = padTop
+    this.wrap.style.flexDirection = m ? 'column' : 'row'
+    this.wrap.style.justifyContent = m ? 'flex-start' : 'center'
+    this.wrap.style.alignItems = m ? 'stretch' : 'center'
+
+    if (m) {
+      this.wrap.style.flexDirection = 'column'
+      this.wrap.style.justifyContent = 'flex-start'
+      this.wrap.style.alignItems = 'stretch'
+      this.titleElement.style.position = 'fixed'
+      this.titleElement.style.bottom = 'max(58px, calc(56px + env(safe-area-inset-bottom, 0px)))'
+      this.titleElement.style.left = '50%'
+      this.titleElement.style.top = 'auto'
+      this.titleElement.style.right = 'auto'
+      this.titleElement.style.transform = 'translateX(-50%)'
+      this.titleElement.style.width = 'auto'
+      this.titleElement.style.maxWidth = 'min(340px, 94vw)'
+      this.titleElement.style.textAlign = 'center'
+      this.titleElement.style.marginBottom = '0'
+      this.titleElement.style.fontSize = 'clamp(20px, 5.2vw, 30px)'
+      this.titleElement.style.zIndex = '1300'
+      this.titleElement.style.pointerEvents = 'none'
+      this.navRow.style.gap = compact ? '10px' : '8px'
+      this.navRow.style.justifyContent = 'center'
+      this.navRow.style.paddingBottom = '4px'
+    } else {
+      this.wrap.style.flexDirection = 'row'
+      this.titleElement.style.position = 'absolute'
+      this.titleElement.style.bottom = ''
+      this.titleElement.style.left = '30px'
+      this.titleElement.style.top = ''
+      this.titleElement.style.right = ''
+      this.titleElement.style.transform = ''
+      this.titleElement.style.width = 'auto'
+      this.titleElement.style.maxWidth = ''
+      this.titleElement.style.textAlign = 'left'
+      this.titleElement.style.marginBottom = '0'
+      this.titleElement.style.fontSize = `${NAV_LABEL_FONT_PX}px`
+      this.titleElement.style.zIndex = ''
+      this.titleElement.style.pointerEvents = ''
+      this.navRow.style.gap = '28px'
+      this.navRow.style.paddingBottom = '0'
+    }
+
+    const labelPx = m ? 17 : NAV_LABEL_FONT_PX
+    const scale = m ? (compact ? 0.56 : 0.62) : 1
+
+    for (let i = 0; i < this.buttons.length; i++) {
+      const btn = this.buttons[i]
+      const span = btn.querySelector('.main-menu-nav-label') as HTMLSpanElement | null
+      const slot = btn.firstElementChild as HTMLDivElement | null
+      if (span) {
+        span.style.display = compact ? 'none' : ''
+        span.style.fontSize = `${labelPx}px`
+      }
+      const base = this.iconBasePx[i] ?? ICON_SLOT_PX
+      const px = Math.max(22, Math.round(base * scale))
+      if (slot) {
+        slot.style.width = `${px}px`
+        slot.style.height = `${px}px`
+      }
+      btn.style.padding = m ? (compact ? '4px 5px' : '4px 2px') : '6px 4px'
+      btn.style.gap = compact ? '0' : '10px'
+    }
   }
 
   public getButtons(): HTMLButtonElement[] {
@@ -187,7 +271,10 @@ export class MainMenuNavUI {
 
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'flex' : 'none'
-    if (visible) this.wrap.style.opacity = '1'
+    if (visible) {
+      this.wrap.style.opacity = '1'
+      this.applyResponsiveLayout()
+    }
   }
 
   public setOpacity(alpha: number) {

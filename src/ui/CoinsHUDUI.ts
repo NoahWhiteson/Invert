@@ -1,5 +1,6 @@
 import { COINS_CHANGED_EVENT, getCoins } from '../store/skinEconomy'
 import { ringTextShadow } from './textOutline'
+import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 
 const COIN_ICON = new URL('../assets/icons/coin.png', import.meta.url).href
 
@@ -14,6 +15,7 @@ export class CoinsHUDUI {
   private rolling = false
   private rollTo = 0
   private rollToken = 0
+  private playingLayout = false
 
   private static readonly DIGIT_H = 32
   private static readonly CLIP_W = '0.58em'
@@ -78,6 +80,31 @@ export class CoinsHUDUI {
     setInterval(() => this.sync(), 33)
 
     window.addEventListener(COINS_CHANGED_EVENT, () => this.sync())
+    onMainMenuLayoutChange(() => this.applyRootPlacement())
+  }
+
+  private applyRootPlacement() {
+    if (this.playingLayout) {
+      this.root.style.left = '20px'
+      this.root.style.bottom = 'auto'
+      this.root.style.top = '224px'
+      this.root.style.right = 'auto'
+      this.root.style.transform = 'none'
+      return
+    }
+    if (isMainMenuMobileWidth()) {
+      this.root.style.left = 'auto'
+      this.root.style.right = 'max(12px, env(safe-area-inset-right, 0px))'
+      this.root.style.top = 'calc(118px + env(safe-area-inset-top, 0px))'
+      this.root.style.bottom = 'auto'
+      this.root.style.transform = 'none'
+    } else {
+      this.root.style.left = '50%'
+      this.root.style.top = 'auto'
+      this.root.style.bottom = '25vh'
+      this.root.style.right = 'auto'
+      this.root.style.transform = 'translateX(-50%)'
+    }
   }
 
   private static digitArray(n: number): number[] {
@@ -239,18 +266,8 @@ export class CoinsHUDUI {
   }
 
   public setPlayMode(playing: boolean) {
-    if (playing) {
-      this.root.style.left = '20px'
-      this.root.style.bottom = 'auto'
-      this.root.style.top = '224px'
-      this.root.style.right = 'auto'
-      this.root.style.transform = 'none'
-    } else {
-      this.root.style.left = '50%'
-      this.root.style.top = 'auto'
-      this.root.style.bottom = '25vh'
-      this.root.style.transform = 'translateX(-50%)'
-    }
+    this.playingLayout = playing
+    this.applyRootPlacement()
   }
 
   public setOpacity(alpha: number) {

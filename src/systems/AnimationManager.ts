@@ -77,35 +77,6 @@ export class AnimationManager {
   private static clipCache: Map<AnimationState, THREE.AnimationClip> = new Map()
   private static riflePoseTracks: Map<string, THREE.KeyframeTrack> = new Map()
   private static loadingPromise: Promise<void> | null = null
-  /** When true, logs torso-aim debug info. */
-  private static tposeDebug = false
-  private static rotationDebugAt = new Map<string, number>()
-
-  public static setTposeDebug(on: boolean) {
-    this.tposeDebug = on
-    if (!on) {
-      this.rotationDebugAt.clear()
-    } else {
-      console.info('[anim] Torso-aim debug ON')
-    }
-  }
-
-  public static getTposeDebug(): boolean {
-    return this.tposeDebug
-  }
-
-  private static readonly allMixers = new Set<AnimationManager>()
-
-  /** One-shot console dump of every active mixer (call from `game.animDebugDump()`). */
-  public static dumpAllMixersToConsole() {
-    const list = [...AnimationManager.allMixers]
-    console.groupCollapsed(`[anim] dump ${list.length} AnimationManager(s)`)
-    for (const m of list) {
-      console.log('—', m.debugLabel, { state: m.currentState })
-    }
-    console.groupEnd()
-    return list.length
-  }
 
   private mixer: THREE.AnimationMixer
   private actions: Map<AnimationState, THREE.AnimationAction> = new Map()
@@ -154,7 +125,6 @@ export class AnimationManager {
 
   constructor(model: THREE.Object3D) {
     this.mixer = new THREE.AnimationMixer(model)
-    AnimationManager.allMixers.add(this)
 
     /* --- ARCHIVED: Upper Body Discovery ---
     model.traverse((o) => {

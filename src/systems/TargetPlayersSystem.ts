@@ -181,13 +181,11 @@ export class TargetPlayersSystem {
       if (this.bindMinY > -0.02) this.bindMinY = -0.85
       this.bindMinY += 0.05 
 
-      console.info(`[TargetPlayersSystem] starting parallel spawn of ${this.count} bots`)
       const spawnPromises: Promise<void>[] = []
       for (let i = 0; i < this.count; i++) {
         spawnPromises.push(this.spawnTarget(i))
       }
       await Promise.all(spawnPromises)
-      console.info(`[TargetPlayersSystem] all bots spawned`)
     } catch (e) {
       console.warn('TargetPlayersSystem: failed to load target model', e)
     }

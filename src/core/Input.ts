@@ -1,8 +1,29 @@
 export class InputManager {
   private keys: { [key: string]: boolean } = {}
+  private virtualKeys: { [key: string]: boolean } = {}
   public isSimulatedUnlocked: boolean = false
-  public virtualMousePos: { x: number, y: number } = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  public virtualMousePos: { x: number; y: number } = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  private virtualLookDelta = { x: 0, y: 0 }
+  private mobileControlsActive = false
   private _wheelDelta: number = 0
+
+  private clampVirtualMouseToViewport() {
+    const w = window.visualViewport?.width ?? window.innerWidth
+    const h = window.visualViewport?.height ?? window.innerHeight
+    this.virtualMousePos.x = Math.max(0, Math.min(w, this.virtualMousePos.x))
+    this.virtualMousePos.y = Math.max(0, Math.min(h, this.virtualMousePos.y))
+  }
+
+  private syncPointerFromEvent(e: PointerEvent) {
+    if (document.pointerLockElement) {
+      this.virtualMousePos.x += e.movementX
+      this.virtualMousePos.y += e.movementY
+    } else {
+      this.virtualMousePos.x = e.clientX
+      this.virtualMousePos.y = e.clientY
+    }
+    this.clampVirtualMouseToViewport()
+  }
 
   // Gamepad state
   public gamepadConnected: boolean = false
@@ -48,15 +69,11 @@ export class InputManager {
       if (document.visibilityState === 'hidden') releaseAllKeys()
     })
     
-    window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement) {
-        this.virtualMousePos.x = Math.max(0, Math.min(window.innerWidth, this.virtualMousePos.x + e.movementX))
-        this.virtualMousePos.y = Math.max(0, Math.min(window.innerHeight, this.virtualMousePos.y + e.movementY))
-      } else {
-        this.virtualMousePos.x = e.clientX
-        this.virtualMousePos.y = e.clientY
-      }
-    })
+    window.addEventListener('pointermove', (e) => this.syncPointerFromEvent(e), { passive: true })
+
+    const onVpResize = () => this.clampVirtualMouseToViewport()
+    window.addEventListener('resize', onVpResize)
+    window.visualViewport?.addEventListener('resize', onVpResize)
 
     window.addEventListener('contextmenu', (e) => {
       if (document.pointerLockElement) e.preventDefault()
@@ -98,12 +115,15 @@ export class InputManager {
   }
 
   public centerVirtualMouse() {
-    this.virtualMousePos.x = window.innerWidth / 2
-    this.virtualMousePos.y = window.innerHeight / 2
+    const w = window.visualViewport?.width ?? window.innerWidth
+    const h = window.visualViewport?.height ?? window.innerHeight
+    this.virtualMousePos.x = w / 2
+    this.virtualMousePos.y = h / 2
   }
 
   public isKeyDown(code: string): boolean {
     // Map keyboard and common gamepad controls
+    if (this.virtualKeys[code]) return true
     if (this.keys[code]) return true
 
     if (this.gamepadConnected) {
@@ -130,6 +150,35 @@ export class InputManager {
 
   public getKeys() {
     return this.keys
+  }
+
+  public setVirtualKey(code: string, down: boolean) {
+    this.virtualKeys[code] = down
+  }
+
+  public clearVirtualKeys() {
+    for (const k of Object.keys(this.virtualKeys)) this.virtualKeys[k] = false
+  }
+
+  public addVirtualLookDelta(dx: number, dy: number) {
+    this.virtualLookDelta.x += dx
+    this.virtualLookDelta.y += dy
+  }
+
+  public consumeVirtualLookDelta(): { x: number; y: number } {
+    const d = { x: this.virtualLookDelta.x, y: this.virtualLookDelta.y }
+    this.virtualLookDelta.x = 0
+    this.virtualLookDelta.y = 0
+    return d
+  }
+
+  public setMobileControlsActive(active: boolean) {
+    this.mobileControlsActive = active
+    if (!active) this.clearVirtualKeys()
+  }
+
+  public isMobileControlsActive(): boolean {
+    return this.mobileControlsActive
   }
 
   public consumeWheelDelta(): number {

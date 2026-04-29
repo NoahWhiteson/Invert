@@ -2,6 +2,7 @@ import { InputManager } from '../core/Input'
 import { applyAccountBackupJson, API_ACCOUNT_ID_KEY, getAccountBackupJson } from '../store/skinEconomy'
 import { ECONOMY_RELOADED_EVENT, trySyncEconomyFromApi } from '../net/invertEconomySync'
 import { Crosshair } from './Crosshair'
+import { isMainMenuMobileWidth, mainMenuViewportHeightCss, onMainMenuLayoutChange } from './mainMenuLayout'
 import { ringTextShadow } from './textOutline'
 
 export type SoundType = 'master' | 'gun' | 'impact' | 'explosion' | 'ui'
@@ -32,6 +33,7 @@ export class SettingsUI {
   private ignoreDragUntilMouseUp = false
   /** Extra elements (e.g. main menu nav) that should use the click-hand cursor when hovered. */
   private extraCursorTargets: HTMLElement[] = []
+  private suppressTopRightButton = false
 
   // Slider State (FOV)
   public fovPercent: number = 0.8
@@ -364,6 +366,8 @@ export class SettingsUI {
     this.uuidBlock.appendChild(backupRow)
     document.body.appendChild(this.uuidBlock)
     this.refreshAccountUuidLabel()
+    this.applyResponsiveLayout()
+    onMainMenuLayoutChange(() => this.applyResponsiveLayout())
 
     this.load()
 
@@ -568,6 +572,93 @@ export class SettingsUI {
       `
   }
 
+  private applyResponsiveLayout() {
+    const m = isMainMenuMobileWidth()
+    const controlWidth = m ? '132px' : '170px'
+    const labelFont = m ? '22px' : '28px'
+    const sectionFont = m ? '20px' : '24px'
+    const bodyPadding = m ? '0 22px' : '0 40px'
+    const sectionPadding = m ? '22px 22px 12px 22px' : ''
+
+    if (m) {
+      this.menu.style.marginTop = '0'
+      this.menu.style.width = 'min(380px, calc(100vw - 24px))'
+      this.menu.style.height = mainMenuViewportHeightCss(208)
+      this.menu.style.maxHeight = mainMenuViewportHeightCss(208)
+      this.menu.style.borderWidth = '3px'
+      this.title.style.top = 'max(34px, calc(env(safe-area-inset-top, 0px) + 26px))'
+      this.title.style.fontSize = '44px'
+      this.title.style.letterSpacing = '1.5px'
+      this.resetBtn.style.top = 'calc(100dvh - 92px - env(safe-area-inset-bottom, 0px))'
+      this.resetBtn.style.fontSize = '25px'
+      this.uuidBlock.style.top = 'calc(100dvh - 42px - env(safe-area-inset-bottom, 0px))'
+      this.uuidBlock.style.width = 'calc(100vw - 20px)'
+      this.uuidBlock.style.gap = '3px'
+      this.uuidValueEl.style.fontSize = '12px'
+      this.copyBackupBtn.style.fontSize = '15px'
+      this.restoreBackupBtn.style.fontSize = '15px'
+    } else {
+      this.menu.style.marginTop = '22px'
+      this.menu.style.width = '420px'
+      this.menu.style.height = '680px'
+      this.menu.style.maxHeight = ''
+      this.menu.style.borderWidth = '4px'
+      this.title.style.top = 'calc(50% - 365px)'
+      this.title.style.fontSize = '62px'
+      this.title.style.letterSpacing = '3px'
+      this.resetBtn.style.top = 'calc(50% + 372px)'
+      this.resetBtn.style.fontSize = '32px'
+      this.uuidBlock.style.top = 'calc(50% + 428px)'
+      this.uuidBlock.style.width = 'min(92vw, 480px)'
+      this.uuidBlock.style.gap = '6px'
+      this.uuidValueEl.style.fontSize = '16px'
+      this.copyBackupBtn.style.fontSize = '18px'
+      this.restoreBackupBtn.style.fontSize = '18px'
+    }
+
+    this.fovTrack.style.width = controlWidth
+    this.circleBtn.parentElement!.style.width = controlWidth
+    for (const key of ['master', 'gun', 'impact', 'explosion', 'ui'] as SoundType[]) {
+      this.volumeTracks[key]!.style.width = controlWidth
+    }
+    for (const key of ['grass', 'blood', 'bulletHoles', 'killLeaderMsg', 'trainNoise'] as GraphicOption[]) {
+      this.graphicButtons[key]!.style.width = m ? '78px' : '100px'
+      this.graphicButtons[key]!.style.fontSize = m ? '17px' : '20px'
+      this.graphicButtons[key]!.style.padding = m ? '5px 4px' : '6px'
+    }
+
+    const spans = Array.from(this.menu.querySelectorAll('span')) as HTMLSpanElement[]
+    for (const span of spans) {
+      const text = span.textContent?.trim() ?? ''
+      if (['VIEW', 'SOUND', 'CONTROLS', 'GRAPHICS', 'GAMEPLAY'].includes(text)) {
+        span.style.fontSize = sectionFont
+        span.style.letterSpacing = m ? '1px' : '1.5px'
+      } else {
+        span.style.fontSize = labelFont
+        span.style.letterSpacing = m ? '0.5px' : '1px'
+      }
+    }
+
+    const divs = Array.from(this.menu.querySelectorAll('div')) as HTMLDivElement[]
+    for (const div of divs) {
+      if (div.style.padding === '0 40px' || div.style.padding === '0px 40px' || div.style.padding === '0px 22px') {
+        div.style.padding = bodyPadding
+        div.style.gap = m ? '15px' : '20px'
+      } else if (
+        sectionPadding !== '' &&
+        (div.style.padding === '24px 30px 16px 30px' ||
+          div.style.padding === '32px 30px 16px 30px')
+      ) {
+        div.style.padding = sectionPadding
+      } else if (
+        !m &&
+        (div.style.padding === '22px 22px 12px 22px' || div.style.padding === '22px')
+      ) {
+        div.style.padding = '32px 30px 16px 30px'
+      }
+    }
+  }
+
   private setMenuOpen(open: boolean, playSound: boolean) {
     if (this.isOpen === open) return
     this.isOpen = open
@@ -615,6 +706,10 @@ export class SettingsUI {
 
   public registerCursorTargets(elements: HTMLElement[]) {
     this.extraCursorTargets = elements
+  }
+
+  public setTopRightButtonSuppressed(suppressed: boolean) {
+    this.suppressTopRightButton = suppressed
   }
 
   private resetValues() {
@@ -685,14 +780,16 @@ export class SettingsUI {
 
   public update(input: InputManager, forceShow: boolean = false) {
     const dead = document.body.classList.contains('is-dead')
-    this.button.style.pointerEvents = dead ? 'none' : 'auto'
+    const mobile = isMainMenuMobileWidth()
+    this.button.style.display = this.suppressTopRightButton ? 'none' : 'block'
+    this.button.style.pointerEvents = dead || this.suppressTopRightButton ? 'none' : 'auto'
 
     if (this.isOpen && !this.wasMenuOpen) {
       input.centerVirtualMouse()
     }
     this.wasMenuOpen = this.isOpen
 
-    const shouldShowCursor = input.isSimulatedUnlocked || this.isOpen || !document.pointerLockElement || forceShow
+    const shouldShowCursor = !mobile && (input.isSimulatedUnlocked || this.isOpen || !document.pointerLockElement || forceShow)
 
     if (shouldShowCursor) {
       this.customCursor.style.display = 'block'
@@ -873,10 +970,6 @@ export class SettingsUI {
 
       this.currentScale += (this.targetScale - this.currentScale) * 0.3
       this.customCursor.style.transform = `translate(-50%, -50%) scale(${this.currentScale})`
-
-      if (this.isOpen) {
-        input.isSimulatedUnlocked = true
-      }
     } else {
       this.customCursor.style.display = 'none'
       this.isHovering = false

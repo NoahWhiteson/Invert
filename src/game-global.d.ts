@@ -14,9 +14,6 @@ declare global {
       freeze: () => string
       thirdperson: () => string
       debugTargets: (on: boolean) => string
-      tposeDebug: (on: boolean) => string
-      animDebugLocal: () => Record<string, unknown> | null
-      animDebugDump: () => string
       setBarrierScale: (s: number) => string
       updateLeaderboard: (data: LeaderboardEntry[], myRank?: LeaderboardEntry) => string
       setUsername: (name: string) => string

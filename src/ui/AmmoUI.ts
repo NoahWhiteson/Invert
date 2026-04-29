@@ -162,14 +162,14 @@ export class AmmoUI {
     this.shownProgress = next
   }
 
-  public update(mag: number, reserve: number, maxMag: number, visible: boolean, isReloading: boolean, reloadProgress01: number) {
+  public update(mag: number, maxMag: number, visible: boolean, isReloading: boolean, reloadProgress01: number) {
     if (!visible) {
       this.ammoText.innerText = ''
       this.reloadWrap.style.display = 'none'
       return
     }
-    this.ammoText.innerText = `${mag} / ${reserve}`
-    this.element.title = `Magazine ${mag} / ${maxMag} · Reserve`
+    this.ammoText.innerText = `${mag} / ${maxMag}`
+    this.element.title = `Magazine ${mag} / ${maxMag}`
     this.reloadWrap.style.display = isReloading ? 'flex' : 'none'
     if (isReloading) {
       this.setReloadProgress(reloadProgress01)

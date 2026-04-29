@@ -1,4 +1,5 @@
 import { loadProfanityList, textContainsProfanity, isProfanityListReady } from '../utils/profanityFilter'
+import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 
 const THICK_OUTLINE =
   '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
@@ -116,6 +117,28 @@ export class MainMenuNameInputUI {
     this.wrap.appendChild(pencil)
     this.wrap.appendChild(this.input)
     document.body.appendChild(this.wrap)
+
+    this.applyResponsiveLayout()
+    onMainMenuLayoutChange(() => this.applyResponsiveLayout())
+  }
+
+  private applyResponsiveLayout() {
+    const m = isMainMenuMobileWidth()
+    if (m) {
+      this.wrap.style.bottom = 'calc(178px + env(safe-area-inset-bottom, 0px))'
+      this.wrap.style.paddingLeft = 'env(safe-area-inset-left, 0px)'
+      this.wrap.style.paddingRight = 'env(safe-area-inset-right, 0px)'
+      this.wrap.style.maxWidth = 'calc(100vw - 24px)'
+      this.input.style.width = 'min(160px, 52vw)'
+      this.input.style.fontSize = '22px'
+    } else {
+      this.wrap.style.bottom = '30vh'
+      this.wrap.style.paddingLeft = '0'
+      this.wrap.style.paddingRight = '0'
+      this.wrap.style.maxWidth = ''
+      this.input.style.width = 'min(38vw, 200px)'
+      this.input.style.fontSize = '24px'
+    }
   }
 
   /** Row + input for custom-cursor hit tests. */
@@ -125,7 +148,10 @@ export class MainMenuNameInputUI {
 
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'flex' : 'none'
-    if (visible) this.wrap.style.opacity = '1'
+    if (visible) {
+      this.wrap.style.opacity = '1'
+      this.applyResponsiveLayout()
+    }
   }
 
   public setOpacity(alpha: number) {

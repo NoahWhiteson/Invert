@@ -1,9 +1,12 @@
 import { ringTextShadow } from './textOutline'
 import { SettingsUI } from './SettingsUI'
+import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 
 export class MainMenuPlayUI {
   private wrap: HTMLDivElement
   private btn: HTMLButtonElement
+  private label: HTMLSpanElement
+  private icon: HTMLImageElement
   private onPlay: (() => void) | null = null
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private settingsUI: SettingsUI
@@ -17,6 +20,8 @@ export class MainMenuPlayUI {
     this.wrap.style.zIndex = '1200'
     this.wrap.style.pointerEvents = 'none'
     this.wrap.style.display = 'none'
+    this.wrap.style.paddingBottom = 'env(safe-area-inset-bottom, 0px)'
+    this.wrap.style.paddingLeft = 'env(safe-area-inset-left, 0px)'
 
     this.btn = document.createElement('button')
     this.btn.type = 'button'
@@ -32,6 +37,7 @@ export class MainMenuPlayUI {
     this.btn.style.cursor = 'none'
 
     const icon = document.createElement('img')
+    this.icon = icon
     icon.src = new URL('../assets/icons/fight.png', import.meta.url).href
     icon.alt = ''
     icon.draggable = false
@@ -41,6 +47,7 @@ export class MainMenuPlayUI {
     icon.style.imageRendering = 'pixelated'
 
     const label = document.createElement('span')
+    this.label = label
     label.textContent = 'PLAY'
     label.style.fontFamily = "'m6x11', monospace"
     label.style.fontStyle = 'normal'
@@ -69,6 +76,20 @@ export class MainMenuPlayUI {
 
     this.wrap.appendChild(this.btn)
     document.body.appendChild(this.wrap)
+
+    this.applyResponsiveLayout()
+    onMainMenuLayoutChange(() => this.applyResponsiveLayout())
+  }
+
+  private applyResponsiveLayout() {
+    const m = isMainMenuMobileWidth()
+    const bottom = m ? 'max(14px, env(safe-area-inset-bottom, 0px))' : '24px'
+    const left = m ? 'max(12px, env(safe-area-inset-left, 0px))' : '24px'
+    this.wrap.style.bottom = bottom
+    this.wrap.style.left = left
+    this.label.style.fontSize = m ? '34px' : '48px'
+    this.icon.style.width = m ? '34px' : '40px'
+    this.icon.style.height = m ? '34px' : '40px'
   }
 
   public setOnPlay(handler: () => void) {
@@ -77,7 +98,10 @@ export class MainMenuPlayUI {
 
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'block' : 'none'
-    if (visible) this.wrap.style.opacity = '1'
+    if (visible) {
+      this.wrap.style.opacity = '1'
+      this.applyResponsiveLayout()
+    }
   }
 
   public setOpacity(alpha: number) {
