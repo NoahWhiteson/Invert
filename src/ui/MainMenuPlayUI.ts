@@ -95,13 +95,13 @@ export class MainMenuPlayUI {
     // Mobile: Use click for widest compat, plus pointerdown for pointer devices
     // Both handlers deduplicated via _lastPlay
 
-    this.btn.addEventListener('click', (e) => {
+    this.btn.addEventListener('click', () => {
       // Try to request pointer lock safely before calling triggerPlay (if needed)
       // The game will typically need pointer lock for mouse FPS controls.
       requestPointerLockSafe(document.body)
       this.triggerPlay()
     })
-    this.btn.addEventListener('pointerdown', (e) => {
+    this.btn.addEventListener('pointerdown', () => {
       label.style.color = '#ffff00'
       requestPointerLockSafe(document.body)
       this.triggerPlay()
