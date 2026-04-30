@@ -115,6 +115,7 @@ const COINS_PER_KILL = 10
 const HEALTH_PER_KILL = 15
 const LOCAL_KILL_REWARD_DEDUPE_MS = 2500
 const recentLocalKillRewards = new Map<string, number>()
+const recentLocalBotScoreRewards = new Map<string, number>()
 
 function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
@@ -135,6 +136,17 @@ function grantLocalKillReward(victimKey: string) {
   recentLocalKillRewards.set(victimKey, now)
   awardKillCoins()
   healLocalPlayerOnKill()
+}
+
+function registerLocalBotKillScore(victimKey: string) {
+  const now = performance.now()
+  for (const [key, at] of recentLocalBotScoreRewards) {
+    if (now - at > LOCAL_KILL_REWARD_DEDUPE_MS) recentLocalBotScoreRewards.delete(key)
+  }
+  if (recentLocalBotScoreRewards.has(victimKey)) return
+  recentLocalBotScoreRewards.set(victimKey, now)
+  discoveredPlayers.add(victimKey)
+  myBotKills++
 }
 
 const core = new SceneSetup()
@@ -956,6 +968,7 @@ void Promise.all([
       
       if (attackerId === multiplayer.getLocalPlayerId()) {
         grantLocalKillReward(targetId)
+        registerLocalBotKillScore(targetId)
         if (typeof killerKills === 'number') myPvpKills = killerKills
         if (typeof killerBotKills === 'number') myBotKills = killerBotKills
         updateLeaderboard()
@@ -1195,8 +1208,9 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
         damageTexts.spawn(res.pos, Math.round(dmg), idx)
 
         if (res.killed) {
-          grantLocalKillReward(`bot_${idx}`)
-          discoveredPlayers.add(`bot_${idx}`)
+          const victimKey = `bot_${idx}`
+          grantLocalKillReward(victimKey)
+          registerLocalBotKillScore(victimKey)
           // stats will be synced via player_killed message from server
           updateLeaderboard()
           killFeed.push(res.name, 'Grenade')
@@ -2346,8 +2360,9 @@ function shoot() {
           crosshair.triggerHit()
 
           if (damageRes.killed) {
-            grantLocalKillReward(`bot_${damageRes.targetIdx}`)
-            discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
+            const victimKey = `bot_${damageRes.targetIdx}`
+            grantLocalKillReward(victimKey)
+            registerLocalBotKillScore(victimKey)
             // stats will be synced via player_killed message from server
             updateLeaderboard()
             killFeed.push(damageRes.name, weaponLabelFromSlot(slot))
