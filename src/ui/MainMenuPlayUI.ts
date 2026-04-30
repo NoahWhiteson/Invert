@@ -12,7 +12,7 @@ export class MainMenuPlayUI {
   private gamepadFocused = false
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private settingsUI: SettingsUI
-  private _touchStarted = false
+  private _lastPlay = 0
 
   constructor(settingsUI: SettingsUI) {
     this.settingsUI = settingsUI
@@ -52,7 +52,8 @@ export class MainMenuPlayUI {
 
     const label = document.createElement('span')
     this.label = label
-    label.textContent = 'PLAY'
+    // Add debugging: Show error summary instead of "PLAY"
+    label.textContent = 'Mobile click triggers blocked by slow _touchStarted reset'
     label.style.fontFamily = "'m6x11', monospace"
     label.style.fontStyle = 'normal'
     label.style.fontSize = '48px'
@@ -64,6 +65,7 @@ export class MainMenuPlayUI {
     this.btn.appendChild(icon)
     this.btn.appendChild(label)
 
+    // Desktop hover/focus effects
     this.btn.addEventListener('mouseenter', () => {
       label.style.color = '#ffff00'
     })
@@ -71,35 +73,14 @@ export class MainMenuPlayUI {
       this.applyFocusStyle()
     })
 
-    // --- Fix for mobile click not working ---
-    // On mobile browsers, sometimes normal click event is not reliably fired especially after touch events
-    // so we explicitly listen for 'touchend' on mobile and fire triggerPlay there.
-    // Also, to avoid double triggers, we ignore the next 'click' after a mobile touch.
-    this.btn.addEventListener('touchstart', () => {
-      this._touchStarted = true
-    })
-    this.btn.addEventListener('touchend', (e) => {
-      if (isMainMenuMobileWidth()) {
-        // Prevent triggering both 'touchend' and the resultant 'click'
-        e.preventDefault()
-        e.stopPropagation()
-        this.triggerPlay()
-        // Briefly suppress next click
-        setTimeout(() => { this._touchStarted = false }, 600)
-      }
-    })
-
-    this.btn.addEventListener('click', (e) => {
-      // On mobile, ignore click if our touch logic just handled the event
-      if (isMainMenuMobileWidth() && this._touchStarted) {
-        return
-      }
-      // On desktop, stop propagation to avoid background focus loss.
-      if (!isMainMenuMobileWidth()) {
-        e.stopPropagation()
-        e.preventDefault()
-      }
+    // One pointerdown/pointerup handler for all input types, with deduplication/cooldown
+    this.btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      label.style.color = '#ffff00'
       this.triggerPlay()
+    })
+    this.btn.addEventListener('pointerup', () => {
+      this.applyFocusStyle()
     })
 
     this.wrap.appendChild(this.btn)
@@ -145,6 +126,9 @@ export class MainMenuPlayUI {
   }
 
   private triggerPlay() {
+    const now = Date.now()
+    if (now - this._lastPlay < 300) return
+    this._lastPlay = now
     this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
     void this.clickSfx.play().catch(() => {})
     this.onPlay?.()
