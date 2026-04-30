@@ -67,13 +67,27 @@ export class PlayerController {
     this.playerGroup.position.set(0, -sphereRadius + this.state.height, 0)
     this.lockElement = lockElement
 
+    // Polyfill for iOS — requestPointerLock doesn't exist
+    if (!this.lockElement.requestPointerLock) {
+      // @ts-ignore: assign polyfill
+      this.lockElement.requestPointerLock = () => Promise.resolve()
+    }
+
     this.controls = new PointerLockControls(camera, this.lockElement)
     this.lockElement.addEventListener('click', () => {
       if (!this.pointerLockAllowed) return
       if (!this.lockElement.isConnected) return
       const doc = this.lockElement.ownerDocument
       if (!doc || doc.visibilityState !== 'visible') return
-      this.controls.lock()
+      // Don't try to lock on mobile — pointer lock isn't supported
+      // Use document.body here as in your prompt for feature detection, but fallback for SSR
+      if (
+        typeof document !== 'undefined' &&
+        !document.pointerLockElement &&
+        'requestPointerLock' in (document.body || {})
+      ) {
+        this.controls.lock()
+      }
     })
   }
 
@@ -126,8 +140,11 @@ export class PlayerController {
       this.state.shakeIntensity = 0
     }
 
+    // Guard for pointer lock on iOS & mobile
+    const hasPointerLock = typeof document !== 'undefined' && 'pointerLockElement' in document
+
     if (!input.isSimulatedUnlocked) {
-      this.controls.enabled = this.controls.isLocked
+      this.controls.enabled = hasPointerLock ? this.controls.isLocked : true
     } else {
       this.controls.enabled = false
     }
