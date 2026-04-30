@@ -72,6 +72,10 @@ export class PlayerController {
       // @ts-ignore: assign polyfill
       this.lockElement.requestPointerLock = () => Promise.resolve()
     }
+    if (!this.lockElement.ownerDocument.exitPointerLock) {
+      // @ts-ignore: iOS/mobile pointer-lock polyfill
+      this.lockElement.ownerDocument.exitPointerLock = () => {}
+    }
 
     this.controls = new PointerLockControls(camera, this.lockElement)
     this.lockElement.addEventListener('click', () => {

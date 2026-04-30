@@ -530,6 +530,30 @@ function onDeathScreenConfirmRespawn() {
   void player.controls.lock()
 }
 
+function safeUnlockPlayerControls() {
+  try {
+    player.controls.unlock()
+  } catch (e) {
+    console.warn('[controls] pointer unlock failed; continuing death UI flow', e)
+  }
+}
+
+function enterDeathUiState() {
+  player.setPointerLockAllowed(false)
+  safeUnlockPlayerControls()
+  mobileControlsUI.setVisible(false)
+  crosshair.setVisible(false)
+  healthUI.setOpacity(0)
+  ammoUI.setOpacity(0)
+  weaponUI.setOpacity(0)
+  killFeed.setOpacity(0)
+  staminaUI.setOpacity(0)
+  leaderboardUI.setVisible(false)
+  timerUI.setVisible(false)
+  coinsHUD.setOpacity(0)
+  heldWeapons.setThirdPerson(true)
+}
+
 function handleLocalDeathFromBot(botIndex: number) {
   if (isDead) return
   const botEntry = targetPlayers.getTargetList().find((b) => b.id === `bot_${botIndex}`)
@@ -548,15 +572,7 @@ function handleLocalDeathFromBot(botIndex: number) {
     localPlayerRagdoll = tryCreateSkeletonRagdoll(playerModel.root, playerModel.anims, impulse)
   }
 
-  player.setPointerLockAllowed(false)
-  player.controls.unlock()
-  mobileControlsUI.setVisible(false)
-  crosshair.setVisible(false)
-  healthUI.setOpacity(0)
-  ammoUI.setOpacity(0)
-  weaponUI.setOpacity(0)
-  killFeed.setOpacity(0)
-  heldWeapons.setThirdPerson(true)
+  enterDeathUiState()
   deathUI.show(botName, 'AK-47', onDeathScreenConfirmRespawn)
 }
 
@@ -582,15 +598,7 @@ function handleLocalDeathFromEnvironment(
     localPlayerRagdoll = tryCreateSkeletonRagdoll(playerModel.root, playerModel.anims, impulse)
   }
 
-  player.setPointerLockAllowed(false)
-  player.controls.unlock()
-  mobileControlsUI.setVisible(false)
-  crosshair.setVisible(false)
-  healthUI.setOpacity(0)
-  ammoUI.setOpacity(0)
-  weaponUI.setOpacity(0)
-  killFeed.setOpacity(0)
-  heldWeapons.setThirdPerson(true)
+  enterDeathUiState()
   deathUI.show(killerLabel, weaponLabel, onDeathScreenConfirmRespawn, { detailsText })
 }
 
@@ -935,15 +943,7 @@ void Promise.all([
         localPlayerRagdoll = tryCreateSkeletonRagdoll(playerModel.root, playerModel.anims, impulse)
       }
 
-      player.setPointerLockAllowed(false)
-      player.controls.unlock()
-      mobileControlsUI.setVisible(false)
-      crosshair.setVisible(false)
-      healthUI.setOpacity(0)
-      ammoUI.setOpacity(0)
-      weaponUI.setOpacity(0)
-      killFeed.setOpacity(0)
-      heldWeapons.setThirdPerson(true)
+      enterDeathUiState()
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
