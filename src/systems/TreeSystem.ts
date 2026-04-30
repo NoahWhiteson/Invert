@@ -16,7 +16,6 @@ const PINE_BOX_HITBOXES: LocalBoxHitbox[] = dedupeLocalBoxes([
 export class TreeSystem {
   public treeMaterial: THREE.ShaderMaterial
   public treeOutlineMaterial: THREE.ShaderMaterial
-  private textureLoader = new THREE.TextureLoader()
   private objLoader = new OBJLoader()
   private sourceTree: THREE.Group | null = null
   private container: THREE.Group
@@ -30,10 +29,6 @@ export class TreeSystem {
     this.container = new THREE.Group()
     this.container.name = 'treeSystemContainer'
     scene.add(this.container)
-
-    const pineTexture = this.textureLoader.load(new URL('../assets/models/grave_map/colormap.png', import.meta.url).href)
-    pineTexture.colorSpace = THREE.SRGBColorSpace
-    pineTexture.magFilter = THREE.NearestFilter
 
     const treeVertexShader = `
       varying vec2 vUv;
@@ -96,7 +91,6 @@ export class TreeSystem {
       uniforms: {
         uTime: { value: 0 },
         uWindIntensity: { value: 0.2 },
-        uTexture: { value: pineTexture }
       },
       side: THREE.DoubleSide,
       vertexShader: treeVertexShader,
@@ -104,20 +98,12 @@ export class TreeSystem {
         varying vec2 vUv;
         varying float vHeight;
         varying float vNoise;
-        uniform sampler2D uTexture;
         void main() {
-          vec4 texColor = texture2D(uTexture, vUv);
-          // Convert texture to grayscale and boost it to white-ish
-          float gray = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
-          vec3 baseColor = vec3(1.0); // Pure white objects
-          
+          vec3 baseColor = vec3(1.0);
           float hFactor = clamp(vHeight / 5.0, 0.0, 1.0);
-          // Subtle shading to give it some form while staying white
           float shade = mix(0.8, 1.0, 0.4 + hFactor * 0.6);
           vec3 color = baseColor * shade;
-          
-          gl_FragColor = vec4(color, texColor.a);
-          if (texColor.a < 0.5) discard;
+          gl_FragColor = vec4(color, 1.0);
         }
       `
     })

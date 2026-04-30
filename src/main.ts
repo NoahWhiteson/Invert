@@ -1029,7 +1029,18 @@ void Promise.all([
   }
 
   multiplayer.onMatchReset = () => {
-    returnToMainMenu()
+    if (matchEndedFreeze) {
+      returnToMainMenu()
+      return
+    }
+    matchEndedByDebug = false
+    matchEndTopThreeCache = null
+    if (matchEndTimeout) {
+      clearTimeout(matchEndTimeout)
+      matchEndTimeout = null
+    }
+    matchEndUI.hide()
+    matchEndShowcase.clear()
   }
 
   multiplayer.onRoomId = (id) => {
