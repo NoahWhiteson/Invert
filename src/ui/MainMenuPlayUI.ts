@@ -36,7 +36,8 @@ export class MainMenuPlayUI {
     this.btn.style.backgroundColor = 'transparent'
     this.btn.style.borderRadius = '0'
     this.btn.style.border = 'none'
-    this.btn.style.cursor = 'none'
+    // FIX HERE: On mobile must show pointer (especially iOS expects pointer on buttons)
+    this.btn.style.cursor = 'pointer'
 
     const icon = document.createElement('img')
     this.icon = icon
@@ -68,17 +69,21 @@ export class MainMenuPlayUI {
     this.btn.addEventListener('mouseleave', () => {
       this.applyFocusStyle()
     })
+
+    // --- Fix for mobile click not working ---
+    // We now do NOT call e.preventDefault() or e.stopPropagation() on 'click' on mobile, 
+    // as well as avoid duplicate triggers by only acting on 'click'.
     this.btn.addEventListener('click', (e) => {
-      e.stopPropagation()
-      e.preventDefault()
+      // On mobile, let the click go through. On desktop, stop propagation to avoid background focus loss.
+      if (!isMainMenuMobileWidth()) {
+        e.stopPropagation()
+        e.preventDefault()
+      }
       this.triggerPlay()
     })
-    this.btn.addEventListener('pointerup', (e) => {
-      if (!isMainMenuMobileWidth()) return
-      e.stopPropagation()
-      e.preventDefault()
-      this.triggerPlay()
-    })
+
+    // No pointerup handler needed anymore, pure 'click' covers both desktop and mobile.
+    // (Browsers now reliably fire 'click' after touchend, and pointerup is not needed for buttons.)
 
     this.wrap.appendChild(this.btn)
 
