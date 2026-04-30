@@ -113,6 +113,8 @@ window.addEventListener(COINS_CHANGED_EVENT, (ev) => {
 
 const COINS_PER_KILL = 10
 const HEALTH_PER_KILL = 15
+const LOCAL_KILL_REWARD_DEDUPE_MS = 2500
+const recentLocalKillRewards = new Map<string, number>()
 
 function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
@@ -122,6 +124,17 @@ function healLocalPlayerOnKill() {
   if (isDead || atMainMenu) return
   player.state.health = Math.min(player.state.maxHealth, player.state.health + HEALTH_PER_KILL, 100)
   lastHealth = player.state.health
+}
+
+function grantLocalKillReward(victimKey: string) {
+  const now = performance.now()
+  for (const [key, at] of recentLocalKillRewards) {
+    if (now - at > LOCAL_KILL_REWARD_DEDUPE_MS) recentLocalKillRewards.delete(key)
+  }
+  if (recentLocalKillRewards.has(victimKey)) return
+  recentLocalKillRewards.set(victimKey, now)
+  awardKillCoins()
+  healLocalPlayerOnKill()
 }
 
 const core = new SceneSetup()
@@ -942,6 +955,7 @@ void Promise.all([
       killFeed.push(botName, weaponLabelFromSlot(slotFromWeaponName(weapon || '')))
       
       if (attackerId === multiplayer.getLocalPlayerId()) {
+        grantLocalKillReward(targetId)
         if (typeof killerKills === 'number') myPvpKills = killerKills
         if (typeof killerBotKills === 'number') myBotKills = killerBotKills
         updateLeaderboard()
@@ -963,8 +977,7 @@ void Promise.all([
       enterDeathUiState()
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
-      awardKillCoins()
-      healLocalPlayerOnKill()
+      grantLocalKillReward(targetId)
       if (typeof killerKills === 'number') {
         myPvpKills = killerKills
       } else {
@@ -1182,8 +1195,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
         damageTexts.spawn(res.pos, Math.round(dmg), idx)
 
         if (res.killed) {
-          awardKillCoins()
-          healLocalPlayerOnKill()
+          grantLocalKillReward(`bot_${idx}`)
           discoveredPlayers.add(`bot_${idx}`)
           // stats will be synced via player_killed message from server
           updateLeaderboard()
@@ -2334,8 +2346,7 @@ function shoot() {
           crosshair.triggerHit()
 
           if (damageRes.killed) {
-            awardKillCoins()
-            healLocalPlayerOnKill()
+            grantLocalKillReward(`bot_${damageRes.targetIdx}`)
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
             // stats will be synced via player_killed message from server
             updateLeaderboard()
