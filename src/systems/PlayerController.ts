@@ -80,8 +80,6 @@ export class PlayerController {
     this.controls = new PointerLockControls(camera, this.lockElement)
     this.lockElement.addEventListener('click', () => {
       if (!this.pointerLockAllowed) return
-      const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches
-      if (touchDevice) return
       if (!this.lockElement.isConnected) return
       const doc = this.lockElement.ownerDocument
       if (!doc || doc.visibilityState !== 'visible') return
