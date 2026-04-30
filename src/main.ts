@@ -77,6 +77,7 @@ import {
 import { GrenadeSystem } from './systems/GrenadeSystem'
 import { TentSystem } from './systems/TentSystem'
 import { BarrierSystem } from './systems/BarrierSystem'
+import { WallStepsSystem, type WallStepsPlacement } from './systems/WallStepsSystem'
 
 
 void (async () => {
@@ -136,6 +137,7 @@ const trees = new TreeSystem(core.scene, sphereRadius)
 const trainTrack = new TrainTrackSystem(core.scene, sphereRadius)
 const tents = new TentSystem(core.scene, sphereRadius)
 const barriers = new BarrierSystem(core.scene, sphereRadius)
+const wallSteps = new WallStepsSystem(core.scene, sphereRadius)
 
 
 const player = new PlayerController(core.scene, core.camera, sphereRadius, core.renderer.domElement)
@@ -427,6 +429,7 @@ function getSpawnCollisionBodies(): Array<{ position: THREE.Vector3; radius: num
   return [
     ...tents.getCollisionBodies(),
     ...barriers.getCollisionBodies(),
+    ...wallSteps.getCollisionBodies(),
     ...trees.getCollisionBodies(),
     ...targetPlayers.getCollisionBodies(),
     ...multiplayer.getCollisionBodies(),
@@ -595,10 +598,31 @@ function handleLocalDeathFromTrain(hitAwayWorld: THREE.Vector3) {
   handleLocalDeathFromEnvironment(hitAwayWorld, 'Train', 'Train', 'Killed by Train')
 }
 
-function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius: number): TreePlacement[] {
+type MapPropPlacement = {
+  phi: number
+  theta: number
+  scale?: number
+}
+
+const RANDOM_TENT_COUNT = 5
+const RANDOM_BARRIER_COUNT = 5
+const RANDOM_WALL_STEPS_COUNT = 5
+const RANDOM_PROP_CLEARANCE = 13
+
+function normalizeTheta(theta: number): number {
+  const tau = Math.PI * 2
+  return ((theta % tau) + tau) % tau
+}
+
+function pushIfClear<T extends MapPropPlacement>(out: T[], item: T) {
+  if (isPhiBlockedByTrainTrack(item.phi)) return
+  out.push({ ...item, theta: normalizeTheta(item.theta) })
+}
+
+function createFallbackTreeLayout(_count: number, radius: number, safeZoneRadius: number): TreePlacement[] {
   const out: TreePlacement[] = []
   const spawnPos = new THREE.Vector3(0, -radius, 0)
-  while (out.length < count) {
+  while (out.length < _count) {
     const phi = Math.random() * Math.PI
     const theta = Math.random() * Math.PI * 2
     if (isPhiBlockedByTrainTrack(phi)) continue
@@ -607,6 +631,75 @@ function createFallbackTreeLayout(count: number, radius: number, safeZoneRadius:
     out.push({ phi, theta, scale: 1.2 + Math.random() * 2.0 })
   }
   return out
+}
+
+function createRandomSpreadLayout(
+  count: number,
+  radius: number,
+  minDistance: number,
+  scale: number,
+  reserved: MapPropPlacement[] = []
+): MapPropPlacement[] {
+  const out: MapPropPlacement[] = []
+  const all = [...reserved]
+  const candidate = new THREE.Vector3()
+  const other = new THREE.Vector3()
+
+  for (let attempt = 0; attempt < 600 && out.length < count; attempt++) {
+    const st = randomPhiThetaClearOfTrainTrack(120)
+    candidate.setFromSphericalCoords(radius, st.phi, st.theta)
+
+    let clear = true
+    for (const item of all) {
+      other.setFromSphericalCoords(radius, item.phi, item.theta)
+      if (candidate.distanceTo(other) < minDistance) {
+        clear = false
+        break
+      }
+    }
+    if (!clear) continue
+
+    const placement = { phi: st.phi, theta: st.theta, scale }
+    pushIfClear(out, placement)
+    all.push(placement)
+  }
+
+  while (out.length < count) {
+    const st = randomPhiThetaClearOfTrainTrack(120)
+    const placement = { phi: st.phi, theta: st.theta, scale }
+    pushIfClear(out, placement)
+  }
+
+  return out
+}
+
+function applyRandomMapLayout() {
+  const tentsLayout = createRandomSpreadLayout(RANDOM_TENT_COUNT, sphereRadius, RANDOM_PROP_CLEARANCE, 0.05)
+  const barriersLayout = createRandomSpreadLayout(
+    RANDOM_BARRIER_COUNT,
+    sphereRadius,
+    RANDOM_PROP_CLEARANCE,
+    0.075,
+    tentsLayout
+  )
+  const wallStepsLayout = createRandomSpreadLayout(
+    RANDOM_WALL_STEPS_COUNT,
+    sphereRadius,
+    RANDOM_PROP_CLEARANCE,
+    0.08,
+    [...tentsLayout, ...barriersLayout]
+  ) as WallStepsPlacement[]
+
+  tents.clear()
+  for (const item of tentsLayout) tents.spawn(item.phi, item.theta, item.scale)
+
+  barriers.clear()
+  for (const item of barriersLayout) barriers.spawn(item.phi, item.theta, item.scale)
+
+  wallSteps.clear()
+  for (const item of wallStepsLayout) wallSteps.spawn(item.phi, item.theta, item.scale)
+
+  void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
 }
 
 function buildSortedLeaderboardEntries(): LeaderboardEntry[] {
@@ -736,33 +829,17 @@ void Promise.all([
   trainTrack.init(),
   tents.init(),
   barriers.init(),
+  wallSteps.init(),
   AnimationManager.preloadAll(),
   heldWeapons.loadAll(),
   initAllSfx(),
 ]).then(() => {
   timerUI.onOneMinuteRemaining = () => playSfx('oneMinute', 1, 'ui')
-  void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
+  applyRandomMapLayout()
   
   multiplayer.onWorldState = (state) => {
     timerUI.setStartTime(state.matchStartTime)
-    if (state.treeLayout.length > 0) {
-      const filtered = state.treeLayout.filter((t) => !isPhiBlockedByTrainTrack(t.phi))
-      void trees.init(
-        filtered.length > 0 ? filtered : createFallbackTreeLayout(80, sphereRadius, 8)
-      )
-    }
-    if (state.tentLayout.length > 0) {
-      tents.clear()
-      for (const t of state.tentLayout) {
-        tents.spawn(t.phi, t.theta)
-      }
-    }
-    if (state.barrierLayout && state.barrierLayout.length > 0) {
-      barriers.clear()
-      for (const b of state.barrierLayout) {
-        barriers.spawn(b.phi, b.theta)
-      }
-    }
+    applyRandomMapLayout()
     if (typeof state.trainPhase === 'number' && !trainPhaseSynced) {
       trainPhaseSynced = true
       initialTrainPhaseForTrain = state.trainPhase
@@ -1553,6 +1630,7 @@ function pickShootIntersection(
   netPlayers: THREE.Object3D[],
   tents: THREE.Object3D[],
   barriers: THREE.Object3D[],
+  wallSteps: THREE.Object3D[],
   trees: THREE.Object3D[]
 ): THREE.Intersection | null {
   _entityRayBuffer.length = 0
@@ -1560,6 +1638,7 @@ function pickShootIntersection(
   for (let i = 0; i < netPlayers.length; i++) _entityRayBuffer.push(netPlayers[i]!)
   for (let i = 0; i < tents.length; i++) _entityRayBuffer.push(tents[i]!)
   for (let i = 0; i < barriers.length; i++) _entityRayBuffer.push(barriers[i]!)
+  for (let i = 0; i < wallSteps.length; i++) _entityRayBuffer.push(wallSteps[i]!)
   for (let i = 0; i < trees.length; i++) _entityRayBuffer.push(trees[i]!)
 
   raycaster.set(origin, dir)
@@ -1677,7 +1756,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     (o) => typeof o.userData.targetIdx !== 'number' || o.userData.targetIdx !== botIndex
   )
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), wallSteps.getRaycastTargets(), trees.getRaycastTargets())
   const hitDist = h?.distance ?? Infinity
 
   const spawnGraceActive = localSpawnDamageInvulnerable()
@@ -2197,7 +2276,7 @@ function shoot() {
     }
     const targets = targetPlayers.getRaycastTargets()
     const netTargets = multiplayer.getRaycastTargets()
-    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
+    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), wallSteps.getRaycastTargets(), trees.getRaycastTargets())
 
     if (h) {
       if (h.object === mesh || !h.object.userData.networkPlayerId) {
@@ -2358,7 +2437,7 @@ function updateCrosshairEnemyHover() {
   core.camera.getWorldDirection(muzzleDir)
   const targets = targetPlayers.getRaycastTargets()
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), wallSteps.getRaycastTargets(), trees.getRaycastTargets())
   if (!h) {
     crosshair.setEnemyHover(false)
     return
@@ -2975,6 +3054,25 @@ function animate() {
       const barrierBodies = barriers.getCollisionBodies()
       for (let i = 0; i < barrierBodies.length; i++) {
         const b = barrierBodies[i]!
+        _colDelta.copy(myPos).sub(b.position)
+        const distSq = _colDelta.lengthSq()
+        if (distSq < 1e-8) continue
+        const minDist = myRadius + b.radius
+        if (distSq >= minDist * minDist) continue
+        const dist = Math.sqrt(distSq)
+        const push = minDist - dist + 1e-4
+        _colDelta.multiplyScalar(1 / dist)
+        myPos.addScaledVector(_colDelta, push)
+        const into = player.state.velocity.dot(_colDelta)
+        if (into < 0) {
+          player.state.velocity.addScaledVector(_colDelta, -into)
+        }
+      }
+
+      // Prevent phasing through wall steps
+      const wallStepBodies = wallSteps.getCollisionBodies()
+      for (let i = 0; i < wallStepBodies.length; i++) {
+        const b = wallStepBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
         const distSq = _colDelta.lengthSq()
         if (distSq < 1e-8) continue
