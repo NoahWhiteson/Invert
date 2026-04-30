@@ -37,7 +37,7 @@ export class MainMenuPlayUI {
     this.btn.style.backgroundColor = 'transparent'
     this.btn.style.borderRadius = '0'
     this.btn.style.border = 'none'
-    // FIX HERE: On mobile must show pointer (especially iOS expects pointer on buttons)
+    // On mobile must show pointer (especially iOS expects pointer on buttons)
     this.btn.style.cursor = 'pointer'
 
     const icon = document.createElement('img')
@@ -52,8 +52,7 @@ export class MainMenuPlayUI {
 
     const label = document.createElement('span')
     this.label = label
-    // Add debugging: Show error summary instead of "PLAY"
-    label.textContent = 'Mobile click triggers blocked by slow _touchStarted reset'
+    label.textContent = 'Play'
     label.style.fontFamily = "'m6x11', monospace"
     label.style.fontStyle = 'normal'
     label.style.fontSize = '48px'
@@ -73,9 +72,17 @@ export class MainMenuPlayUI {
       this.applyFocusStyle()
     })
 
-    // One pointerdown/pointerup handler for all input types, with deduplication/cooldown
+    // Mobile: Use click for widest compat, plus pointerdown for pointer devices
+    // Both handlers deduplicated via _lastPlay
+
+    this.btn.addEventListener('click', (e) => {
+      // Native button will already handle focus/blur on click/tap,
+      // so keep logic simple and only call triggerPlay.
+      this.triggerPlay()
+    })
     this.btn.addEventListener('pointerdown', (e) => {
-      e.preventDefault()
+      // pointerdown on some mobile devices triggers before click/tap.
+      // e.preventDefault can break pseudo-focus, so don't use unless bug observed.
       label.style.color = '#ffff00'
       this.triggerPlay()
     })
@@ -130,6 +137,7 @@ export class MainMenuPlayUI {
     if (now - this._lastPlay < 300) return
     this._lastPlay = now
     this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
+    // On mobile, some browsers block sound unless in a user gesture handler.
     void this.clickSfx.play().catch(() => {})
     this.onPlay?.()
   }
