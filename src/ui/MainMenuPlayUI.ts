@@ -75,12 +75,12 @@ export class MainMenuPlayUI {
     // Mobile: Use click for widest compat, plus pointerdown for pointer devices
     // Both handlers deduplicated via _lastPlay
 
-    this.btn.addEventListener('click', (e) => {
+    this.btn.addEventListener('click', () => {
       // Native button will already handle focus/blur on click/tap,
       // so keep logic simple and only call triggerPlay.
       this.triggerPlay()
     })
-    this.btn.addEventListener('pointerdown', (e) => {
+    this.btn.addEventListener('pointerdown', () => {
       // pointerdown on some mobile devices triggers before click/tap.
       // e.preventDefault can break pseudo-focus, so don't use unless bug observed.
       label.style.color = '#ffff00'
