@@ -1,12 +1,17 @@
 import * as THREE from 'three'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { placeOnSphere } from '../core/Utils'
+import { dedupeLocalBoxes, pushWorldCollisionBox, type CollisionBox, type LocalBoxHitbox } from './CollisionTypes'
 
 export type TreePlacement = {
   phi: number
   theta: number
   scale: number
 }
+
+const PINE_BOX_HITBOXES: LocalBoxHitbox[] = dedupeLocalBoxes([
+  { position: [0.294, 0.407, 0.477], size: [0.609, 0.199, 0.401] },
+])
 
 export class TreeSystem {
   public treeMaterial: THREE.ShaderMaterial
@@ -18,6 +23,7 @@ export class TreeSystem {
   private sphereRadius: number
   private treeLayout: TreePlacement[] = []
   private collisionBodies: { position: THREE.Vector3; radius: number }[] = []
+  private collisionBoxes: CollisionBox[] = []
 
   constructor(scene: THREE.Scene, sphereRadius: number) {
     this.sphereRadius = sphereRadius
@@ -168,6 +174,7 @@ export class TreeSystem {
     this.container.clear()
     this.treeLayout = []
     this.collisionBodies = []
+    this.collisionBoxes = []
     if (!this.sourceTree) return
 
     for (const tree of layout) {
@@ -185,6 +192,9 @@ export class TreeSystem {
         position,
         radius: Math.max(0.55, tree.scale * 0.48),
       })
+      for (const box of PINE_BOX_HITBOXES) {
+        pushWorldCollisionBox(this.collisionBoxes, treeGroup, box, tree.scale)
+      }
     }
   }
 
@@ -194,6 +204,10 @@ export class TreeSystem {
 
   public getCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {
     return this.collisionBodies
+  }
+
+  public getCollisionBoxes(): CollisionBox[] {
+    return this.collisionBoxes
   }
 
   public getRaycastTargets(): THREE.Object3D[] {

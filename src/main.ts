@@ -112,9 +112,16 @@ window.addEventListener(COINS_CHANGED_EVENT, (ev) => {
 })
 
 const COINS_PER_KILL = 10
+const HEALTH_PER_KILL = 15
 
 function awardKillCoins() {
   setCoins(getCoins() + COINS_PER_KILL)
+}
+
+function healLocalPlayerOnKill() {
+  if (isDead || atMainMenu) return
+  player.state.health = Math.min(player.state.maxHealth, player.state.health + HEALTH_PER_KILL, 100)
+  lastHealth = player.state.health
 }
 
 const core = new SceneSetup()
@@ -957,6 +964,7 @@ void Promise.all([
       deathUI.show(killerName || 'Unknown', weapon || 'Unknown', onDeathScreenConfirmRespawn)
     } else if (attackerId != null && attackerId === multiplayer.getLocalPlayerId()) {
       awardKillCoins()
+      healLocalPlayerOnKill()
       if (typeof killerKills === 'number') {
         myPvpKills = killerKills
       } else {
@@ -1175,6 +1183,7 @@ const grenadeSystem = new GrenadeSystem(core.scene, sphereRadius, (params) => {
 
         if (res.killed) {
           awardKillCoins()
+          healLocalPlayerOnKill()
           discoveredPlayers.add(`bot_${idx}`)
           // stats will be synced via player_killed message from server
           updateLeaderboard()
@@ -1832,6 +1841,11 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
 
 const _tmpKb = new THREE.Vector3()
 const _colDelta = new THREE.Vector3()
+const _boxLocalCenter = new THREE.Vector3()
+const _boxClosest = new THREE.Vector3()
+const _boxLocalNormal = new THREE.Vector3()
+const _boxWorldNormal = new THREE.Vector3()
+const _boxInvQuat = new THREE.Quaternion()
 const _trainHitAway = new THREE.Vector3()
 
 let lastTrainPlayerHitMs = -Infinity
@@ -2321,6 +2335,7 @@ function shoot() {
 
           if (damageRes.killed) {
             awardKillCoins()
+            healLocalPlayerOnKill()
             discoveredPlayers.add(`bot_${damageRes.targetIdx}`)
             // stats will be synced via player_killed message from server
             updateLeaderboard()
@@ -2477,6 +2492,51 @@ let settingsWasOpenLastFrame = false
 let lastDamageTakenAtMs = performance.now()
 const PASSIVE_HEAL_DELAY_MS = 3000
 const PASSIVE_HEAL_PER_SEC = 4
+
+function resolvePlayerAgainstCollisionBoxes(
+  myPos: THREE.Vector3,
+  myRadius: number,
+  boxes: Array<{ position: THREE.Vector3; halfSize: THREE.Vector3; quaternion: THREE.Quaternion }>
+) {
+  for (let i = 0; i < boxes.length; i++) {
+    const box = boxes[i]!
+    _boxInvQuat.copy(box.quaternion).invert()
+    _boxLocalCenter.copy(myPos).sub(box.position).applyQuaternion(_boxInvQuat)
+    _boxClosest.copy(_boxLocalCenter).clamp(
+      _v1.copy(box.halfSize).multiplyScalar(-1),
+      _v2.copy(box.halfSize)
+    )
+
+    _boxLocalNormal.copy(_boxLocalCenter).sub(_boxClosest)
+    const distSq = _boxLocalNormal.lengthSq()
+    let push = 0
+    if (distSq > 1e-8) {
+      const dist = Math.sqrt(distSq)
+      if (dist >= myRadius) continue
+      _boxLocalNormal.multiplyScalar(1 / dist)
+      push = myRadius - dist + 1e-4
+    } else {
+      const dx = box.halfSize.x - Math.abs(_boxLocalCenter.x)
+      const dy = box.halfSize.y - Math.abs(_boxLocalCenter.y)
+      const dz = box.halfSize.z - Math.abs(_boxLocalCenter.z)
+      if (dx <= dy && dx <= dz) {
+        _boxLocalNormal.set(_boxLocalCenter.x >= 0 ? 1 : -1, 0, 0)
+        push = myRadius + dx + 1e-4
+      } else if (dy <= dz) {
+        _boxLocalNormal.set(0, _boxLocalCenter.y >= 0 ? 1 : -1, 0)
+        push = myRadius + dy + 1e-4
+      } else {
+        _boxLocalNormal.set(0, 0, _boxLocalCenter.z >= 0 ? 1 : -1)
+        push = myRadius + dz + 1e-4
+      }
+    }
+
+    _boxWorldNormal.copy(_boxLocalNormal).applyQuaternion(box.quaternion).normalize()
+    myPos.addScaledVector(_boxWorldNormal, push)
+    const into = player.state.velocity.dot(_boxWorldNormal)
+    if (into < 0) player.state.velocity.addScaledVector(_boxWorldNormal, -into)
+  }
+}
 
 function tryAutoLockCursor() {
   if (document.visibilityState !== 'visible') return
@@ -3038,7 +3098,7 @@ function animate() {
       }
 
       // Prevent phasing through tents
-      const tentBodies = tents.getCollisionBodies()
+      const tentBodies: Array<{ position: THREE.Vector3; radius: number }> = []
       for (let i = 0; i < tentBodies.length; i++) {
         const b = tentBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
@@ -3057,7 +3117,7 @@ function animate() {
       }
 
       // Prevent phasing through barriers
-      const barrierBodies = barriers.getCollisionBodies()
+      const barrierBodies: Array<{ position: THREE.Vector3; radius: number }> = []
       for (let i = 0; i < barrierBodies.length; i++) {
         const b = barrierBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
@@ -3076,7 +3136,7 @@ function animate() {
       }
 
       // Prevent phasing through wall steps
-      const wallStepBodies = wallSteps.getCollisionBodies()
+      const wallStepBodies: Array<{ position: THREE.Vector3; radius: number }> = []
       for (let i = 0; i < wallStepBodies.length; i++) {
         const b = wallStepBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
@@ -3112,6 +3172,11 @@ function animate() {
           player.state.velocity.addScaledVector(_colDelta, -into)
         }
       }
+
+      resolvePlayerAgainstCollisionBoxes(myPos, myRadius, tents.getCollisionBoxes())
+      resolvePlayerAgainstCollisionBoxes(myPos, myRadius, barriers.getCollisionBoxes())
+      resolvePlayerAgainstCollisionBoxes(myPos, myRadius, wallSteps.getCollisionBoxes())
+      resolvePlayerAgainstCollisionBoxes(myPos, myRadius, trees.getCollisionBoxes())
 
       const isProtected = localSpawnDamageInvulnerable()
       if (!atMainMenu && !isProtected) {

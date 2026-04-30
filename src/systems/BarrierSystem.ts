@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { clone as cloneSkinningHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { placeOnSphere } from '../core/Utils'
+import { dedupeLocalBoxes, pushWorldCollisionBox, type CollisionBox, type LocalBoxHitbox } from './CollisionTypes'
 
 export const BARRIER_CONFIG = {
   SIZE: 0.075,
@@ -10,6 +11,11 @@ export const BARRIER_CONFIG = {
   /** Crease edges only (deg): lower = more lines. */
   EDGE_ANGLE: 22,
 }
+
+const BARRIER_BOX_HITBOXES: LocalBoxHitbox[] = dedupeLocalBoxes([
+  { position: [0, 8.3, 0], size: [66.483, 16.683, 24.983] },
+  { position: [0, 16.6, 0], size: [66.483, 33.283, 24.983] },
+])
 
 function createBarrierToonFill(color: THREE.Color): THREE.MeshToonMaterial {
   const emissive = color.clone().multiplyScalar(0.38)
@@ -33,6 +39,7 @@ export class BarrierSystem {
   private edgeMaterial: THREE.ShaderMaterial
 
   private barriersData: { position: THREE.Vector3; radius: number }[] = []
+  private barrierBoxes: CollisionBox[] = []
 
   constructor(
     scene: THREE.Scene,
@@ -106,6 +113,7 @@ export class BarrierSystem {
   public clear() {
     this.container.clear()
     this.barriersData = []
+    this.barrierBoxes = []
   }
 
   public spawn(phi: number, theta: number, scaleOverride?: number) {
@@ -130,6 +138,9 @@ export class BarrierSystem {
     barrier.getWorldPosition(worldPos)
     const radius = (scaleOverride ?? this.barrierScale) * 45 // Slightly larger collision radius
     this.barriersData.push({ position: worldPos, radius })
+    for (const box of BARRIER_BOX_HITBOXES) {
+      pushWorldCollisionBox(this.barrierBoxes, barrier, box, scaleOverride ?? this.barrierScale)
+    }
   }
 
   public getCollisionBodies() {
@@ -138,6 +149,10 @@ export class BarrierSystem {
 
   public getRaycastTargets(): THREE.Object3D[] {
     return this.container.children
+  }
+
+  public getCollisionBoxes(): CollisionBox[] {
+    return this.barrierBoxes
   }
 
   public updateScales(s: number) {

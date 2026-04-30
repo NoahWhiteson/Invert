@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { clone as cloneSkinningHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { placeOnSphere } from '../core/Utils'
+import { dedupeLocalBoxes, pushWorldCollisionBox, type CollisionBox, type LocalBoxHitbox } from './CollisionTypes'
 
 export const TENT_CONFIG = {
   SIZE: 0.05,
@@ -10,6 +11,27 @@ export const TENT_CONFIG = {
   /** Crease edges only (deg): lower = more lines. */
   EDGE_ANGLE: 22,
 }
+
+const TENT_BOX_HITBOXES: LocalBoxHitbox[] = dedupeLocalBoxes([
+  { position: [-23.937, 5.751, 0.049], size: [8.272, 7.71, 41.143] },
+  { position: [-16.856, 16.167, 0.049], size: [22.435, 28.541, 41.143] },
+  { position: [-12.755, 19.262, 0.049], size: [14.233, 22.35, 41.143] },
+  { position: [-10.818, 25.665, 0.049], size: [18.107, 35.154, 41.143] },
+  { position: [-1.937, 36.804, 0.049], size: [7.544, 12.874, 41.143] },
+  { position: [1.937, 36.804, 0.049], size: [7.544, 12.874, 41.143] },
+  { position: [10.818, 25.665, 0.049], size: [18.107, 35.154, 41.143] },
+  { position: [12.755, 19.262, 0.049], size: [14.233, 22.35, 41.143] },
+  { position: [16.856, 16.167, 0.049], size: [22.435, 28.541, 41.143] },
+  { position: [23.937, 5.751, 0.049], size: [8.272, 7.71, 41.143] },
+  { position: [-14.945, 19.173, -22.992], size: [26.257, 38.417, 5.079] },
+  { position: [-14.945, 19.173, 23.09], size: [26.257, 38.417, 5.079] },
+  { position: [-11.402, 24.568, -22.992], size: [33.343, 49.207, 5.079] },
+  { position: [-11.402, 24.568, 23.09], size: [33.343, 49.207, 5.079] },
+  { position: [11.402, 24.568, -22.992], size: [33.343, 49.207, 5.079] },
+  { position: [11.402, 24.568, 23.09], size: [33.343, 49.207, 5.079] },
+  { position: [14.945, 19.173, -22.992], size: [26.257, 38.417, 5.079] },
+  { position: [14.945, 19.173, 23.09], size: [26.257, 38.417, 5.079] },
+])
 
 function createTentToonFill(color: THREE.Color, _skinning: boolean): THREE.MeshToonMaterial {
   const emissive = color.clone().multiplyScalar(0.38)
@@ -34,6 +56,7 @@ export class TentSystem {
   private edgeMaterial: THREE.LineBasicMaterial
 
   private tentsData: { position: THREE.Vector3; radius: number }[] = []
+  private tentBoxes: CollisionBox[] = []
 
   constructor(
     scene: THREE.Scene,
@@ -118,6 +141,7 @@ export class TentSystem {
   public clear() {
     this.container.clear()
     this.tentsData = []
+    this.tentBoxes = []
   }
 
   public spawn(phi: number, theta: number, scaleOverride?: number) {
@@ -146,6 +170,9 @@ export class TentSystem {
     // Let's use a conservative radius for now and adjust if needed.
     const radius = (scaleOverride ?? this.tentScale) * 35 
     this.tentsData.push({ position: worldPos, radius })
+    for (const box of TENT_BOX_HITBOXES) {
+      pushWorldCollisionBox(this.tentBoxes, tent, box, scaleOverride ?? this.tentScale)
+    }
   }
 
   public getCollisionBodies() {
@@ -154,6 +181,10 @@ export class TentSystem {
 
   public getRaycastTargets(): THREE.Object3D[] {
     return this.container.children
+  }
+
+  public getCollisionBoxes(): CollisionBox[] {
+    return this.tentBoxes
   }
 
   public updateScales(s: number) {

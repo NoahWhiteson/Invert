@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { clone as cloneSkinningHierarchy } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
 import { placeOnSphere } from '../core/Utils'
+import { dedupeLocalBoxes, pushWorldCollisionBox, type CollisionBox, type LocalBoxHitbox } from './CollisionTypes'
 
 export type WallStepsPlacement = {
   phi: number
@@ -19,6 +20,14 @@ const WALL_STEPS_CONFIG = {
   COLLISION_RADIUS_MIN: 0.48,
   COLLISION_RADIUS_MULT: 8,
 }
+
+const WALL_STEPS_BOX_HITBOXES: LocalBoxHitbox[] = dedupeLocalBoxes([
+  { position: [-46.429, 4, 0], size: [7.268, 8.125, 7.125] },
+  { position: [-35.714, 7.5, 0], size: [14.411, 15.125, 7.125] },
+  { position: [-12.5, 12.5, 0], size: [32.268, 25.125, 7.125] },
+  { position: [8.929, 16.5, 0], size: [10.839, 33.125, 7.125] },
+  { position: [32.143, 20, 0], size: [35.839, 40.125, 7.125] },
+])
 
 function createWallStepsToonFill(color: THREE.Color): THREE.MeshToonMaterial {
   const emissive = color.clone().multiplyScalar(0.38)
@@ -38,6 +47,7 @@ export class WallStepsSystem {
   private material: THREE.MeshToonMaterial
   private edgeMaterial: THREE.ShaderMaterial
   private collisionBodies: { position: THREE.Vector3; radius: number }[] = []
+  private collisionBoxes: CollisionBox[] = []
   private sourceBounds: THREE.Box3 | null = null
   private sourceSize = new THREE.Vector3()
   private sourceCenter = new THREE.Vector3()
@@ -108,6 +118,7 @@ export class WallStepsSystem {
   public clear() {
     this.container.clear()
     this.collisionBodies = []
+    this.collisionBoxes = []
   }
 
   public spawn(phi: number, theta: number, scaleOverride?: number) {
@@ -130,10 +141,15 @@ export class WallStepsSystem {
     this.container.add(wallSteps)
     wallSteps.updateWorldMatrix(true, false)
 
-    this.addCollisionBodiesFor(wallSteps, scale)
+    this.addCollisionBoxesFor(wallSteps, scale)
   }
 
-  private addCollisionBodiesFor(wallSteps: THREE.Group, scale: number) {
+  private addCollisionBoxesFor(wallSteps: THREE.Group, scale: number) {
+    for (const box of WALL_STEPS_BOX_HITBOXES) {
+      pushWorldCollisionBox(this.collisionBoxes, wallSteps, box, scale)
+    }
+
+    // Keep one loose sphere for spawn clearance only.
     if (!this.sourceBounds) {
       const position = new THREE.Vector3()
       wallSteps.getWorldPosition(position)
@@ -167,6 +183,10 @@ export class WallStepsSystem {
 
   public getCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {
     return this.collisionBodies
+  }
+
+  public getCollisionBoxes(): CollisionBox[] {
+    return this.collisionBoxes
   }
 
   public getRaycastTargets(): THREE.Object3D[] {
