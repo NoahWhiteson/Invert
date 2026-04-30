@@ -529,6 +529,7 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
 }
 
 function onDeathScreenConfirmRespawn() {
+  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches
   if (multiplayer.isConnected()) {
     multiplayer.sendLocalDeath()
     multiplayer.sendRespawn()
@@ -537,13 +538,13 @@ function onDeathScreenConfirmRespawn() {
       if (!isDead) return
       player.setPointerLockAllowed(true)
       finishLocalRespawn(100, 100, null)
-      void player.controls.lock()
+      if (!touchDevice) void player.controls.lock()
     }, 1300)
     return
   }
   player.setPointerLockAllowed(true)
   finishLocalRespawn(100, 100, null)
-  void player.controls.lock()
+  if (!touchDevice) void player.controls.lock()
 }
 
 function safeUnlockPlayerControls() {
@@ -1812,12 +1813,6 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     if (tp?.ragdoll) {
       tp.ragdoll.applyExternalImpulse(_colDelta.copy(_shotDir).multiplyScalar(0.1), h.point)
     }
-    if (tp) {
-      const headPos = new THREE.Vector3()
-      tp.model.getWorldPosition(headPos)
-      headPos.y += 2.5
-      damageTexts.spawn(headPos, BOT_AK_DAMAGE, stringToId(targetId))
-    }
     return
   }
 
@@ -2539,6 +2534,8 @@ function resolvePlayerAgainstCollisionBoxes(
 }
 
 function tryAutoLockCursor() {
+  const touchDevice = navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches
+  if (touchDevice) return
   if (document.visibilityState !== 'visible') return
   if (document.pointerLockElement === core.renderer.domElement) return
   if (!player.controls.isLocked) {
