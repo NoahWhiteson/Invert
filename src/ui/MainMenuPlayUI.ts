@@ -12,6 +12,7 @@ export class MainMenuPlayUI {
   private gamepadFocused = false
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private settingsUI: SettingsUI
+  private _touchStarted = false
 
   constructor(settingsUI: SettingsUI) {
     this.settingsUI = settingsUI
@@ -71,19 +72,35 @@ export class MainMenuPlayUI {
     })
 
     // --- Fix for mobile click not working ---
-    // We now do NOT call e.preventDefault() or e.stopPropagation() on 'click' on mobile, 
-    // as well as avoid duplicate triggers by only acting on 'click'.
+    // On mobile browsers, sometimes normal click event is not reliably fired especially after touch events
+    // so we explicitly listen for 'touchend' on mobile and fire triggerPlay there.
+    // Also, to avoid double triggers, we ignore the next 'click' after a mobile touch.
+    this.btn.addEventListener('touchstart', () => {
+      this._touchStarted = true
+    })
+    this.btn.addEventListener('touchend', (e) => {
+      if (isMainMenuMobileWidth()) {
+        // Prevent triggering both 'touchend' and the resultant 'click'
+        e.preventDefault()
+        e.stopPropagation()
+        this.triggerPlay()
+        // Briefly suppress next click
+        setTimeout(() => { this._touchStarted = false }, 600)
+      }
+    })
+
     this.btn.addEventListener('click', (e) => {
-      // On mobile, let the click go through. On desktop, stop propagation to avoid background focus loss.
+      // On mobile, ignore click if our touch logic just handled the event
+      if (isMainMenuMobileWidth() && this._touchStarted) {
+        return
+      }
+      // On desktop, stop propagation to avoid background focus loss.
       if (!isMainMenuMobileWidth()) {
         e.stopPropagation()
         e.preventDefault()
       }
       this.triggerPlay()
     })
-
-    // No pointerup handler needed anymore, pure 'click' covers both desktop and mobile.
-    // (Browsers now reliably fire 'click' after touchend, and pointerup is not needed for buttons.)
 
     this.wrap.appendChild(this.btn)
 
