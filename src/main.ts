@@ -500,10 +500,19 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   mobileControlsUI.setVisible(true)
   player.controls.enabled = player.controls.isLocked || input.isMobileControlsActive()
   crosshair.setVisible(true)
+  leaderboardUI.setVisible(true)
+  leaderboardUI.setOpacity(1)
+  timerUI.setVisible(true)
+  timerUI.setOpacity(1)
   healthUI.setOpacity(1)
   ammoUI.setOpacity(1)
   weaponUI.setOpacity(1)
   killFeed.setOpacity(1)
+  staminaUI.setSuppressForMenu(false)
+  coinsHUD.setPlayMode(true)
+  coinsHUD.setOpacity(1)
+  damageIndicator.setLowHealth(false)
+  lastHealth = health
   deathUI.hide()
   localSpawnInvulnUntilMs = performance.now() + LOCAL_SPAWN_DAMAGE_INVULN_MS
   ammoSystem.refillAllToStarting()
@@ -551,6 +560,7 @@ function enterDeathUiState() {
   leaderboardUI.setVisible(false)
   timerUI.setVisible(false)
   coinsHUD.setOpacity(0)
+  damageIndicator.setLowHealth(false)
   heldWeapons.setThirdPerson(true)
 }
 
@@ -1041,12 +1051,7 @@ const coinsHUD = new CoinsHUDUI()
 const damageIndicator = new DamageIndicator()
 const weaponUI = new WeaponUI((slot) => {
   if (atMainMenu || isDead || matchEndedFreeze) return
-  weaponUI.updateActiveSlot(slot)
-  heldWeapons.setActiveSlot(slot)
-  if (slot === GRENADE_SLOT) {
-    const st = ammoSystem.getState(GRENADE_SLOT)
-    heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
-  }
+  switchWeaponSlot(slot)
 })
 const killFeed = new KillFeedUI()
 const roomIdUI = new RoomIDUI()
@@ -2194,6 +2199,18 @@ function weaponLabelFromSlot(slot: number): string {
   return 'Unknown'
 }
 
+function switchWeaponSlot(slot: number, playClick: boolean = true) {
+  const next = Math.max(0, Math.min(2, slot))
+  const changed = heldWeapons.getActiveSlot() !== next
+  weaponUI.updateActiveSlot(next)
+  heldWeapons.setActiveSlot(next)
+  if (next === GRENADE_SLOT) {
+    const st = ammoSystem.getState(GRENADE_SLOT)
+    heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
+  }
+  if (changed && playClick) playSfx('click', 0.65, 'ui')
+}
+
 function slotFromWeaponName(name: string): number {
   const n = name.toLowerCase()
   if (n.includes('ak')) return AK_SLOT
@@ -2561,6 +2578,9 @@ printUndersphereConsoleMessage()
 
 let viewToggleKeyWasDown = false
 let reloadKeyWasDown = false
+let digit1WasDown = false
+let digit2WasDown = false
+let digit3WasDown = false
 let gamepadL1WasDown = false
 let gamepadR1WasDown = false
 let simFrame = 0
@@ -2580,38 +2600,24 @@ function animate() {
     if (r1Down && !gamepadR1WasDown) {
       const current = heldWeapons.getActiveSlot()
       const next = (current + 1) % 3
-      heldWeapons.setActiveSlot(next)
-      weaponUI.updateActiveSlot(next)
-      if (next === GRENADE_SLOT) {
-        const st = ammoSystem.getState(GRENADE_SLOT)
-        heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
-      }
+      switchWeaponSlot(next)
     }
     if (l1Down && !gamepadL1WasDown) {
       const current = heldWeapons.getActiveSlot()
       const next = (current + 2) % 3
-      heldWeapons.setActiveSlot(next)
-      weaponUI.updateActiveSlot(next)
-      if (next === GRENADE_SLOT) {
-        const st = ammoSystem.getState(GRENADE_SLOT)
-        heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
-      }
+      switchWeaponSlot(next)
     }
     gamepadL1WasDown = l1Down
     gamepadR1WasDown = r1Down
 
     if (input.isGamepadButtonPressed(12)) { // D-pad Up -> AK
-      heldWeapons.setActiveSlot(AK_SLOT)
-      weaponUI.updateActiveSlot(AK_SLOT)
+      switchWeaponSlot(AK_SLOT)
     } else if (input.isGamepadButtonPressed(13)) { // D-pad Down -> Grenade
-      heldWeapons.setActiveSlot(GRENADE_SLOT)
-      weaponUI.updateActiveSlot(GRENADE_SLOT)
+      switchWeaponSlot(GRENADE_SLOT)
     } else if (input.isGamepadButtonPressed(14)) { // D-pad Left -> AK
-      heldWeapons.setActiveSlot(AK_SLOT)
-      weaponUI.updateActiveSlot(AK_SLOT)
+      switchWeaponSlot(AK_SLOT)
     } else if (input.isGamepadButtonPressed(15)) { // D-pad Right -> Shotgun
-      heldWeapons.setActiveSlot(SHOTGUN_SLOT)
-      weaponUI.updateActiveSlot(SHOTGUN_SLOT)
+      switchWeaponSlot(SHOTGUN_SLOT)
     }
   } else {
     isLeftMouseDownOnGamepad = false
@@ -3366,29 +3372,18 @@ function animate() {
       const direction = wheelDelta > 0 ? 1 : -1
       let next = (current + direction) % 3
       if (next < 0) next = 2
-      weaponUI.updateActiveSlot(next)
-      heldWeapons.setActiveSlot(next)
-      if (next === 2) {
-        const st = ammoSystem.getState(2)
-        heldWeapons.setModelVisibility(2, (st?.mag ?? 0) > 0)
-      }
+      switchWeaponSlot(next)
     }
 
-    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit1')) {
-      weaponUI.updateActiveSlot(0)
-      heldWeapons.setActiveSlot(0)
-    }
-    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit2')) {
-      weaponUI.updateActiveSlot(1)
-      heldWeapons.setActiveSlot(1)
-    }
-    if (!isDead && !matchEndedFreeze && input.isKeyDown('Digit3')) {
-      weaponUI.updateActiveSlot(2)
-      heldWeapons.setActiveSlot(2)
-      // Check if we should show the grenade
-      const st = ammoSystem.getState(2)
-      heldWeapons.setModelVisibility(2, (st?.mag ?? 0) > 0)
-    }
+    const digit1Down = input.isKeyDown('Digit1')
+    const digit2Down = input.isKeyDown('Digit2')
+    const digit3Down = input.isKeyDown('Digit3')
+    if (!isDead && !matchEndedFreeze && digit1Down && !digit1WasDown) switchWeaponSlot(AK_SLOT)
+    if (!isDead && !matchEndedFreeze && digit2Down && !digit2WasDown) switchWeaponSlot(SHOTGUN_SLOT)
+    if (!isDead && !matchEndedFreeze && digit3Down && !digit3WasDown) switchWeaponSlot(GRENADE_SLOT)
+    digit1WasDown = digit1Down
+    digit2WasDown = digit2Down
+    digit3WasDown = digit3Down
 
     const reloadDown = input.isKeyDown('KeyR')
     if (!isDead && !matchEndedFreeze && reloadDown && !reloadKeyWasDown && controlsActive && !isReloading) {
