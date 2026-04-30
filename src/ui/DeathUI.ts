@@ -1,4 +1,5 @@
 import { ringTextShadow } from './textOutline'
+import { isMainMenuMobileWidth } from './mainMenuLayout'
 
 export class DeathUI {
   private root: HTMLDivElement
@@ -17,6 +18,7 @@ export class DeathUI {
   private timerId: number | null = null
   private countdownMorphTimer: number | null = null
   private onRespawnClick: (() => void) | null = null
+  private lastRespawnTap = 0
   /** Native `disabled` on buttons drops click events; use a flag + styling instead. */
   private respawnReady = false
 
@@ -34,6 +36,7 @@ export class DeathUI {
     this.root.style.position = 'fixed'
     this.root.style.inset = '0'
     this.root.style.pointerEvents = 'none'
+    this.root.style.touchAction = 'manipulation'
     this.root.style.zIndex = '2147483646'
     this.root.style.display = 'none'
 
@@ -73,6 +76,7 @@ export class DeathUI {
     this.card.style.textAlign = 'center'
     this.card.classList.add('death-card')
     this.card.style.pointerEvents = 'auto'
+    this.card.style.touchAction = 'manipulation'
     this.card.style.opacity = '0'
     this.card.style.transition = 'opacity 350ms ease, transform 350ms cubic-bezier(0.1, 0.88, 0.16, 1)'
     this.root.appendChild(this.card)
@@ -111,6 +115,7 @@ export class DeathUI {
     this.respawnBtn.style.justifyContent = 'center'
     this.respawnBtn.style.gap = '0'
     this.respawnBtn.style.textDecoration = 'none'
+    this.respawnBtn.style.touchAction = 'manipulation'
     this.respawnBtn.classList.add('death-respawn')
 
     this.respawnPrefix = document.createElement('span')
@@ -142,13 +147,29 @@ export class DeathUI {
       this.respawnBtn.style.color = '#fff'
     })
 
-    const tryRespawn = (e: Event) => {
+    const tryRespawn = (e?: Event) => {
       if (!this.respawnReady) return
-      e.preventDefault()
-      e.stopPropagation()
+      const now = Date.now()
+      if (now - this.lastRespawnTap < 300) return
+      this.lastRespawnTap = now
+      e?.preventDefault()
+      e?.stopPropagation()
       this.onRespawnClick?.()
     }
     this.card.addEventListener('click', tryRespawn)
+    this.respawnBtn.addEventListener('click', tryRespawn)
+    this.respawnBtn.addEventListener('pointerdown', (e) => {
+      if (!isMainMenuMobileWidth()) return
+      tryRespawn(e)
+    })
+    this.card.addEventListener('pointerdown', (e) => {
+      if (!isMainMenuMobileWidth()) return
+      tryRespawn(e)
+    })
+    this.respawnBtn.addEventListener('touchend', (e) => {
+      if (!isMainMenuMobileWidth()) return
+      tryRespawn(e)
+    }, { passive: false })
     this.card.appendChild(this.respawnBtn)
     this.setCountdownInstant(10)
     this.applyRespawnReadyStyle()

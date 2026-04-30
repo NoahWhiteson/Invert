@@ -497,7 +497,8 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   player.state.isThirdPerson = false
   heldWeapons.setThirdPerson(false)
   player.setPointerLockAllowed(true)
-  player.controls.enabled = player.controls.isLocked
+  mobileControlsUI.setVisible(true)
+  player.controls.enabled = player.controls.isLocked || input.isMobileControlsActive()
   crosshair.setVisible(true)
   healthUI.setOpacity(1)
   ammoUI.setOpacity(1)
@@ -509,7 +510,6 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   for (let s = 0; s < 3; s++) {
     heldWeapons.setModelVisibility(s, true)
   }
-  mobileControlsUI.setVisible(true)
 }
 
 function onDeathScreenConfirmRespawn() {
