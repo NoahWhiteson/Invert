@@ -7,7 +7,9 @@ export class MainMenuPlayUI {
   private btn: HTMLButtonElement
   private label: HTMLSpanElement
   private icon: HTMLImageElement
+  private mobileDisclaimer: HTMLDivElement
   private onPlay: (() => void) | null = null
+  private gamepadFocused = false
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private settingsUI: SettingsUI
 
@@ -64,17 +66,40 @@ export class MainMenuPlayUI {
       label.style.color = '#ffff00'
     })
     this.btn.addEventListener('mouseleave', () => {
-      label.style.color = '#fff'
+      this.applyFocusStyle()
     })
     this.btn.addEventListener('click', (e) => {
       e.stopPropagation()
       e.preventDefault()
-      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
-      void this.clickSfx.play().catch(() => {})
-      this.onPlay?.()
+      this.triggerPlay()
+    })
+    this.btn.addEventListener('pointerup', (e) => {
+      if (!isMainMenuMobileWidth()) return
+      e.stopPropagation()
+      e.preventDefault()
+      this.triggerPlay()
     })
 
     this.wrap.appendChild(this.btn)
+
+    this.mobileDisclaimer = document.createElement('div')
+    this.mobileDisclaimer.textContent = 'Add to Homescreen for the best experience'
+    this.mobileDisclaimer.style.position = 'fixed'
+    this.mobileDisclaimer.style.left = '50%'
+    this.mobileDisclaimer.style.bottom = 'max(104px, calc(96px + env(safe-area-inset-bottom, 0px)))'
+    this.mobileDisclaimer.style.transform = 'translateX(-50%)'
+    this.mobileDisclaimer.style.width = 'min(320px, calc(100vw - 28px))'
+    this.mobileDisclaimer.style.fontFamily = "'m6x11', monospace"
+    this.mobileDisclaimer.style.fontSize = '17px'
+    this.mobileDisclaimer.style.lineHeight = '1.15'
+    this.mobileDisclaimer.style.textAlign = 'center'
+    this.mobileDisclaimer.style.color = 'rgba(255,255,255,0.78)'
+    this.mobileDisclaimer.style.textShadow = ringTextShadow(2)
+    this.mobileDisclaimer.style.pointerEvents = 'none'
+    this.mobileDisclaimer.style.display = 'none'
+    this.mobileDisclaimer.style.zIndex = '1200'
+    document.body.appendChild(this.mobileDisclaimer)
+
     document.body.appendChild(this.wrap)
 
     this.applyResponsiveLayout()
@@ -90,16 +115,37 @@ export class MainMenuPlayUI {
     this.label.style.fontSize = m ? '34px' : '48px'
     this.icon.style.width = m ? '34px' : '40px'
     this.icon.style.height = m ? '34px' : '40px'
+    this.mobileDisclaimer.style.display = m && this.wrap.style.display !== 'none' ? 'block' : 'none'
   }
 
   public setOnPlay(handler: () => void) {
     this.onPlay = handler
   }
 
+  private triggerPlay() {
+    this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
+    void this.clickSfx.play().catch(() => {})
+    this.onPlay?.()
+  }
+
+  private applyFocusStyle() {
+    this.label.style.color = this.gamepadFocused ? '#ffff00' : '#fff'
+    this.btn.style.transform = this.gamepadFocused ? 'translateY(-2px) scale(1.05)' : ''
+    this.icon.style.filter = this.gamepadFocused ? 'brightness(1.18) saturate(1.15)' : ''
+  }
+
+  public setGamepadFocused(focused: boolean) {
+    if (this.gamepadFocused === focused) return
+    this.gamepadFocused = focused
+    this.applyFocusStyle()
+  }
+
   public setVisible(visible: boolean) {
     this.wrap.style.display = visible ? 'block' : 'none'
+    this.mobileDisclaimer.style.display = visible && isMainMenuMobileWidth() ? 'block' : 'none'
     if (visible) {
       this.wrap.style.opacity = '1'
+      this.mobileDisclaimer.style.opacity = '1'
       this.applyResponsiveLayout()
     }
   }
@@ -107,6 +153,7 @@ export class MainMenuPlayUI {
   public setOpacity(alpha: number) {
     const a = alpha <= 0 ? 0 : alpha >= 1 ? 1 : alpha
     this.wrap.style.opacity = String(a)
+    this.mobileDisclaimer.style.opacity = String(a)
   }
 
   public getPlayButton(): HTMLElement {

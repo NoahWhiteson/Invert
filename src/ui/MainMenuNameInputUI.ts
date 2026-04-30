@@ -4,9 +4,12 @@ import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 const THICK_OUTLINE =
   '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000'
 
-const DEFAULT_NAME = 'You'
-const MAX_USERNAME_CHARS = 8
+const MAX_USERNAME_CHARS = 10
 const PENCIL_STROKE_PX = 1
+
+function makeDefaultName(): string {
+  return `Player_${Math.floor(100 + Math.random() * 900)}`
+}
 
 function pencilStrokeFilter(px: number): string {
   const p = px
@@ -27,6 +30,7 @@ export class MainMenuNameInputUI {
   private input: HTMLInputElement
   private onCommit: (name: string) => void
   private lastValidRaw: string
+  private readonly defaultName = makeDefaultName()
 
   constructor(initialName: string, onCommit: (name: string) => void) {
     this.onCommit = onCommit
@@ -63,8 +67,8 @@ export class MainMenuNameInputUI {
     this.input.type = 'text'
     this.input.autocomplete = 'off'
     this.input.spellcheck = false
-    this.input.maxLength = 8
-    this.input.value = initialName.trim() || DEFAULT_NAME
+    this.input.maxLength = MAX_USERNAME_CHARS
+    this.input.value = initialName.trim() || this.defaultName
     this.lastValidRaw = this.input.value
 
     this.input.style.pointerEvents = 'auto'
@@ -89,14 +93,14 @@ export class MainMenuNameInputUI {
         return
       }
       this.lastValidRaw = raw
-      const v = raw.trim() || DEFAULT_NAME
+      const v = raw.trim() || this.defaultName
       this.onCommit(v)
     }
 
     const normalizeDisplay = () => {
-      let v = this.input.value.trim() || DEFAULT_NAME
+      let v = this.input.value.trim() || this.defaultName
       if (isProfanityListReady() && textContainsProfanity(v)) {
-        v = DEFAULT_NAME
+        v = this.defaultName
         this.input.value = v
       }
       this.lastValidRaw = this.input.value
@@ -109,9 +113,9 @@ export class MainMenuNameInputUI {
     void loadProfanityList().then(() => {
       const raw = this.input.value
       if (!textContainsProfanity(raw)) return
-      this.input.value = DEFAULT_NAME
-      this.lastValidRaw = DEFAULT_NAME
-      this.onCommit(DEFAULT_NAME)
+      this.input.value = this.defaultName
+      this.lastValidRaw = this.defaultName
+      this.onCommit(this.defaultName)
     })
 
     this.wrap.appendChild(pencil)
@@ -160,7 +164,7 @@ export class MainMenuNameInputUI {
   }
 
   public syncValue(name: string) {
-    const v = (name.trim() || DEFAULT_NAME).slice(0, MAX_USERNAME_CHARS)
+    const v = (name.trim() || this.defaultName).slice(0, MAX_USERNAME_CHARS)
     if (this.input.value !== v) this.input.value = v
     this.lastValidRaw = this.input.value
   }

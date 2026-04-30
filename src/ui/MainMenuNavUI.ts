@@ -28,6 +28,7 @@ export class MainMenuNavUI {
   private readonly buttons: HTMLButtonElement[] = []
   private readonly iconBasePx: number[] = []
   private readonly navRow: HTMLDivElement
+  private focusedIndex: number | null = null
   private clickSfx = new Audio(new URL('../assets/audio/click.mp3', import.meta.url).href)
   private titleElement: HTMLDivElement
   private settingsUI: SettingsUI
@@ -171,8 +172,7 @@ export class MainMenuNavUI {
         img.style.filter = ICON_HOVER_FILTER
       })
       btn.addEventListener('mouseleave', () => {
-        span.style.color = '#fff'
-        img.style.filter = ICON_BASE_FILTER
+        this.applyButtonFocusStyles()
       })
       btn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -265,8 +265,27 @@ export class MainMenuNavUI {
     }
   }
 
+  private applyButtonFocusStyles() {
+    for (let i = 0; i < this.buttons.length; i++) {
+      const btn = this.buttons[i]
+      const focused = this.focusedIndex === i
+      const span = btn.querySelector('.main-menu-nav-label') as HTMLSpanElement | null
+      const img = btn.querySelector('img') as HTMLImageElement | null
+      if (span) span.style.color = focused ? '#ffff00' : '#fff'
+      if (img) img.style.filter = focused ? ICON_HOVER_FILTER : ICON_BASE_FILTER
+      btn.style.transform = focused ? 'translateY(-2px) scale(1.05)' : ''
+    }
+  }
+
   public getButtons(): HTMLButtonElement[] {
     return this.buttons
+  }
+
+  public setGamepadFocusedIndex(index: number | null) {
+    const next = index === null ? null : Math.max(0, Math.min(this.buttons.length - 1, index))
+    if (this.focusedIndex === next) return
+    this.focusedIndex = next
+    this.applyButtonFocusStyles()
   }
 
   public setVisible(visible: boolean) {

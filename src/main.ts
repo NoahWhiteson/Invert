@@ -168,15 +168,21 @@ function registerBotKill(killerBotIndex: number) {
 let myBotKills = 0
 /** PvP kills — set from server `killerKills` on each kill (authoritative). */
 let myPvpKills = 0
-const MAX_USERNAME_CHARS = 8
+const MAX_USERNAME_CHARS = 10
+
+function makeDefaultUsername(): string {
+  return `Player_${Math.floor(100 + Math.random() * 900)}`
+}
+
+const SESSION_DEFAULT_USERNAME = makeDefaultUsername()
 
 function clampUsername(raw: string): string {
   const t = raw.trim()
-  return (t.length > 0 ? t : 'You').slice(0, MAX_USERNAME_CHARS)
+  return (t.length > 0 ? t : SESSION_DEFAULT_USERNAME).slice(0, MAX_USERNAME_CHARS)
 }
 
 const _storedName = localStorage.getItem('invert_username')
-let myUsername = clampUsername(_storedName ?? '')
+let myUsername = clampUsername(!_storedName || _storedName === 'You' ? '' : _storedName)
 if (_storedName !== myUsername) {
   try {
     localStorage.setItem('invert_username', myUsername)
@@ -414,38 +420,47 @@ window.addEventListener(
   { passive: false }
 )
 
+const SPAWN_OBJECT_CLEARANCE = 2.6
+const SPAWN_MAX_ATTEMPTS = 160
+
+function getSpawnCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {
+  return [
+    ...tents.getCollisionBodies(),
+    ...barriers.getCollisionBodies(),
+    ...trees.getCollisionBodies(),
+    ...targetPlayers.getCollisionBodies(),
+    ...multiplayer.getCollisionBodies(),
+  ]
+}
+
+function getSpawnClearance(pos: THREE.Vector3): number {
+  let clearance = Infinity
+  const bodies = getSpawnCollisionBodies()
+  for (let i = 0; i < bodies.length; i++) {
+    const b = bodies[i]!
+    const c = pos.distanceTo(b.position) - b.radius - SPAWN_OBJECT_CLEARANCE
+    if (c < clearance) clearance = c
+  }
+  return clearance
+}
+
 function getRandomSpawnPos(radius: number): THREE.Vector3 {
   const out = new THREE.Vector3()
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const st = randomPhiThetaClearOfTrainTrack(80) 
-    out.setFromSphericalCoords(radius, st.phi, st.theta)
-    
-    // Check for collisions with other objects
-    let tooClose = false
-    
-    // Check tents
-    const tentPos = tents.getTentPositions()
-    for (const t of tentPos) {
-      if (out.distanceTo(t.position) < t.radius + 2.5) { // Increased from 1.5
-        tooClose = true
-        break
-      }
-    }
-    if (tooClose) continue
+  const best = new THREE.Vector3(0, -radius, 0)
+  let bestClearance = -Infinity
 
-    // Check trees
-    const treePos = trees.getTreeLayout()
-    for (const t of treePos) {
-      const tp = new THREE.Vector3().setFromSphericalCoords(radius, t.phi, t.theta)
-      if (out.distanceTo(tp) < 3.0) { // Increased from 2.2
-        tooClose = true
-        break
-      }
+  for (let attempt = 0; attempt < SPAWN_MAX_ATTEMPTS; attempt++) {
+    const st = randomPhiThetaClearOfTrainTrack(80)
+    out.setFromSphericalCoords(radius, st.phi, st.theta)
+    const clearance = getSpawnClearance(out)
+    if (clearance > bestClearance) {
+      best.copy(out)
+      bestClearance = clearance
     }
-    
-    if (!tooClose) return out
+    if (clearance >= 0) return out
   }
-  return out
+
+  return best
 }
   
 
@@ -1366,14 +1381,125 @@ function syncMainMenuPanelChrome() {
 
 function setMainMenuView(view: 'home' | 'skins' | 'store' | 'credits') {
   mainMenuView = view
+  if (typeof mainMenuNavUI !== 'undefined') {
+    const focusIndex = view === 'home' ? 0 : view === 'skins' ? 1 : view === 'store' ? 2 : 4
+    mainMenuGamepadFocusIndex = focusIndex
+    mainMenuNavUI.setGamepadFocusedIndex(focusIndex)
+    if (typeof mainMenuPlayUI !== 'undefined') mainMenuPlayUI.setGamepadFocused(false)
+  }
   syncMainMenuPanelChrome()
+}
+
+type MainMenuGamepadAction = 'home' | 'skins' | 'store' | 'settings' | 'credits' | 'play'
+const MAIN_MENU_GAMEPAD_ACTIONS: MainMenuGamepadAction[] = ['home', 'skins', 'store', 'settings', 'credits', 'play']
+const MAIN_MENU_GAMEPAD_PLAY_INDEX = MAIN_MENU_GAMEPAD_ACTIONS.indexOf('play')
+let mainMenuGamepadFocusIndex = 0
+let mainMenuGamepadHorizontalWasDown = false
+let mainMenuGamepadVerticalWasDown = false
+let mainMenuGamepadAcceptWasDown = false
+let mainMenuGamepadCancelWasDown = false
+
+function mainMenuGamepadNavIndexForView(): number {
+  return mainMenuView === 'home' ? 0 : mainMenuView === 'skins' ? 1 : mainMenuView === 'store' ? 2 : 4
+}
+
+function applyMainMenuGamepadFocusStyles() {
+  const onPlay = mainMenuGamepadFocusIndex === MAIN_MENU_GAMEPAD_PLAY_INDEX
+  mainMenuNavUI.setGamepadFocusedIndex(onPlay ? null : mainMenuGamepadFocusIndex)
+  mainMenuPlayUI.setGamepadFocused(onPlay)
+}
+
+function startPlayFromMenuGamepad() {
+  input.isSimulatedUnlocked = false
+  player.setPointerLockAllowed(true)
+  tryAutoLockCursor()
+  void beginPlayFromMenu()
+}
+
+function activateMainMenuGamepadFocus() {
+  const action = MAIN_MENU_GAMEPAD_ACTIONS[mainMenuGamepadFocusIndex] ?? 'home'
+  if (action === 'play') {
+    if (!settingsUI.isOpen) startPlayFromMenuGamepad()
+    return
+  }
+  if (action === 'home') {
+    setMainMenuView('home')
+    return
+  }
+  if (action === 'settings') {
+    settingsUI.toggleFromNav()
+    return
+  }
+  setMainMenuView(action)
+}
+
+function previewMainMenuGamepadFocus() {
+  const action = MAIN_MENU_GAMEPAD_ACTIONS[mainMenuGamepadFocusIndex] ?? 'home'
+  if (action === 'play') {
+    applyMainMenuGamepadFocusStyles()
+    return
+  }
+  if (action === 'settings') return
+  setMainMenuView(action)
+}
+
+function handleMainMenuGamepad() {
+  if (!input.gamepadConnected || !atMainMenu || isDead || isPlayTransitioning) {
+    if (typeof mainMenuNavUI !== 'undefined') mainMenuNavUI.setGamepadFocusedIndex(null)
+    if (typeof mainMenuPlayUI !== 'undefined') mainMenuPlayUI.setGamepadFocused(false)
+    mainMenuGamepadHorizontalWasDown = false
+    mainMenuGamepadVerticalWasDown = false
+    mainMenuGamepadAcceptWasDown = false
+    mainMenuGamepadCancelWasDown = false
+    return
+  }
+
+  applyMainMenuGamepadFocusStyles()
+
+  const axisX = input.getGamepadAxis(0)
+  const axisY = input.getGamepadAxis(1)
+  const left = axisX < -0.55 || input.isGamepadButtonPressed(14) || input.isGamepadButtonPressed(4)
+  const right = axisX > 0.55 || input.isGamepadButtonPressed(15) || input.isGamepadButtonPressed(5)
+  const horizontal = left || right
+  if (horizontal && !mainMenuGamepadHorizontalWasDown) {
+    if (mainMenuGamepadFocusIndex === MAIN_MENU_GAMEPAD_PLAY_INDEX) {
+      mainMenuGamepadFocusIndex = right ? 0 : MAIN_MENU_GAMEPAD_PLAY_INDEX - 1
+    } else {
+      const step = right ? 1 : -1
+      const navCount = MAIN_MENU_GAMEPAD_PLAY_INDEX
+      mainMenuGamepadFocusIndex = (mainMenuGamepadFocusIndex + step + navCount) % navCount
+    }
+    previewMainMenuGamepadFocus()
+  }
+  mainMenuGamepadHorizontalWasDown = horizontal
+
+  const up = axisY < -0.55 || input.isGamepadButtonPressed(12)
+  const down = axisY > 0.55 || input.isGamepadButtonPressed(13)
+  const vertical = up || down
+  if (vertical && !mainMenuGamepadVerticalWasDown) {
+    if (down) {
+      mainMenuGamepadFocusIndex = MAIN_MENU_GAMEPAD_PLAY_INDEX
+    } else if (mainMenuGamepadFocusIndex === MAIN_MENU_GAMEPAD_PLAY_INDEX) {
+      mainMenuGamepadFocusIndex = mainMenuGamepadNavIndexForView()
+    }
+    applyMainMenuGamepadFocusStyles()
+  }
+  mainMenuGamepadVerticalWasDown = vertical
+
+  const accept = input.isGamepadButtonPressed(0) || input.isGamepadButtonPressed(9)
+  if (accept && !mainMenuGamepadAcceptWasDown) activateMainMenuGamepadFocus()
+  mainMenuGamepadAcceptWasDown = accept
+
+  const cancel = input.isGamepadButtonPressed(1)
+  if (cancel && !mainMenuGamepadCancelWasDown && settingsUI.isOpen) settingsUI.toggleFromNav()
+  mainMenuGamepadCancelWasDown = cancel
 }
 
 void loadProfanityList().then(() => {
   if (!isProfanityListReady() || !textContainsProfanity(myUsername)) return
-  myUsername = 'You'
+  myUsername = makeDefaultUsername()
   persistMyUsernameToLocalStorage()
-  mainMenuNameUI.syncValue('You')
+  mainMenuNameUI.syncValue(myUsername)
   updateLeaderboard()
 })
 
@@ -1392,6 +1518,12 @@ const _shotDir = new THREE.Vector3()
 const _sphereHitPoint = new THREE.Vector3()
 const _entityRayBuffer: THREE.Object3D[] = []
 const _worldNormalScratch = new THREE.Vector3()
+const _aimAssistTargetPos = new THREE.Vector3()
+const _aimAssistToTarget = new THREE.Vector3()
+const _aimAssistBestDir = new THREE.Vector3()
+const AIM_ASSIST_MAX_ANGLE_RAD = 0.12
+const AIM_ASSIST_STRENGTH = 0.22
+const AIM_ASSIST_MAX_DISTANCE = 110
 
 /** `dir` must be unit length; returns distance along ray or null. */
 function raySphereNearestHitUnit(
@@ -1420,13 +1552,15 @@ function pickShootIntersection(
   humanPlayers: THREE.Object3D[],
   netPlayers: THREE.Object3D[],
   tents: THREE.Object3D[],
-  barriers: THREE.Object3D[]
+  barriers: THREE.Object3D[],
+  trees: THREE.Object3D[]
 ): THREE.Intersection | null {
   _entityRayBuffer.length = 0
   for (let i = 0; i < humanPlayers.length; i++) _entityRayBuffer.push(humanPlayers[i]!)
   for (let i = 0; i < netPlayers.length; i++) _entityRayBuffer.push(netPlayers[i]!)
   for (let i = 0; i < tents.length; i++) _entityRayBuffer.push(tents[i]!)
   for (let i = 0; i < barriers.length; i++) _entityRayBuffer.push(barriers[i]!)
+  for (let i = 0; i < trees.length; i++) _entityRayBuffer.push(trees[i]!)
 
   raycaster.set(origin, dir)
   const entityHits = raycaster.intersectObjects(_entityRayBuffer, true)
@@ -1448,6 +1582,37 @@ function pickShootIntersection(
     bestT = tWorld
   }
   return best
+}
+
+function applyTinyAimAssist(origin: THREE.Vector3, dir: THREE.Vector3) {
+  const minDot = Math.cos(AIM_ASSIST_MAX_ANGLE_RAD)
+  let bestDot = minDot
+  let bestDistance = Infinity
+  let found = false
+
+  const scan = (targets: THREE.Object3D[]) => {
+    for (let i = 0; i < targets.length; i++) {
+      const obj = targets[i]
+      if (!obj) continue
+      obj.getWorldPosition(_aimAssistTargetPos)
+      _aimAssistToTarget.copy(_aimAssistTargetPos).sub(origin)
+      const dist = _aimAssistToTarget.length()
+      if (dist < 2 || dist > AIM_ASSIST_MAX_DISTANCE) continue
+      _aimAssistToTarget.multiplyScalar(1 / dist)
+      const dot = dir.dot(_aimAssistToTarget)
+      if (dot < bestDot) continue
+      if (dot === bestDot && dist >= bestDistance) continue
+      bestDot = dot
+      bestDistance = dist
+      found = true
+      _aimAssistBestDir.copy(_aimAssistToTarget)
+    }
+  }
+
+  scan(targetPlayers.getRaycastTargets())
+  scan(multiplayer.getRaycastTargets())
+  if (!found) return
+  dir.lerp(_aimAssistBestDir, AIM_ASSIST_STRENGTH).normalize()
 }
 
 const _rayOc = new THREE.Vector3()
@@ -1512,7 +1677,7 @@ function tryBotAkHit(botIndex: number, eye: THREE.Vector3, dir: THREE.Vector3) {
     (o) => typeof o.userData.targetIdx !== 'number' || o.userData.targetIdx !== botIndex
   )
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, botTargets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
   const hitDist = h?.distance ?? Infinity
 
   const spawnGraceActive = localSpawnDamageInvulnerable()
@@ -1592,7 +1757,6 @@ let isRightMouseDown = false
 let isLeftMouseDownOnGamepad = false
 let isRightMouseDownOnGamepad = false
 let wasLeftMouseDownLastFrame = false
-let wasGamepadButton3DownLastFrame = false
 let grenadeCharge = 0
 
 const SHOTGUN_SLOT = 1
@@ -1973,6 +2137,7 @@ function shoot() {
   const cam = core.camera
   cam.getWorldPosition(_worldPos)
   cam.getWorldDirection(muzzleDir)
+  applyTinyAimAssist(_worldPos, muzzleDir)
 
   heldWeapons.triggerFire(performance.now())
   if (slot !== GRENADE_SLOT && playerModel.anims) {
@@ -2032,7 +2197,7 @@ function shoot() {
     }
     const targets = targetPlayers.getRaycastTargets()
     const netTargets = multiplayer.getRaycastTargets()
-    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
+    const h = pickShootIntersection(_worldPos, _shotDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
 
     if (h) {
       if (h.object === mesh || !h.object.userData.networkPlayerId) {
@@ -2193,7 +2358,7 @@ function updateCrosshairEnemyHover() {
   core.camera.getWorldDirection(muzzleDir)
   const targets = targetPlayers.getRaycastTargets()
   const netTargets = multiplayer.getRaycastTargets()
-  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets())
+  const h = pickShootIntersection(_worldPos, muzzleDir, mesh, sphereRadius, targets, netTargets, tents.getRaycastTargets(), barriers.getRaycastTargets(), trees.getRaycastTargets())
   if (!h) {
     crosshair.setEnemyHover(false)
     return
@@ -2317,6 +2482,8 @@ printUndersphereConsoleMessage()
 
 let viewToggleKeyWasDown = false
 let reloadKeyWasDown = false
+let gamepadL1WasDown = false
+let gamepadR1WasDown = false
 let simFrame = 0
 const timer = new THREE.Timer()
 
@@ -2324,30 +2491,54 @@ function animate() {
   requestAnimationFrame(animate)
 
   input.update()
-  if (input.gamepadConnected) {
-    isLeftMouseDownOnGamepad = input.isGamepadButtonPressed(7) || input.isGamepadButtonPressed(5) // RT or RB
-    isRightMouseDownOnGamepad = input.isGamepadButtonPressed(6) || input.isGamepadButtonPressed(4) // LT or LB
+  handleMainMenuGamepad()
+  if (input.gamepadConnected && !atMainMenu && !isPlayTransitioning) {
+    isLeftMouseDownOnGamepad = input.isGamepadButtonPressed(7) // R2 / RT
+    isRightMouseDownOnGamepad = input.isGamepadButtonPressed(6) // L2 / LT
 
-    // Handle Switch Weapon with Gamepad (Y/Triangle to cycle or D-pad)
-    if (input.isGamepadButtonPressed(3) && !wasGamepadButton3DownLastFrame) { // Y or Triangle
+    const l1Down = input.isGamepadButtonPressed(4)
+    const r1Down = input.isGamepadButtonPressed(5)
+    if (r1Down && !gamepadR1WasDown) {
       const current = heldWeapons.getActiveSlot()
       const next = (current + 1) % 3
       heldWeapons.setActiveSlot(next)
+      weaponUI.updateActiveSlot(next)
+      if (next === GRENADE_SLOT) {
+        const st = ammoSystem.getState(GRENADE_SLOT)
+        heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
+      }
     }
-    wasGamepadButton3DownLastFrame = input.isGamepadButtonPressed(3)
+    if (l1Down && !gamepadL1WasDown) {
+      const current = heldWeapons.getActiveSlot()
+      const next = (current + 2) % 3
+      heldWeapons.setActiveSlot(next)
+      weaponUI.updateActiveSlot(next)
+      if (next === GRENADE_SLOT) {
+        const st = ammoSystem.getState(GRENADE_SLOT)
+        heldWeapons.setModelVisibility(GRENADE_SLOT, (st?.mag ?? 0) > 0)
+      }
+    }
+    gamepadL1WasDown = l1Down
+    gamepadR1WasDown = r1Down
 
     if (input.isGamepadButtonPressed(12)) { // D-pad Up -> AK
       heldWeapons.setActiveSlot(AK_SLOT)
+      weaponUI.updateActiveSlot(AK_SLOT)
     } else if (input.isGamepadButtonPressed(13)) { // D-pad Down -> Grenade
       heldWeapons.setActiveSlot(GRENADE_SLOT)
+      weaponUI.updateActiveSlot(GRENADE_SLOT)
     } else if (input.isGamepadButtonPressed(14)) { // D-pad Left -> AK
       heldWeapons.setActiveSlot(AK_SLOT)
+      weaponUI.updateActiveSlot(AK_SLOT)
     } else if (input.isGamepadButtonPressed(15)) { // D-pad Right -> Shotgun
       heldWeapons.setActiveSlot(SHOTGUN_SLOT)
+      weaponUI.updateActiveSlot(SHOTGUN_SLOT)
     }
   } else {
     isLeftMouseDownOnGamepad = false
     isRightMouseDownOnGamepad = false
+    gamepadL1WasDown = false
+    gamepadR1WasDown = false
   }
 
   const effectiveLeftDown = isLeftMouseDown || isLeftMouseDownOnGamepad || input.isKeyDown('MouseLeft')
@@ -2784,6 +2975,25 @@ function animate() {
       const barrierBodies = barriers.getCollisionBodies()
       for (let i = 0; i < barrierBodies.length; i++) {
         const b = barrierBodies[i]!
+        _colDelta.copy(myPos).sub(b.position)
+        const distSq = _colDelta.lengthSq()
+        if (distSq < 1e-8) continue
+        const minDist = myRadius + b.radius
+        if (distSq >= minDist * minDist) continue
+        const dist = Math.sqrt(distSq)
+        const push = minDist - dist + 1e-4
+        _colDelta.multiplyScalar(1 / dist)
+        myPos.addScaledVector(_colDelta, push)
+        const into = player.state.velocity.dot(_colDelta)
+        if (into < 0) {
+          player.state.velocity.addScaledVector(_colDelta, -into)
+        }
+      }
+
+      // Prevent phasing through trees
+      const treeBodies = trees.getCollisionBodies()
+      for (let i = 0; i < treeBodies.length; i++) {
+        const b = treeBodies[i]!
         _colDelta.copy(myPos).sub(b.position)
         const distSq = _colDelta.lengthSq()
         if (distSq < 1e-8) continue

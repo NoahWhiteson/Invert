@@ -5,11 +5,19 @@ export class SceneSetup {
   public camera: THREE.PerspectiveCamera
   public renderer: THREE.WebGLRenderer
 
+  private getViewportSize(): { width: number; height: number } {
+    const vv = window.visualViewport
+    const width = Math.max(1, Math.round(vv?.width ?? window.innerWidth))
+    const height = Math.max(1, Math.round(vv?.height ?? window.innerHeight))
+    return { width, height }
+  }
+
   constructor() {
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0xffffff)
 
-    this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
+    const initial = this.getViewportSize()
+    this.camera = new THREE.PerspectiveCamera(75, initial.width / initial.height, 0.1, 1000)
     this.camera.rotation.order = 'YXZ'
 
     this.renderer = new THREE.WebGLRenderer({
@@ -18,7 +26,7 @@ export class SceneSetup {
       stencil: false,
       depth: true,
     })
-    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.renderer.setSize(initial.width, initial.height)
     const maxDpr = 1.25 // Capped to 1.25 to prevent massive lag on high DPI screens (like MacBooks)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr))
     this.renderer.sortObjects = false
@@ -26,14 +34,21 @@ export class SceneSetup {
     this.renderer.shadowMap.type = THREE.PCFShadowMap
     document.body.appendChild(this.renderer.domElement)
 
-    window.addEventListener('resize', this.onResize.bind(this))
+    const onViewportChange = () => this.onResize()
+    window.addEventListener('resize', onViewportChange)
+    window.addEventListener('orientationchange', onViewportChange)
+    window.visualViewport?.addEventListener('resize', onViewportChange)
+    window.visualViewport?.addEventListener('scroll', onViewportChange)
+    window.setTimeout(onViewportChange, 50)
+    window.setTimeout(onViewportChange, 250)
   }
 
   private onResize() {
-    this.camera.aspect = window.innerWidth / window.innerHeight
+    const { width, height } = this.getViewportSize()
+    this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25))
-    this.renderer.setSize(window.innerWidth, window.innerHeight)
+    this.renderer.setSize(width, height)
   }
 
   public render() {

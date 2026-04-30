@@ -16,6 +16,8 @@ export class TreeSystem {
   private sourceTree: THREE.Group | null = null
   private container: THREE.Group
   private sphereRadius: number
+  private treeLayout: TreePlacement[] = []
+  private collisionBodies: { position: THREE.Vector3; radius: number }[] = []
 
   constructor(scene: THREE.Scene, sphereRadius: number) {
     this.sphereRadius = sphereRadius
@@ -164,17 +166,37 @@ export class TreeSystem {
 
   private rebuild(layout: TreePlacement[]) {
     this.container.clear()
+    this.treeLayout = []
+    this.collisionBodies = []
     if (!this.sourceTree) return
 
     for (const tree of layout) {
       const treeGroup = this.sourceTree.clone()
       treeGroup.scale.set(tree.scale, tree.scale, tree.scale)
       placeOnSphere(treeGroup, this.sphereRadius, tree.phi, tree.theta, -0.1)
+      treeGroup.userData = { ...tree }
       this.container.add(treeGroup)
+      treeGroup.updateWorldMatrix(true, false)
+
+      const position = new THREE.Vector3()
+      treeGroup.getWorldPosition(position)
+      this.treeLayout.push({ ...tree })
+      this.collisionBodies.push({
+        position,
+        radius: Math.max(0.55, tree.scale * 0.48),
+      })
     }
   }
 
   public getTreeLayout(): TreePlacement[] {
-    return this.container.children.map((c) => c.userData as TreePlacement).filter(Boolean)
+    return this.treeLayout
+  }
+
+  public getCollisionBodies(): Array<{ position: THREE.Vector3; radius: number }> {
+    return this.collisionBodies
+  }
+
+  public getRaycastTargets(): THREE.Object3D[] {
+    return this.container.children
   }
 }

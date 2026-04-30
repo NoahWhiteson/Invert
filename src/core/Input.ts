@@ -133,11 +133,11 @@ export class InputManager {
         case 'KeyS': return this.getGamepadAxis(1) > this.deadzone
         case 'KeyA': return this.getGamepadAxis(0) < -this.deadzone
         case 'KeyD': return this.getGamepadAxis(0) > this.deadzone
-        case 'Space': return this.isGamepadButtonPressed(0) // A or Cross
+        case 'Space': return this.isGamepadButtonPressed(0) // A / Cross / X
         case 'ShiftLeft': return this.isGamepadButtonPressed(10) // Left Stick Click
         case 'ControlLeft':
-        case 'KeyC': return this.isGamepadButtonPressed(1) // B or Circle
-        case 'KeyR': return this.isGamepadButtonPressed(2) // X or Square
+        case 'KeyC': return this.isGamepadButtonPressed(11) // Right Stick Click / R3
+        case 'KeyR': return this.isGamepadButtonPressed(2) // X / Square
         case 'Digit1': return this.isGamepadButtonPressed(12) // D-pad Up
         case 'Digit2': return this.isGamepadButtonPressed(13) // D-pad Down
         case 'Digit3': return this.isGamepadButtonPressed(14) // D-pad Left
