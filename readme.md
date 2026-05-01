@@ -26,4 +26,6 @@ As you rack up kills, you earn coins that can be spent in the shop. We designed 
 
 Undersphere is a project born out of a love for tight movement, satisfying physics, and the weirdness of small scale gravity. Step onto the sphere and see for yourself.
 
-** This game was made for 2026 Vibejam to test AI's skill. This entire project was made with AI **
+Created by Noah Whiteson.
+
+Made for 2026 Vibejam as an AI-assisted game development experiment.

@@ -79,6 +79,8 @@ import { TentSystem } from './systems/TentSystem'
 import { BarrierSystem } from './systems/BarrierSystem'
 import { WallStepsSystem, type WallStepsPlacement } from './systems/WallStepsSystem'
 
+console.log('Made With ❤️ by Noah Whiteson')
+
 
 void (async () => {
   try {
@@ -832,13 +834,18 @@ const soundUrls = {
   trainHorn: new URL('./assets/audio/trainhorn.mp3', import.meta.url).href,
 }
 
-const audioCtx = typeof window !== 'undefined'
-  ? new ((window as any).AudioContext || (window as any).webkitAudioContext)()
-  : null
-
+let audioCtx: AudioContext | null = null
 let masterBus: GainNode | null = null
+let sfxLoadPromise: Promise<void> | null = null
+let trainHornScheduled = false
 
-if (audioCtx) {
+function ensureAudioContext(): AudioContext | null {
+  if (audioCtx) return audioCtx
+  if (typeof window === 'undefined') return null
+  const AudioCtor = window.AudioContext || (window as any).webkitAudioContext
+  if (!AudioCtor) return null
+
+  audioCtx = new AudioCtor()
   const limiter = audioCtx.createDynamicsCompressor()
   limiter.threshold.setValueAtTime(-18, audioCtx.currentTime)
   limiter.knee.setValueAtTime(10, audioCtx.currentTime)
@@ -851,6 +858,7 @@ if (audioCtx) {
   masterBus = bus
 
   bus.connect(limiter).connect(audioCtx.destination)
+  return audioCtx
 }
 
 async function loadAudioBuffer(url: string): Promise<AudioBuffer | null> {
@@ -866,11 +874,32 @@ async function loadAudioBuffer(url: string): Promise<AudioBuffer | null> {
 }
 
 async function initAllSfx() {
+  if (!audioCtx) return
   const tasks = Object.entries(soundUrls).map(async ([key, url]) => {
     const buf = await loadAudioBuffer(url)
     if (buf) soundBuffers.set(key, buf)
   })
   await Promise.all(tasks)
+}
+
+function unlockGameAudio() {
+  const ctx = ensureAudioContext()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume()
+  sfxLoadPromise ??= initAllSfx()
+  void sfxLoadPromise.then(() => initTrainAudio())
+  if (!trainHornScheduled) {
+    trainHornScheduled = true
+    scheduleTrainHorn()
+  }
+}
+
+if (typeof window !== 'undefined') {
+  const unlockOptions = { once: true, capture: true } as AddEventListenerOptions
+  window.addEventListener('pointerdown', unlockGameAudio, unlockOptions)
+  window.addEventListener('touchstart', unlockGameAudio, unlockOptions)
+  window.addEventListener('click', unlockGameAudio, unlockOptions)
+  window.addEventListener('keydown', unlockGameAudio, unlockOptions)
 }
 
 void Promise.all([
@@ -882,7 +911,6 @@ void Promise.all([
   wallSteps.init(),
   AnimationManager.preloadAll(),
   heldWeapons.loadAll(),
-  initAllSfx(),
 ]).then(() => {
   timerUI.onOneMinuteRemaining = () => playSfx('oneMinute', 1, 'ui')
   applyRandomMapLayout()
@@ -2134,15 +2162,6 @@ function scheduleTrainHorn() {
     scheduleTrainHorn()
   }, delay)
 }
-
-const _resumeTrainAudio = () => {
-  if (!audioCtx) return
-  if (audioCtx.state === 'suspended') void audioCtx.resume()
-  void initTrainAudio()
-  scheduleTrainHorn()
-}
-window.addEventListener('click', _resumeTrainAudio, { once: true })
-window.addEventListener('keydown', _resumeTrainAudio, { once: true })
 
 const _trainCamPos = new THREE.Vector3()
 const _trainPos = new THREE.Vector3()
