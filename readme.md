@@ -29,3 +29,5 @@ Undersphere is a project born out of a love for tight movement, satisfying physi
 Created by Noah Whiteson.
 
 Made for 2026 Vibejam as an AI-assisted game development experiment.
+
+Twitter: @_NoahWhiteson
