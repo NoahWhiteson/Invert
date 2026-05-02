@@ -520,6 +520,7 @@ function finishLocalRespawn(health: number, maxHealth: number, pos?: THREE.Vecto
   const spawnPos = pos && pos.lengthSq() > 1e-8 ? pos.clone() : getRandomSpawnPos(sphereRadius)
   player.playerGroup.position.copy(spawnPos)
   player.state.velocity.set(0, 0, 0)
+  player.resetPhysicsClock()
 
   core.camera.up.set(0, 1, 0)
   core.camera.quaternion.identity()
@@ -1401,6 +1402,7 @@ async function beginPlayFromMenu() {
   })
   atMainMenu = false // State change AFTER transition
   player.state.velocity.set(0, 0, 0)
+  player.resetPhysicsClock()
 
   player.playerGroup.quaternion.copy(endQuat)
 

@@ -391,6 +391,10 @@ export class PlayerController {
     this.state.onGround = false
   }
 
+  public resetPhysicsClock() {
+    this.lastPhysicsTime = performance.now()
+  }
+
   public setPointerLockAllowed(allowed: boolean) {
     this.pointerLockAllowed = allowed
     if (!allowed && this.controls.isLocked) {

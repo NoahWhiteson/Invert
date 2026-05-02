@@ -2,26 +2,6 @@ import { ringTextShadow } from './textOutline'
 import { SettingsUI } from './SettingsUI'
 import { isMainMenuMobileWidth, onMainMenuLayoutChange } from './mainMenuLayout'
 
-function requestPointerLockSafe(element: HTMLElement, options?: any) {
-  // Try to request pointer lock if available (with/without options)
-  // Only call if supported
-  // See https://developer.mozilla.org/en-US/docs/Web/API/Element/requestPointerLock
-  // Chromium supports {unadjustedMovement}, but may not exist on all platforms/browsers
-  if (element.requestPointerLock) {
-    try {
-      if (options && 'unadjustedMovement' in options && element.requestPointerLock.length > 0) {
-        // If browser supports experimental options parameter (e.g. Chromium)
-        (element.requestPointerLock as any)(options)
-      } else {
-        element.requestPointerLock()
-      }
-    } catch (_) {
-      // fail silently
-    }
-  }
-  // else: do nothing; feature unavailable
-}
-
 export class MainMenuPlayUI {
   private wrap: HTMLDivElement
   private btn: HTMLButtonElement
@@ -96,14 +76,10 @@ export class MainMenuPlayUI {
     // Both handlers deduplicated via _lastPlay
 
     this.btn.addEventListener('click', () => {
-      // Try to request pointer lock safely before calling triggerPlay (if needed)
-      // The game will typically need pointer lock for mouse FPS controls.
-      requestPointerLockSafe(document.body)
       this.triggerPlay()
     })
     this.btn.addEventListener('pointerdown', () => {
       label.style.color = '#ffff00'
-      requestPointerLockSafe(document.body)
       this.triggerPlay()
     })
     this.btn.addEventListener('pointerup', () => {
