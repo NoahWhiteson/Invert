@@ -76,6 +76,7 @@ const IDLE_DURATION = 2200
 const WANDER_DURATION = 10000
 
 const VISION_MAX_DIST = 40
+const CHASE_STOP_DIST = 5.2
 /** Narrower cone than before (~96° total); bots spot you less from the sides. */
 const VISION_MIN_COS = Math.cos((48 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
@@ -462,8 +463,13 @@ export class TargetPlayersSystem {
       const distTan = toWander.length()
       if (distTan > 1e-8) {
         rawDesired.copy(toWander).normalize()
-        wantMove = distTan > 1.35
+        wantMove = t.chasing ? distTan > CHASE_STOP_DIST : distTan > 1.35
         wantSprint = distTan > 9
+        if (t.chasing && !wantMove) {
+          const radialSp = t.velocity.dot(radial)
+          const tang = this._vB.copy(t.velocity).addScaledVector(radial, -radialSp).multiplyScalar(0.62)
+          t.velocity.copy(this._vC.copy(radial).multiplyScalar(radialSp).add(tang))
+        }
         if (distTan < 1.2) {
           t.stateTimer = 0
         }

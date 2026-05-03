@@ -669,33 +669,68 @@ type MapPropPlacement = {
   phi: number
   theta: number
   scale?: number
+  radius?: number
 }
 
 const RANDOM_TENT_COUNT = 5
 const RANDOM_BARRIER_COUNT = 5
 const RANDOM_WALL_STEPS_COUNT = 5
 const RANDOM_PROP_CLEARANCE = 13
+const TREE_PROP_CLEARANCE = 2.2
 
 function normalizeTheta(theta: number): number {
   const tau = Math.PI * 2
   return ((theta % tau) + tau) % tau
 }
 
-function pushIfClear<T extends MapPropPlacement>(out: T[], item: T) {
-  if (isPhiBlockedByTrainTrack(item.phi)) return
-  out.push({ ...item, theta: normalizeTheta(item.theta) })
+function placementWorldPos(item: MapPropPlacement, radius: number, out: THREE.Vector3): THREE.Vector3 {
+  return out.setFromSphericalCoords(radius, item.phi, item.theta)
 }
 
-function createFallbackTreeLayout(_count: number, radius: number, safeZoneRadius: number): TreePlacement[] {
+function estimatedPropRadius(scale: number, kind: 'tent' | 'barrier' | 'wallSteps' | 'tree'): number {
+  if (kind === 'tent') return scale * 35
+  if (kind === 'barrier') return scale * 45
+  if (kind === 'wallSteps') return Math.max(1.25, scale * 32)
+  return Math.max(0.55, scale * 0.48)
+}
+
+function isPlacementClear(
+  candidate: MapPropPlacement,
+  radius: number,
+  reserved: MapPropPlacement[],
+  extraClearance: number
+): boolean {
+  if (isPhiBlockedByTrainTrack(candidate.phi)) return false
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  placementWorldPos(candidate, radius, a)
+  for (const item of reserved) {
+    placementWorldPos(item, radius, b)
+    const minDist = (candidate.radius ?? 0) + (item.radius ?? 0) + extraClearance
+    if (a.distanceTo(b) < minDist) return false
+  }
+  return true
+}
+
+function createFallbackTreeLayout(
+  _count: number,
+  radius: number,
+  safeZoneRadius: number,
+  reserved: MapPropPlacement[] = []
+): TreePlacement[] {
   const out: TreePlacement[] = []
+  const all = [...reserved]
   const spawnPos = new THREE.Vector3(0, -radius, 0)
-  while (out.length < _count) {
-    const phi = Math.random() * Math.PI
-    const theta = Math.random() * Math.PI * 2
-    if (isPhiBlockedByTrainTrack(phi)) continue
-    const p = new THREE.Vector3().setFromSphericalCoords(radius, phi, theta)
+  const p = new THREE.Vector3()
+  for (let attempt = 0; attempt < 2500 && out.length < _count; attempt++) {
+    const st = randomPhiThetaClearOfTrainTrack(120)
+    const scale = 1.2 + Math.random() * 2.0
+    const item = { phi: st.phi, theta: st.theta, scale, radius: estimatedPropRadius(scale, 'tree') }
+    placementWorldPos(item, radius, p)
     if (p.distanceTo(spawnPos) < safeZoneRadius) continue
-    out.push({ phi, theta, scale: 1.2 + Math.random() * 2.0 })
+    if (!isPlacementClear(item, radius, all, TREE_PROP_CLEARANCE)) continue
+    out.push({ phi: item.phi, theta: item.theta, scale })
+    all.push(item)
   }
   return out
 }
@@ -703,50 +738,33 @@ function createFallbackTreeLayout(_count: number, radius: number, safeZoneRadius
 function createRandomSpreadLayout(
   count: number,
   radius: number,
-  minDistance: number,
+  extraClearance: number,
   scale: number,
+  kind: 'tent' | 'barrier' | 'wallSteps',
   reserved: MapPropPlacement[] = []
 ): MapPropPlacement[] {
   const out: MapPropPlacement[] = []
   const all = [...reserved]
-  const candidate = new THREE.Vector3()
-  const other = new THREE.Vector3()
 
-  for (let attempt = 0; attempt < 600 && out.length < count; attempt++) {
+  for (let attempt = 0; attempt < 1800 && out.length < count; attempt++) {
     const st = randomPhiThetaClearOfTrainTrack(120)
-    candidate.setFromSphericalCoords(radius, st.phi, st.theta)
-
-    let clear = true
-    for (const item of all) {
-      other.setFromSphericalCoords(radius, item.phi, item.theta)
-      if (candidate.distanceTo(other) < minDistance) {
-        clear = false
-        break
-      }
-    }
-    if (!clear) continue
-
-    const placement = { phi: st.phi, theta: st.theta, scale }
-    pushIfClear(out, placement)
+    const placement = { phi: st.phi, theta: st.theta, scale, radius: estimatedPropRadius(scale, kind) }
+    if (!isPlacementClear(placement, radius, all, extraClearance)) continue
+    out.push({ ...placement, theta: normalizeTheta(placement.theta) })
     all.push(placement)
-  }
-
-  while (out.length < count) {
-    const st = randomPhiThetaClearOfTrainTrack(120)
-    const placement = { phi: st.phi, theta: st.theta, scale }
-    pushIfClear(out, placement)
   }
 
   return out
 }
 
 function applyRandomMapLayout() {
-  const tentsLayout = createRandomSpreadLayout(RANDOM_TENT_COUNT, sphereRadius, RANDOM_PROP_CLEARANCE, 0.05)
+  const tentsLayout = createRandomSpreadLayout(RANDOM_TENT_COUNT, sphereRadius, RANDOM_PROP_CLEARANCE, 0.05, 'tent')
   const barriersLayout = createRandomSpreadLayout(
     RANDOM_BARRIER_COUNT,
     sphereRadius,
     RANDOM_PROP_CLEARANCE,
     0.075,
+    'barrier',
     tentsLayout
   )
   const wallStepsLayout = createRandomSpreadLayout(
@@ -754,6 +772,7 @@ function applyRandomMapLayout() {
     sphereRadius,
     RANDOM_PROP_CLEARANCE,
     0.08,
+    'wallSteps',
     [...tentsLayout, ...barriersLayout]
   ) as WallStepsPlacement[]
 
@@ -766,7 +785,7 @@ function applyRandomMapLayout() {
   wallSteps.clear()
   for (const item of wallStepsLayout) wallSteps.spawn(item.phi, item.theta, item.scale)
 
-  void trees.init(createFallbackTreeLayout(80, sphereRadius, 8))
+  void trees.init(createFallbackTreeLayout(80, sphereRadius, 8, [...tentsLayout, ...barriersLayout, ...wallStepsLayout]))
 }
 
 function buildSortedLeaderboardEntries(): LeaderboardEntry[] {
