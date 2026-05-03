@@ -343,7 +343,8 @@ export class HeldWeapons {
         wrap.visible = false
         const muzzleAnchor = new THREE.Group()
         muzzleAnchor.name = 'muzzleFlashAnchor'
-        muzzleAnchor.position.copy(cfg.muzzleLocal)
+        // `wrap` is scaled for the FP model; compensate so cfg.muzzleLocal remains camera-space-ish.
+        muzzleAnchor.position.copy(cfg.muzzleLocal).multiplyScalar(1 / s)
         wrap.add(muzzleAnchor)
         this.muzzleAnchors[i] = muzzleAnchor
         this.anchor.add(wrap)

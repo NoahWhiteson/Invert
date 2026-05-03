@@ -34,6 +34,7 @@ type TargetState = {
   chasing: boolean
   lookPhase: number
   lastBotFireMs: number
+  lastBotFireAnimMs: number
   lastAimWorld: THREE.Vector3
   despawnedForPvP: boolean
 }
@@ -81,6 +82,8 @@ const CHASE_STOP_DIST = 5.2
 const VISION_MIN_COS = Math.cos((48 * Math.PI) / 180)
 const CHASE_RETARGET_MS = 1600
 const BOT_AK_FIRE_INTERVAL_MS = 210
+const BOT_FIRE_ANIM_INTERVAL_MS = 520
+const BOT_FIRE_BRAKE_MS = 360
 /** Eye height toward planet center from shellPoint (body center on ground). */
 const BOT_EYE_INSET = 1.12
 const BOT_SPAWN_MIN_SEP = 24
@@ -416,6 +419,7 @@ export class TargetPlayersSystem {
   private updateBotBrain(t: TargetState, ctx: BotBrainContext, botIndex: number, dt: number) {
     const groundR = this.groundRadius()
     const radial = this._vA.copy(t.shellPoint).normalize()
+    const firingRecently = ctx.nowMs - t.lastBotFireMs < BOT_FIRE_BRAKE_MS
 
     const visible = this.pickVisibleChaseTarget(t, ctx, botIndex)
     if (visible) {
@@ -514,6 +518,7 @@ export class TargetPlayersSystem {
     }
 
     const targetSpeed = wantSprint ? BOT_WALK_SPEED * BOT_SPRINT_MULT : BOT_WALK_SPEED
+    const moveSpeedCap = firingRecently ? targetSpeed * 0.45 : targetSpeed
 
     for (let s = 0; s < stepCount; s++) {
       const pos = t.shellPoint
@@ -539,7 +544,8 @@ export class TargetPlayersSystem {
         const n = this._vD.copy(pos).normalize()
         const radialSp = t.velocity.dot(n)
         const tang = this._vB.copy(t.velocity).addScaledVector(n, -radialSp)
-        if (tang.length() > targetSpeed) tang.setLength(targetSpeed)
+        if (tang.length() > moveSpeedCap) tang.setLength(moveSpeedCap)
+        if (firingRecently) tang.multiplyScalar(0.78)
         t.velocity.copy(n.multiplyScalar(radialSp).add(tang))
       } else {
         t.velocity.multiplyScalar(Math.pow(BOT_MOMENTUM_AIR, forceScale))
@@ -626,7 +632,10 @@ export class TargetPlayersSystem {
           this._dirScratch.normalize()
           ctx.tryBotAkHit(botIndex, this._eyeScratch, this._dirScratch)
           t.lastBotFireMs = ctx.nowMs
-          t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
+          if (ctx.nowMs - t.lastBotFireAnimMs >= BOT_FIRE_ANIM_INTERVAL_MS) {
+            t.lastBotFireAnimMs = ctx.nowMs
+            t.anims.triggerFire(BOT_FIRE_ANIM_INTERVAL_MS)
+          }
         }
       }
     }
@@ -1033,6 +1042,7 @@ export class TargetPlayersSystem {
       chasing: false,
       lookPhase: Math.random() * Math.PI * 2,
       lastBotFireMs: 0,
+      lastBotFireAnimMs: 0,
       lastAimWorld: new THREE.Vector3(),
       despawnedForPvP: false,
     }
@@ -1116,6 +1126,7 @@ export class TargetPlayersSystem {
     t.chasing = false
     t.wanderTarget = null
     t.lastBotFireMs = 0
+    t.lastBotFireAnimMs = 0
     t.velocity.set(0, 0, 0)
     t.steerDir.set(0, 0, 0)
     t.onGround = true
