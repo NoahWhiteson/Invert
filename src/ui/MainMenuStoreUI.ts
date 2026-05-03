@@ -171,15 +171,14 @@ export class MainMenuStoreUI {
     this.buyBtn.style.alignItems = 'center'
     this.buyBtn.style.justifyContent = 'center'
     this.buyBtn.style.gap = '8px'
-    this.buyBtn.style.minWidth = '180px'
-    this.buyBtn.style.minHeight = '44px'
-    this.buyBtn.style.padding = '8px 16px'
+    this.buyBtn.style.padding = '6px 4px'
     this.buyBtn.style.boxSizing = 'border-box'
     this.buyBtn.style.cursor = 'none'
     this.buyBtn.style.backgroundColor = 'transparent'
     this.buyBtn.style.border = 'none'
     this.buyBtn.style.fontFamily = "'m6x11', monospace"
     this.buyBtn.style.fontSize = '26px'
+    this.buyBtn.style.lineHeight = '1'
     this.buyBtn.style.color = '#fff'
     this.buyBtn.style.textShadow = ringTextShadow(2)
     this.buyBtn.style.pointerEvents = 'auto'
@@ -196,6 +195,8 @@ export class MainMenuStoreUI {
     this.buyCoin.style.filter = ICON_BASE_FILTER
 
     this.buyLabel = document.createElement('span')
+    this.buyLabel.style.pointerEvents = 'none'
+    this.buyCoin.style.pointerEvents = 'none'
     this.buyBtn.appendChild(this.buyCoin)
     this.buyBtn.appendChild(this.buyLabel)
     this.buyWrap.appendChild(this.buyBtn)
@@ -534,6 +535,6 @@ export class MainMenuStoreUI {
   }
 
   public getPointerTargets(): HTMLElement[] {
-    return [this.panel, this.buyWrap]
+    return [this.panel, this.buyBtn]
   }
 }
