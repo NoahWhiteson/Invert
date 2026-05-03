@@ -166,7 +166,7 @@ export class MainMenuStoreUI {
 
     this.buyBtn = document.createElement('button')
     this.buyBtn.type = 'button'
-    this.buyBtn.style.display = 'flex'
+    this.buyBtn.style.display = 'inline-flex'
     this.buyBtn.style.flexDirection = 'row'
     this.buyBtn.style.alignItems = 'center'
     this.buyBtn.style.justifyContent = 'center'
@@ -178,11 +178,12 @@ export class MainMenuStoreUI {
     this.buyBtn.style.border = 'none'
     this.buyBtn.style.fontFamily = "'m6x11', monospace"
     this.buyBtn.style.fontSize = '26px'
-    this.buyBtn.style.lineHeight = '1'
+    this.buyBtn.style.lineHeight = '0.8'
     this.buyBtn.style.color = '#fff'
     this.buyBtn.style.textShadow = ringTextShadow(2)
     this.buyBtn.style.pointerEvents = 'auto'
     this.buyBtn.style.touchAction = 'manipulation'
+    this.buyBtn.style.verticalAlign = 'top'
 
     this.buyCoin = document.createElement('img')
     this.buyCoin.src = COIN_ICON
@@ -195,6 +196,8 @@ export class MainMenuStoreUI {
     this.buyCoin.style.filter = ICON_BASE_FILTER
 
     this.buyLabel = document.createElement('span')
+    this.buyLabel.style.display = 'inline-block'
+    this.buyLabel.style.lineHeight = '0.8'
     this.buyLabel.style.pointerEvents = 'none'
     this.buyCoin.style.pointerEvents = 'none'
     this.buyBtn.appendChild(this.buyCoin)
