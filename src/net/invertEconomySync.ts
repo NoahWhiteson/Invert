@@ -173,18 +173,17 @@ export async function purchaseAkGunSkinViaApi(skinId: AkGunSkinId): Promise<bool
     })
     const data = (await res.json().catch(() => ({}))) as Partial<EconomyResponse> & { error?: string }
     if (!res.ok) {
-      if (res.status === 404) {
-        const ok = purchaseAkGunSkinLocally(skinId)
-        if (ok) notifyEconomyReloaded()
-        return ok
-      }
-      return false
+      const ok = purchaseAkGunSkinLocally(skinId)
+      if (ok) notifyEconomyReloaded()
+      return ok
     }
     if (typeof data.coins !== 'number') return false
     applyEconomyJson(data as EconomyResponse)
     return true
   } catch {
-    return false
+    const ok = purchaseAkGunSkinLocally(skinId)
+    if (ok) notifyEconomyReloaded()
+    return ok
   }
 }
 

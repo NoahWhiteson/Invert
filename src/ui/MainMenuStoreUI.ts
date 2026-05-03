@@ -89,6 +89,8 @@ export class MainMenuStoreUI {
   private onSkinSwatchPreview?: (skin: EquippedAkSkin) => void
   private onGunSkinPurchase?: (skinId: AkGunSkinId) => void
   private settingsUI: SettingsUI
+  private buyInFlight = false
+  private lastBuyAt = 0
 
   constructor(settingsUI: SettingsUI, callbacks?: MainMenuStoreCallbacks) {
     this.settingsUI = settingsUI
@@ -159,7 +161,7 @@ export class MainMenuStoreUI {
     this.buyWrap.style.bottom = '10vh'
     this.buyWrap.style.transform = 'translateX(-50%)'
     this.buyWrap.style.display = 'none'
-    this.buyWrap.style.zIndex = '1200'
+    this.buyWrap.style.zIndex = '1450'
     this.buyWrap.style.pointerEvents = 'auto'
 
     this.buyBtn = document.createElement('button')
@@ -169,7 +171,10 @@ export class MainMenuStoreUI {
     this.buyBtn.style.alignItems = 'center'
     this.buyBtn.style.justifyContent = 'center'
     this.buyBtn.style.gap = '8px'
-    this.buyBtn.style.padding = '4px 10px'
+    this.buyBtn.style.minWidth = '180px'
+    this.buyBtn.style.minHeight = '44px'
+    this.buyBtn.style.padding = '8px 16px'
+    this.buyBtn.style.boxSizing = 'border-box'
     this.buyBtn.style.cursor = 'none'
     this.buyBtn.style.backgroundColor = 'transparent'
     this.buyBtn.style.border = 'none'
@@ -178,6 +183,7 @@ export class MainMenuStoreUI {
     this.buyBtn.style.color = '#fff'
     this.buyBtn.style.textShadow = ringTextShadow(2)
     this.buyBtn.style.pointerEvents = 'auto'
+    this.buyBtn.style.touchAction = 'manipulation'
 
     this.buyCoin = document.createElement('img')
     this.buyCoin.src = COIN_ICON
@@ -202,21 +208,13 @@ export class MainMenuStoreUI {
       this.buyCoin.style.filter = ICON_HOVER_FILTER
     })
     this.buyBtn.addEventListener('mouseleave', () => this.refreshBuyBar())
-    this.buyBtn.addEventListener('click', (e) => {
+    const onBuyPress = (e: Event) => {
       e.stopPropagation()
       e.preventDefault()
-      const sid = this.storePreviewSkin
-      if (sid === null || sid === 'default' || ownsAkGunSkin(sid)) return
-      if (getCoins() < AK_GUN_SKIN_PRICE[sid]) return
-      this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
-      void this.clickSfx.play().catch(() => {})
-      void (async () => {
-        const ok = await purchaseAkGunSkinViaApi(sid)
-        if (ok) this.onGunSkinPurchase?.(sid)
-        else await trySyncEconomyFromApi()
-        this.refresh()
-      })()
-    })
+      void this.purchaseSelectedSkin()
+    }
+    this.buyBtn.addEventListener('pointerdown', onBuyPress)
+    this.buyBtn.addEventListener('click', onBuyPress)
 
     this.panel.appendChild(this.labelEl)
     this.panel.appendChild(this.gridHost)
@@ -288,6 +286,31 @@ export class MainMenuStoreUI {
     void this.clickSfx.play().catch(() => {})
     this.storePreviewSkin = skin
     this.onSkinSwatchPreview?.(skin)
+    this.refresh()
+  }
+
+  private async purchaseSelectedSkin() {
+    const now = Date.now()
+    if (this.buyInFlight || now - this.lastBuyAt < 250) return
+    this.lastBuyAt = now
+
+    const sid = this.storePreviewSkin
+    if (sid === null || sid === 'default' || ownsAkGunSkin(sid)) return
+    if (getCoins() < AK_GUN_SKIN_PRICE[sid]) return
+
+    this.buyInFlight = true
+    this.buyBtn.disabled = true
+    this.clickSfx.volume = 0.5 * this.settingsUI.volumes.master * this.settingsUI.volumes.ui
+    void this.clickSfx.play().catch(() => {})
+
+    const ok = await purchaseAkGunSkinViaApi(sid)
+    if (ok) {
+      this.onGunSkinPurchase?.(sid)
+    } else {
+      await trySyncEconomyFromApi()
+    }
+
+    this.buyInFlight = false
     this.refresh()
   }
 
@@ -468,7 +491,7 @@ export class MainMenuStoreUI {
     const price = AK_GUN_SKIN_PRICE[prev]
     const canBuy = getCoins() >= price
     this.buyWrap.style.display = 'block'
-    this.buyBtn.disabled = false
+    this.buyBtn.disabled = this.buyInFlight
     this.buyBtn.style.opacity = canBuy ? '1' : '0.5'
     this.buyLabel.textContent = `Buy ${AK_SKIN_SHOP_LABEL[prev]} - ${price}`
     this.buyLabel.style.color = canBuy ? '#fff' : MUTED

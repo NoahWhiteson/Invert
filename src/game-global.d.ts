@@ -12,6 +12,7 @@ declare global {
       inflictDMG: (damageAmount: number, dirX?: number, dirY?: number, dirZ?: number) => void
       testBlood: () => string
       freeze: () => string
+      Debug: (on?: boolean) => string
       thirdperson: () => string
       debugTargets: (on: boolean) => string
       setBarrierScale: (s: number) => string

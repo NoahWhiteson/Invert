@@ -38,12 +38,16 @@ type TargetState = {
   despawnedForPvP: boolean
 }
 
+type CollisionBody = { position: THREE.Vector3; radius: number }
+
 /** Simplified context for basic wandering. */
 export type BotBrainContext = {
   playerPosition: THREE.Vector3
   playerAlive: boolean
   /** Local + remote human body positions (for vision / chase). */
   getHumanPositionsForVision: () => THREE.Vector3[]
+  /** Props and live bodies bots should not pass through. */
+  getObstacleBodies?: () => CollisionBody[]
   worldMesh: THREE.Mesh
   nowMs: number
   /** AK-style hitscan from bot eye; applies damage to player / nets / bots (excludes shooter). */
@@ -51,6 +55,7 @@ export type BotBrainContext = {
 }
 
 const BOT_BODY_HALF = 0.9
+const BOT_COLLISION_RADIUS = 0.65
 const BOT_GRAVITY = 0.0065
 const BOT_JUMP_FORCE = 0.2
 const BOT_MOVE_ACCEL = 0.02
@@ -112,6 +117,7 @@ export class TargetPlayersSystem {
   private _aimWorldScratch = new THREE.Vector3()
   private _eyeScratch = new THREE.Vector3()
   private _dirScratch = new THREE.Vector3()
+  private _collisionScratch = new THREE.Vector3()
   private handTraceRightHand: unknown = null
   private handTraceHips: unknown = null
   private handTracePrevLateral = 0
@@ -206,7 +212,7 @@ export class TargetPlayersSystem {
     const out: Array<{ position: THREE.Vector3; radius: number }> = []
     for (const t of this.targets) {
       if (!t || t.despawnedForPvP || t.ragdoll || t.health <= 0) continue
-      out.push({ position: t.container.position, radius: 0.65 })
+      out.push({ position: t.container.position, radius: BOT_COLLISION_RADIUS })
     }
     return out
   }
@@ -545,6 +551,8 @@ export class TargetPlayersSystem {
       } else {
         t.onGround = false
       }
+
+      this.resolveBotObstacleCollisions(t, ctx.getObstacleBodies?.() ?? [], groundR)
     }
 
     this.applyShellPlacement(t, t.shellPoint)
@@ -601,6 +609,47 @@ export class TargetPlayersSystem {
           t.anims.triggerFire(BOT_AK_FIRE_INTERVAL_MS)
         }
       }
+    }
+  }
+
+  private resolveBotObstacleCollisions(
+    t: TargetState,
+    bodies: CollisionBody[],
+    groundR: number
+  ) {
+    if (bodies.length === 0) return
+    const pos = t.shellPoint
+    const radial = this._vA.copy(pos).normalize()
+
+    for (let i = 0; i < bodies.length; i++) {
+      const b = bodies[i]
+      if (!b || !Number.isFinite(b.radius) || b.radius <= 0) continue
+      if (b.position === t.container.position || b.position === t.shellPoint) continue
+
+      this._collisionScratch.copy(pos).sub(b.position)
+      this._collisionScratch.addScaledVector(radial, -this._collisionScratch.dot(radial))
+
+      let distSq = this._collisionScratch.lengthSq()
+      if (distSq < 1e-8) {
+        this._collisionScratch.copy(t.velocity).addScaledVector(radial, -t.velocity.dot(radial))
+        if (this._collisionScratch.lengthSq() < 1e-8) {
+          this._collisionScratch.copy(t.steerDir)
+        }
+        if (this._collisionScratch.lengthSq() < 1e-8) continue
+        distSq = this._collisionScratch.lengthSq()
+      }
+
+      const minDist = BOT_COLLISION_RADIUS + b.radius
+      if (distSq >= minDist * minDist) continue
+
+      const dist = Math.sqrt(distSq)
+      const normal = this._collisionScratch.multiplyScalar(1 / dist)
+      const push = minDist - dist + 1e-4
+      pos.addScaledVector(normal, push)
+      pos.setLength(groundR)
+
+      const into = t.velocity.dot(normal)
+      if (into < 0) t.velocity.addScaledVector(normal, -into)
     }
   }
 

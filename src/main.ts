@@ -470,6 +470,20 @@ function getSpawnCollisionBodies(): Array<{ position: THREE.Vector3; radius: num
   ]
 }
 
+function getBotObstacleBodies(): Array<{ position: THREE.Vector3; radius: number }> {
+  const bodies = [
+    ...tents.getCollisionBodies(),
+    ...barriers.getCollisionBodies(),
+    ...wallSteps.getCollisionBodies(),
+    ...trees.getCollisionBodies(),
+    ...multiplayer.getCollisionBodies(),
+  ]
+  if (!atMainMenu && !isDead && !matchEndedFreeze) {
+    bodies.push({ position: player.playerGroup.position, radius: Math.max(0.55, player.state.currentHeight * 0.34) })
+  }
+  return bodies
+}
+
 function getSpawnClearance(pos: THREE.Vector3): number {
   let clearance = Infinity
   const bodies = getSpawnCollisionBodies()
@@ -1413,7 +1427,9 @@ async function beginPlayFromMenu() {
   player.setPointerLockAllowed(true)
   player.controls.enabled = true
   input.isSimulatedUnlocked = false
+  cameraDebugSnapshot('play transition complete, before lock')
   tryAutoLockCursor()
+  cameraDebugSnapshot('play transition complete, after lock request')
 
   staminaUI.setSuppressForMenu(false)
   mainMenuPlayUI.setVisible(false)
@@ -1462,6 +1478,7 @@ mainMenuPlayUI.setOnPlay(() => {
   if (atMainMenu && !isDead) {
     input.isSimulatedUnlocked = false
     player.setPointerLockAllowed(true)
+    startPlayCameraDebug('play button')
     tryAutoLockCursor()
     void beginPlayFromMenu()
   }
@@ -2604,6 +2621,96 @@ function tryAutoLockCursor() {
   }
 }
 
+const GAME_DEBUG_STORAGE_KEY = 'undersphere_debug'
+let gameDebugEnabled = (() => {
+  try {
+    return localStorage.getItem(GAME_DEBUG_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+})()
+let playCameraDebugUntilMs = 0
+let playCameraDebugLastLogMs = 0
+const _debugPrevCamQuat = new THREE.Quaternion()
+const _debugPrevPlayerQuat = new THREE.Quaternion()
+
+function setGameDebugEnabled(on: boolean) {
+  gameDebugEnabled = on
+  try {
+    if (on) localStorage.setItem(GAME_DEBUG_STORAGE_KEY, '1')
+    else localStorage.removeItem(GAME_DEBUG_STORAGE_KEY)
+  } catch {
+    /* ignore storage failures */
+  }
+  console.info(`[game.Debug] ${on ? 'enabled' : 'disabled'}`)
+  return `Debug ${on ? 'ON' : 'OFF'}`
+}
+
+function pointerLockDebugName(): string {
+  const el = document.pointerLockElement
+  if (!el) return 'none'
+  if (el === core.renderer.domElement) return 'canvas'
+  if (el === document.body) return 'body'
+  return (el as HTMLElement).tagName?.toLowerCase?.() ?? 'unknown'
+}
+
+function cameraDebugSnapshot(label: string, extra?: Record<string, unknown>) {
+  if (!gameDebugEnabled) return
+  const r = core.camera.rotation
+  const cp = core.camera.position
+  const pp = player.playerGroup.position
+  console.info(`[game.Debug][camera] ${label}`, {
+    atMainMenu,
+    isPlayTransitioning,
+    playTransitionPending: !!playTransitionPending,
+    controlsLocked: player.controls.isLocked,
+    controlsEnabled: player.controls.enabled,
+    pointerLock: pointerLockDebugName(),
+    cameraRot: { x: r.x, y: r.y, z: r.z },
+    cameraPos: { x: cp.x, y: cp.y, z: cp.z },
+    playerPos: { x: pp.x, y: pp.y, z: pp.z },
+    playerOnGround: player.state.onGround,
+    simulatedUnlocked: input.isSimulatedUnlocked,
+    ...extra,
+  })
+}
+
+function startPlayCameraDebug(reason: string) {
+  if (!gameDebugEnabled) return
+  playCameraDebugUntilMs = performance.now() + 6000
+  playCameraDebugLastLogMs = 0
+  _debugPrevCamQuat.copy(core.camera.quaternion)
+  _debugPrevPlayerQuat.copy(player.playerGroup.quaternion)
+  cameraDebugSnapshot(`play debug start: ${reason}`)
+}
+
+function updatePlayCameraDebug(dt: number) {
+  if (!gameDebugEnabled || playCameraDebugUntilMs <= 0) return
+  const now = performance.now()
+  const camDelta = _debugPrevCamQuat.angleTo(core.camera.quaternion)
+  const playerDelta = _debugPrevPlayerQuat.angleTo(player.playerGroup.quaternion)
+  const shouldLogSpike = camDelta > 0.12 || (!playTransitionPending && playerDelta > 0.12)
+  const shouldLogHeartbeat = now - playCameraDebugLastLogMs > 750
+
+  if (shouldLogSpike || shouldLogHeartbeat) {
+    playCameraDebugLastLogMs = now
+    cameraDebugSnapshot(shouldLogSpike ? 'camera snap candidate' : 'camera play heartbeat', {
+      dt,
+      camDelta,
+      playerDelta,
+      debugMsRemaining: Math.max(0, playCameraDebugUntilMs - now),
+    })
+  }
+
+  _debugPrevCamQuat.copy(core.camera.quaternion)
+  _debugPrevPlayerQuat.copy(player.playerGroup.quaternion)
+
+  if (now >= playCameraDebugUntilMs) {
+    cameraDebugSnapshot('play debug end')
+    playCameraDebugUntilMs = 0
+  }
+}
+
 function printUndersphereConsoleMessage() {
   console.log(
     '%cUndersphere — Message%c\n\nHey. Thanks for opening the console — and for playing.\n\nEvery player who boots this shell matters; hope the sphere treats you well.\nIf something glitches, a refresh usually snaps things back.\nSee you out there.',
@@ -2641,6 +2748,9 @@ window.game = {
   freeze() {
     isFrozen = !isFrozen
     return `Game ${isFrozen ? 'Frozen' : 'Unfrozen'}`
+  },
+  Debug(on: boolean = true) {
+    return setGameDebugEnabled(on)
   },
   thirdperson() {
     const on = player.toggleThirdPerson()
@@ -2761,6 +2871,7 @@ function animate() {
     const time = performance.now() / 1000
     const currentTime = performance.now()
     simFrame++
+    updatePlayCameraDebug(dt)
 
     updateAudioListener()
     updateHeartbeatByHealth(player.state.health, player.state.maxHealth)
@@ -2849,6 +2960,7 @@ function animate() {
           }
           return out
         },
+        getObstacleBodies: getBotObstacleBodies,
         worldMesh: mesh,
         nowMs: currentTime,
         tryBotAkHit: (..._args: any[]) => { /* noop in menu */ },
@@ -3300,6 +3412,7 @@ function animate() {
           }
           return out
         },
+        getObstacleBodies: getBotObstacleBodies,
         worldMesh: mesh,
         nowMs: currentTime,
         tryBotAkHit,
