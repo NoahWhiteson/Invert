@@ -118,6 +118,7 @@ export class TargetPlayersSystem {
   private _eyeScratch = new THREE.Vector3()
   private _dirScratch = new THREE.Vector3()
   private _collisionScratch = new THREE.Vector3()
+  private _botAvoidScratch = new THREE.Vector3()
   private handTraceRightHand: unknown = null
   private handTraceHips: unknown = null
   private handTracePrevLateral = 0
@@ -489,6 +490,7 @@ export class TargetPlayersSystem {
     const stepDt = dt / stepCount
     const obstacleBodies = ctx.getObstacleBodies?.() ?? []
     let hitObstacle = false
+    this._botAvoidScratch.set(0, 0, 0)
 
     if (
       t.onGround &&
@@ -557,10 +559,14 @@ export class TargetPlayersSystem {
       hitObstacle = this.resolveBotObstacleCollisions(t, obstacleBodies, groundR) || hitObstacle
     }
 
-    if (hitObstacle && !t.chasing) {
-      t.wanderTarget = null
-      t.stateTimer = 0
-      t.locoIntent = 'idle'
+    if (hitObstacle && !t.chasing && this._botAvoidScratch.lengthSq() > 1e-8) {
+      const avoid = this._botAvoidScratch.normalize()
+      if (!t.wanderTarget) t.wanderTarget = new THREE.Vector3()
+      t.wanderTarget.copy(t.shellPoint).addScaledVector(avoid, WANDER_RADIUS * 0.65)
+      t.wanderTarget.normalize().multiplyScalar(groundR)
+      t.steerDir.copy(avoid)
+      t.stateTimer = 900
+      t.locoIntent = 'walk'
     }
 
     this.applyShellPlacement(t, t.shellPoint)
@@ -656,11 +662,13 @@ export class TargetPlayersSystem {
       const push = minDist - dist + 1e-4
       pos.addScaledVector(normal, push)
       pos.setLength(groundR)
+      t.onGround = true
       collided = true
+      this._botAvoidScratch.add(normal)
 
       const into = t.velocity.dot(normal)
       if (into < 0) t.velocity.addScaledVector(normal, -into * 1.08)
-      t.velocity.multiplyScalar(0.72)
+      t.velocity.multiplyScalar(0.55)
       t.steerDir.addScaledVector(normal, 0.35)
       t.steerDir.addScaledVector(radial, -t.steerDir.dot(radial))
       if (t.steerDir.lengthSq() > 1e-8) t.steerDir.normalize()
