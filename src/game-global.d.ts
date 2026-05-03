@@ -13,6 +13,13 @@ declare global {
       testBlood: () => string
       freeze: () => string
       Debug: (on?: boolean) => string
+      muzzleFlash: {
+        tuning: { scale: number; flipX: boolean }
+        get: (slot?: number) => { x: number; y: number; z: number; scale: number; flipX: boolean } | null
+        set: (slot: number, x: number, y: number, z: number) => string
+        scale: (value: number) => string
+        flip: (on?: boolean) => string
+      }
       thirdperson: () => string
       debugTargets: (on: boolean) => string
       setBarrierScale: (s: number) => string

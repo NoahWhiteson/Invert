@@ -2244,6 +2244,10 @@ const FLASH_DISTANCE_FROM_PLAYER = 0.9
 const FLASH_OFFSET_X = 0.13
 const FLASH_OFFSET_Y = -0.1
 const MUZZLE_FLASH_BASE_SCALE = 0.22
+const muzzleFlashTuning = {
+  scale: MUZZLE_FLASH_BASE_SCALE,
+  flipX: false,
+}
 
 const muzzleFlash = new THREE.Sprite(
   new THREE.SpriteMaterial({
@@ -2270,14 +2274,16 @@ function syncMuzzleFlashParent() {
       anchor.add(muzzleFlash)
     }
     muzzleFlash.position.set(0, 0, 0)
-    const inv = 1 / cfg.uniformScale
-    muzzleFlash.scale.set(MUZZLE_FLASH_BASE_SCALE * inv, MUZZLE_FLASH_BASE_SCALE * inv, 1)
+    const inv = 1 / heldWeapons.getCurrentFpUniformScale()
+    const sx = muzzleFlashTuning.scale * inv * (muzzleFlashTuning.flipX ? -1 : 1)
+    muzzleFlash.scale.set(sx, muzzleFlashTuning.scale * inv, 1)
   } else {
     if (muzzleFlash.parent !== core.camera) {
       core.camera.add(muzzleFlash)
     }
     muzzleFlash.position.set(FLASH_OFFSET_X, FLASH_OFFSET_Y, -FLASH_DISTANCE_FROM_PLAYER)
-    muzzleFlash.scale.set(MUZZLE_FLASH_BASE_SCALE, MUZZLE_FLASH_BASE_SCALE, 1)
+    const sx = muzzleFlashTuning.scale * (muzzleFlashTuning.flipX ? -1 : 1)
+    muzzleFlash.scale.set(sx, muzzleFlashTuning.scale, 1)
   }
 }
 
@@ -2770,6 +2776,30 @@ window.game = {
   },
   Debug(on: boolean = true) {
     return setGameDebugEnabled(on)
+  },
+  muzzleFlash: {
+    tuning: muzzleFlashTuning,
+    get(slot: number = heldWeapons.getActiveSlot()) {
+      const v = heldWeapons.getMuzzleLocal(slot)
+      if (!v) return null
+      return { x: v.x, y: v.y, z: v.z, scale: muzzleFlashTuning.scale, flipX: muzzleFlashTuning.flipX }
+    },
+    set(slot: number, x: number, y: number, z: number) {
+      return heldWeapons.setMuzzleLocal(slot, x, y, z)
+        ? `Muzzle slot ${slot} set to (${x}, ${y}, ${z})`
+        : `Invalid muzzle slot ${slot}`
+    },
+    scale(value: number) {
+      if (!Number.isFinite(value) || value <= 0) return 'Invalid scale'
+      muzzleFlashTuning.scale = value
+      syncMuzzleFlashParent()
+      return `Muzzle flash scale set to ${value}`
+    },
+    flip(on: boolean = true) {
+      muzzleFlashTuning.flipX = on
+      syncMuzzleFlashParent()
+      return `Muzzle flash flipX ${on ? 'ON' : 'OFF'}`
+    },
   },
   thirdperson() {
     const on = player.toggleThirdPerson()

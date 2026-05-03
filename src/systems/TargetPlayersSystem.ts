@@ -84,6 +84,7 @@ const CHASE_RETARGET_MS = 1600
 const BOT_AK_FIRE_INTERVAL_MS = 210
 const BOT_FIRE_ANIM_INTERVAL_MS = 520
 const BOT_FIRE_BRAKE_MS = 360
+const BOT_FIRE_ANIMATION_ENABLED = false
 /** Eye height toward planet center from shellPoint (body center on ground). */
 const BOT_EYE_INSET = 1.12
 const BOT_SPAWN_MIN_SEP = 24
@@ -632,7 +633,7 @@ export class TargetPlayersSystem {
           this._dirScratch.normalize()
           ctx.tryBotAkHit(botIndex, this._eyeScratch, this._dirScratch)
           t.lastBotFireMs = ctx.nowMs
-          if (ctx.nowMs - t.lastBotFireAnimMs >= BOT_FIRE_ANIM_INTERVAL_MS) {
+          if (BOT_FIRE_ANIMATION_ENABLED && ctx.nowMs - t.lastBotFireAnimMs >= BOT_FIRE_ANIM_INTERVAL_MS) {
             t.lastBotFireAnimMs = ctx.nowMs
             t.anims.triggerFire(BOT_FIRE_ANIM_INTERVAL_MS)
           }

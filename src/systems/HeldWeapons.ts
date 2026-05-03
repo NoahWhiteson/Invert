@@ -147,7 +147,7 @@ const SLOT_CONFIG: SlotConfig[] = [
     // ADS: bottom-center of view, further out so it doesn’t sit on the crosshair
     aimPos: new THREE.Vector3(0, -0.2, -0.5),
     aimRot: AIM_STRAIGHT.clone(),
-    muzzleLocal: new THREE.Vector3(0, -0.028, -0.5),
+    muzzleLocal: new THREE.Vector3(0, -0.028, 0.5),
     uniformScale: 0.0099,
     fireRate: 100, // ~600 RPM
     damage: 22,
@@ -161,7 +161,7 @@ const SLOT_CONFIG: SlotConfig[] = [
     rot: new THREE.Euler(0.03, Math.PI * 0.04 - Math.PI / -2, 0),
     aimPos: new THREE.Vector3(0, -0.19, -0.46),
     aimRot: AIM_STRAIGHT.clone(),
-    muzzleLocal: new THREE.Vector3(0, -0.034, -0.54),
+    muzzleLocal: new THREE.Vector3(0, -0.034, 0.54),
     uniformScale: 0.01485,
     fpUniformScaleMultiplier: 0.5,
     fireRate: 800,
@@ -255,11 +255,36 @@ export class HeldWeapons {
     return SLOT_CONFIG[this.activeSlot] || null
   }
 
-  /** FP view model scale (muzzle flash / camera-space sizing). 3P uses `uniformScale` on the rig. */
-  public getCurrentFpUniformScale(): number {
-    const cfg = SLOT_CONFIG[this.activeSlot]
+  private getSlotFpScale(slot: number): number {
+    const cfg = SLOT_CONFIG[slot]
     if (!cfg) return 1
     return cfg.uniformScale * (cfg.fpUniformScaleMultiplier ?? 1)
+  }
+
+  private applyMuzzleAnchorLocal(slot: number, anchor?: THREE.Group | null) {
+    const cfg = SLOT_CONFIG[slot]
+    const a = anchor ?? this.muzzleAnchors[slot]
+    if (!cfg || !a) return
+    // `wrap` is scaled for the FP model; compensate so cfg.muzzleLocal is easy to tune in camera-ish units.
+    a.position.copy(cfg.muzzleLocal).multiplyScalar(1 / this.getSlotFpScale(slot))
+  }
+
+  public getMuzzleLocal(slot: number): THREE.Vector3 | null {
+    const cfg = SLOT_CONFIG[slot]
+    return cfg ? cfg.muzzleLocal.clone() : null
+  }
+
+  public setMuzzleLocal(slot: number, x: number, y: number, z: number): boolean {
+    const cfg = SLOT_CONFIG[slot]
+    if (!cfg || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false
+    cfg.muzzleLocal.set(x, y, z)
+    this.applyMuzzleAnchorLocal(slot)
+    return true
+  }
+
+  /** FP view model scale (muzzle flash / camera-space sizing). 3P uses `uniformScale` on the rig. */
+  public getCurrentFpUniformScale(): number {
+    return this.getSlotFpScale(this.activeSlot)
   }
 
   public getActiveSlot(): number {
@@ -343,8 +368,7 @@ export class HeldWeapons {
         wrap.visible = false
         const muzzleAnchor = new THREE.Group()
         muzzleAnchor.name = 'muzzleFlashAnchor'
-        // `wrap` is scaled for the FP model; compensate so cfg.muzzleLocal remains camera-space-ish.
-        muzzleAnchor.position.copy(cfg.muzzleLocal).multiplyScalar(1 / s)
+        this.applyMuzzleAnchorLocal(i, muzzleAnchor)
         wrap.add(muzzleAnchor)
         this.muzzleAnchors[i] = muzzleAnchor
         this.anchor.add(wrap)
@@ -428,8 +452,7 @@ export class HeldWeapons {
     if (anchor) {
       anchor.getWorldPosition(targetPos)
       anchor.getWorldDirection(targetDir)
-      // Usually getWorldDirection returns the direction the object is facing (forward)
-      // In our setup, muzzleLocal is along -Z relative to the gun.
+      // The anchor carries the tuned local muzzle offset; callers use the camera ray for shot direction.
     }
   }
 
