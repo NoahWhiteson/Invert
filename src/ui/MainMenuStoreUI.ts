@@ -162,7 +162,7 @@ export class MainMenuStoreUI {
     this.buyWrap.style.transform = 'translateX(-50%)'
     this.buyWrap.style.display = 'none'
     this.buyWrap.style.zIndex = '1450'
-    this.buyWrap.style.pointerEvents = 'auto'
+    this.buyWrap.style.pointerEvents = 'none'
 
     this.buyBtn = document.createElement('button')
     this.buyBtn.type = 'button'
@@ -538,6 +538,6 @@ export class MainMenuStoreUI {
   }
 
   public getPointerTargets(): HTMLElement[] {
-    return [this.panel, this.buyBtn]
+    return [this.panel, this.buyCoin, this.buyLabel]
   }
 }

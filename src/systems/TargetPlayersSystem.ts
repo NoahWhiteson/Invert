@@ -487,6 +487,8 @@ export class TargetPlayersSystem {
     // Use rounding for stepCount to be more stable at high frame rates, and floor at 1 to ensure at least one physics pass.
     const stepCount = Math.max(1, Math.min(Math.round(frameEquiv), 120))
     const stepDt = dt / stepCount
+    const obstacleBodies = ctx.getObstacleBodies?.() ?? []
+    let hitObstacle = false
 
     if (
       t.onGround &&
@@ -552,7 +554,13 @@ export class TargetPlayersSystem {
         t.onGround = false
       }
 
-      this.resolveBotObstacleCollisions(t, ctx.getObstacleBodies?.() ?? [], groundR)
+      hitObstacle = this.resolveBotObstacleCollisions(t, obstacleBodies, groundR) || hitObstacle
+    }
+
+    if (hitObstacle && !t.chasing) {
+      t.wanderTarget = null
+      t.stateTimer = 0
+      t.locoIntent = 'idle'
     }
 
     this.applyShellPlacement(t, t.shellPoint)
@@ -616,10 +624,11 @@ export class TargetPlayersSystem {
     t: TargetState,
     bodies: CollisionBody[],
     groundR: number
-  ) {
-    if (bodies.length === 0) return
+  ): boolean {
+    if (bodies.length === 0) return false
     const pos = t.shellPoint
     const radial = this._vA.copy(pos).normalize()
+    let collided = false
 
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i]
@@ -647,10 +656,17 @@ export class TargetPlayersSystem {
       const push = minDist - dist + 1e-4
       pos.addScaledVector(normal, push)
       pos.setLength(groundR)
+      collided = true
 
       const into = t.velocity.dot(normal)
-      if (into < 0) t.velocity.addScaledVector(normal, -into)
+      if (into < 0) t.velocity.addScaledVector(normal, -into * 1.08)
+      t.velocity.multiplyScalar(0.72)
+      t.steerDir.addScaledVector(normal, 0.35)
+      t.steerDir.addScaledVector(radial, -t.steerDir.dot(radial))
+      if (t.steerDir.lengthSq() > 1e-8) t.steerDir.normalize()
     }
+
+    return collided
   }
 
   private pickWanderTarget(currentPos: THREE.Vector3): THREE.Vector3 {
