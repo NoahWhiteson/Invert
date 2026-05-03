@@ -91,6 +91,7 @@ export class MainMenuStoreUI {
   private settingsUI: SettingsUI
   private buyInFlight = false
   private lastBuyAt = 0
+  private visible = false
 
   constructor(settingsUI: SettingsUI, callbacks?: MainMenuStoreCallbacks) {
     this.settingsUI = settingsUI
@@ -219,6 +220,13 @@ export class MainMenuStoreUI {
     }
     this.buyBtn.addEventListener('pointerdown', onBuyPress)
     this.buyBtn.addEventListener('click', onBuyPress)
+    window.addEventListener('pointermove', (e) => this.updateBuyHoverAt(e.clientX, e.clientY), { passive: true })
+    window.addEventListener('pointerdown', (e) => {
+      if (!this.isPointOnBuyVisual(e.clientX, e.clientY)) return
+      e.stopPropagation()
+      e.preventDefault()
+      void this.purchaseSelectedSkin()
+    }, { capture: true })
 
     this.panel.appendChild(this.labelEl)
     this.panel.appendChild(this.gridHost)
@@ -316,6 +324,35 @@ export class MainMenuStoreUI {
 
     this.buyInFlight = false
     this.refresh()
+  }
+
+  private getBuyVisualRect(): DOMRect | null {
+    if (!this.visible || this.buyWrap.style.display === 'none') return null
+    const coin = this.buyCoin.getBoundingClientRect()
+    const label = this.buyLabel.getBoundingClientRect()
+    if ((coin.width <= 0 || coin.height <= 0) && (label.width <= 0 || label.height <= 0)) return null
+    const pad = 5
+    const left = Math.min(coin.left, label.left) - pad
+    const top = Math.min(coin.top, label.top) - pad
+    const right = Math.max(coin.right, label.right) + pad
+    const bottom = Math.max(coin.bottom, label.bottom) + pad
+    return new DOMRect(left, top, right - left, bottom - top)
+  }
+
+  private isPointOnBuyVisual(x: number, y: number): boolean {
+    const r = this.getBuyVisualRect()
+    return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+  }
+
+  private updateBuyHoverAt(x: number, y: number) {
+    const sid = this.storePreviewSkin
+    const canBuy = sid !== null && sid !== 'default' && !ownsAkGunSkin(sid) && getCoins() >= AK_GUN_SKIN_PRICE[sid]
+    if (canBuy && this.isPointOnBuyVisual(x, y)) {
+      this.buyLabel.style.color = '#ffff00'
+      this.buyCoin.style.filter = ICON_HOVER_FILTER
+      return
+    }
+    this.refreshBuyBar()
   }
 
   private makeDefaultCell(): HTMLDivElement {
@@ -518,6 +555,7 @@ export class MainMenuStoreUI {
   }
 
   public setVisible(visible: boolean) {
+    this.visible = visible
     if (visible) {
       const opening = this.root.style.display === 'none'
       this.root.style.display = 'block'
