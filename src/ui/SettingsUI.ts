@@ -64,6 +64,11 @@ export class SettingsUI {
   public onGraphicsChange: (key: GraphicOption, on: boolean) => void = () => { }
   private graphicButtons: Record<GraphicOption, HTMLDivElement | null> = { grass: null, blood: null, bulletHoles: null, killLeaderMsg: null, trainNoise: null }
 
+  /** When true, WebSocket multiplayer stays off (solo / offline play). */
+  public soloPlay = false
+  private multiplayerToggleBtn: HTMLDivElement | null = null
+  public onSoloPlayChange: () => void = () => {}
+
   // Crosshair Style
   private crosshair: Crosshair
   private currentCrosshairStyle: 'circle' | 'plus' = 'circle'
@@ -230,6 +235,12 @@ export class SettingsUI {
         </div>
 
         <div style="padding: 0 40px; display: flex; flex-direction: column; gap: 20px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-family: 'm6x11', monospace; font-size: 28px; color: black; letter-spacing: 1px;">MULTIPLAYER</span>
+            <div id="btn-multiplayer" style="width: 100px; padding: 6px; border: 2px solid black; font-family: 'm6x11'; font-size: 20px; display: flex; align-items: center; justify-content: center; cursor: none; transition: all 0.1s;">
+              ENABLED
+            </div>
+          </div>
           ${this.renderGraphicToggle('KILL LEADER MSG', 'killLeaderMsg')}
           ${this.renderGraphicToggle('TRAIN NOISES', 'trainNoise')}
         </div>
@@ -265,6 +276,7 @@ export class SettingsUI {
     this.graphicButtons.bulletHoles = this.menu.querySelector('#btn-bulletHoles')
     this.graphicButtons.killLeaderMsg = this.menu.querySelector('#btn-killLeaderMsg')
     this.graphicButtons.trainNoise = this.menu.querySelector('#btn-trainNoise')
+    this.multiplayerToggleBtn = this.menu.querySelector('#btn-multiplayer')
 
     this.controlsRoot = this.menu.querySelector('#settings-controls-root')
     this.controlsBody = this.menu.querySelector('#settings-controls-body')
@@ -481,6 +493,7 @@ export class SettingsUI {
         if (data.crosshairStyle === 'circle' || data.crosshairStyle === 'plus') {
           this.currentCrosshairStyle = data.crosshairStyle
         }
+        if (typeof data.soloPlay === 'boolean') this.soloPlay = data.soloPlay
       } catch (e) {
         console.warn('Failed to load settings', e)
       }
@@ -505,7 +518,8 @@ export class SettingsUI {
       fovPercent: this.fovPercent,
       volumes: this.volumes,
       graphics: this.graphics,
-      crosshairStyle: this.currentCrosshairStyle
+      crosshairStyle: this.currentCrosshairStyle,
+      soloPlay: this.soloPlay
     }
     localStorage.setItem('invert_settings', JSON.stringify(data))
   }
@@ -626,6 +640,11 @@ export class SettingsUI {
       this.graphicButtons[key]!.style.fontSize = m ? '17px' : '20px'
       this.graphicButtons[key]!.style.padding = m ? '5px 4px' : '6px'
     }
+    if (this.multiplayerToggleBtn) {
+      this.multiplayerToggleBtn.style.width = m ? '78px' : '100px'
+      this.multiplayerToggleBtn.style.fontSize = m ? '17px' : '20px'
+      this.multiplayerToggleBtn.style.padding = m ? '5px 4px' : '6px'
+    }
 
     const spans = Array.from(this.menu.querySelectorAll('span')) as HTMLSpanElement[]
     for (const span of spans) {
@@ -729,10 +748,12 @@ export class SettingsUI {
       this.graphics[key] = true
       this.onGraphicsChange(key, true)
     }
+    this.soloPlay = false
     this.updateGraphicButtons()
 
     this.playClick()
     this.save()
+    this.onSoloPlayChange()
   }
 
   private playClick() {
@@ -775,6 +796,22 @@ export class SettingsUI {
         btn.style.backgroundColor = 'white'
         btn.style.color = 'black'
       }
+    }
+    this.updateMultiplayerToggleButton()
+  }
+
+  private updateMultiplayerToggleButton() {
+    const btn = this.multiplayerToggleBtn
+    if (!btn) return
+    const online = !this.soloPlay
+    if (online) {
+      btn.textContent = 'ENABLED'
+      btn.style.backgroundColor = 'black'
+      btn.style.color = 'white'
+    } else {
+      btn.textContent = 'DISABLED'
+      btn.style.backgroundColor = 'white'
+      btn.style.color = 'black'
     }
   }
 
@@ -884,6 +921,22 @@ export class SettingsUI {
         }
       }
 
+      let isOverMultiplayerToggle = false
+      if (this.multiplayerToggleBtn) {
+        const mr = this.multiplayerToggleBtn.getBoundingClientRect()
+        if (this.isOpen && mx >= mr.left && mx <= mr.right && my >= mr.top && my <= mr.bottom) {
+          isOverMultiplayerToggle = true
+          if (this.isMouseDown) {
+            this.soloPlay = !this.soloPlay
+            this.updateMultiplayerToggleButton()
+            this.playClick()
+            this.save()
+            this.onSoloPlayChange()
+            this.isMouseDown = false
+          }
+        }
+      }
+
       const rRect = this.resetBtn.getBoundingClientRect()
       const isOverReset = this.isOpen && (mx >= rRect.left && mx <= rRect.right && my >= rRect.top && my <= rRect.bottom)
       if (isOverReset && this.isMouseDown && this.isOpen) {
@@ -955,6 +1008,7 @@ export class SettingsUI {
         isOverPlus ||
         this.draggingType ||
         isOverGraphic ||
+        isOverMultiplayerToggle ||
         isOverReset ||
         isOverUuid ||
         isOverCopyBackup ||

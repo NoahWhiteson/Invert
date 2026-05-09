@@ -32,6 +32,9 @@ type TargetState = {
   wanderTarget: THREE.Vector3 | null
   /** True while moving toward a seen human or bot. */
   chasing: boolean
+  /** Obstacle tangent slide blended into desired move after prop hits (decays each tick). */
+  propAvoidTangent: THREE.Vector3
+  propAvoidStrength: number
   lookPhase: number
   lastBotFireMs: number
   lastBotFireAnimMs: number
@@ -47,8 +50,8 @@ export type BotBrainContext = {
   playerAlive: boolean
   /** Local + remote human body positions (for vision / chase). */
   getHumanPositionsForVision: () => THREE.Vector3[]
-  /** Props and live bodies bots should not pass through. */
-  getObstacleBodies?: () => CollisionBody[]
+  /** Props and live bodies bots should not pass through (exclude `index` = no self-collide). */
+  getObstacleBodies?: (excludeBotIndex: number) => CollisionBody[]
   worldMesh: THREE.Mesh
   nowMs: number
   /** AK-style hitscan from bot eye; applies damage to player / nets / bots (excludes shooter). */
@@ -124,6 +127,9 @@ export class TargetPlayersSystem {
   private _dirScratch = new THREE.Vector3()
   private _collisionScratch = new THREE.Vector3()
   private _botAvoidScratch = new THREE.Vector3()
+  private _obstacleRadial = new THREE.Vector3()
+  private _obstacleCombinedN = new THREE.Vector3()
+  private _passEscapeAccum = new THREE.Vector3()
   private handTraceRightHand: unknown = null
   private handTraceHips: unknown = null
   private handTracePrevLateral = 0
@@ -218,9 +224,21 @@ export class TargetPlayersSystem {
     const out: Array<{ position: THREE.Vector3; radius: number }> = []
     for (const t of this.targets) {
       if (!t || t.despawnedForPvP || t.ragdoll || t.health <= 0) continue
-      out.push({ position: t.container.position, radius: BOT_COLLISION_RADIUS })
+      out.push({ position: t.shellPoint, radius: BOT_COLLISION_RADIUS })
     }
     return out
+  }
+
+  public appendLiveBotsAsObstacles(
+    out: Array<{ position: THREE.Vector3; radius: number }>,
+    excludeIndex: number
+  ): void {
+    for (let i = 0; i < this.targets.length; i++) {
+      if (i === excludeIndex) continue
+      const t = this.targets[i]
+      if (!t || t.despawnedForPvP || t.ragdoll || t.health <= 0) continue
+      out.push({ position: t.shellPoint, radius: BOT_COLLISION_RADIUS })
+    }
   }
 
   public damageFromHitObject(
@@ -422,6 +440,8 @@ export class TargetPlayersSystem {
     const radial = this._vA.copy(t.shellPoint).normalize()
     const firingRecently = ctx.nowMs - t.lastBotFireMs < BOT_FIRE_BRAKE_MS
 
+    t.propAvoidStrength = Math.max(0, t.propAvoidStrength - dt * 2.35)
+
     const visible = this.pickVisibleChaseTarget(t, ctx, botIndex)
     if (visible) {
       t.lastAimWorld.copy(visible.aimWorld)
@@ -481,6 +501,18 @@ export class TargetPlayersSystem {
       }
     }
 
+    if (
+      t.propAvoidStrength > 0.055 &&
+      t.wanderTarget &&
+      rawDesired.lengthSq() > 1e-12 &&
+      t.propAvoidTangent.lengthSq() > 1e-10
+    ) {
+      const w = Math.min(0.92, t.propAvoidStrength * (t.chasing ? 0.88 : 0.52))
+      rawDesired.lerp(t.propAvoidTangent, w)
+      rawDesired.addScaledVector(radial, -rawDesired.dot(radial))
+      if (rawDesired.lengthSq() > 1e-12) rawDesired.normalize()
+    }
+
     const steerBlend = Math.min(1, BOT_STEER_SMOOTH * dt)
     if (rawDesired.lengthSq() > 1e-12) {
       if (t.steerDir.lengthSq() < 1e-12) {
@@ -496,10 +528,9 @@ export class TargetPlayersSystem {
     }
 
     const frameEquiv = dt * 60
-    // Use rounding for stepCount to be more stable at high frame rates, and floor at 1 to ensure at least one physics pass.
-    const stepCount = Math.max(1, Math.min(Math.round(frameEquiv), 120))
+    const stepCount = Math.max(1, Math.min(Math.floor(frameEquiv + 1e-9), 120))
     const stepDt = dt / stepCount
-    const obstacleBodies = ctx.getObstacleBodies?.() ?? []
+    const obstacleBodies = ctx.getObstacleBodies?.(botIndex) ?? []
     let hitObstacle = false
     this._botAvoidScratch.set(0, 0, 0)
 
@@ -572,14 +603,31 @@ export class TargetPlayersSystem {
       hitObstacle = this.resolveBotObstacleCollisions(t, obstacleBodies, groundR) || hitObstacle
     }
 
-    if (hitObstacle && !t.chasing && this._botAvoidScratch.lengthSq() > 1e-8) {
-      const avoid = this._botAvoidScratch.normalize()
-      if (!t.wanderTarget) t.wanderTarget = new THREE.Vector3()
-      t.wanderTarget.copy(t.shellPoint).addScaledVector(avoid, WANDER_RADIUS * 0.65)
-      t.wanderTarget.normalize().multiplyScalar(groundR)
-      t.steerDir.copy(avoid)
-      t.stateTimer = 900
-      t.locoIntent = 'walk'
+    if (hitObstacle && this._botAvoidScratch.lengthSq() > 1e-8) {
+      const radialN = this._vD.copy(t.shellPoint).normalize()
+      const avoidRaw = this._vC.copy(this._botAvoidScratch).normalize()
+      const slide = this._vB.copy(avoidRaw).addScaledVector(radialN, -avoidRaw.dot(radialN))
+      if (slide.lengthSq() < 1e-8) slide.crossVectors(radialN, avoidRaw)
+      if (slide.lengthSq() > 1e-8) slide.normalize()
+      else if (t.steerDir.lengthSq() > 1e-10) {
+        slide.copy(t.steerDir).addScaledVector(radialN, -t.steerDir.dot(radialN))
+        if (slide.lengthSq() > 1e-8) slide.normalize()
+      }
+
+      if (slide.lengthSq() > 1e-10) {
+        const bump = t.chasing ? 0.58 : 0.76
+        t.propAvoidStrength = Math.min(1, t.propAvoidStrength + bump)
+        t.propAvoidTangent.copy(slide)
+
+        if (!t.chasing) {
+          if (!t.wanderTarget) t.wanderTarget = new THREE.Vector3()
+          t.wanderTarget.copy(t.shellPoint).addScaledVector(avoidRaw, WANDER_RADIUS * 0.65)
+          t.wanderTarget.normalize().multiplyScalar(groundR)
+          t.steerDir.copy(slide)
+          t.stateTimer = 900
+          t.locoIntent = 'walk'
+        }
+      }
     }
 
     this.applyShellPlacement(t, t.shellPoint)
@@ -649,48 +697,77 @@ export class TargetPlayersSystem {
   ): boolean {
     if (bodies.length === 0) return false
     const pos = t.shellPoint
-    const radial = this._vA.copy(pos).normalize()
     let collided = false
+    const escapeForVelocity = this._obstacleCombinedN.set(0, 0, 0)
 
-    for (let i = 0; i < bodies.length; i++) {
-      const b = bodies[i]
-      if (!b || !Number.isFinite(b.radius) || b.radius <= 0) continue
-      if (b.position === t.container.position || b.position === t.shellPoint) continue
+    const SEP_PASSES = 4
+    for (let pass = 0; pass < SEP_PASSES; pass++) {
+      let anyOverlap = false
+      this._passEscapeAccum.set(0, 0, 0)
 
-      this._collisionScratch.copy(pos).sub(b.position)
-      this._collisionScratch.addScaledVector(radial, -this._collisionScratch.dot(radial))
+      for (let i = 0; i < bodies.length; i++) {
+        const b = bodies[i]
+        if (!b || !Number.isFinite(b.radius) || b.radius <= 0) continue
 
-      let distSq = this._collisionScratch.lengthSq()
-      if (distSq < 1e-8) {
-        this._collisionScratch.copy(t.velocity).addScaledVector(radial, -t.velocity.dot(radial))
-        if (this._collisionScratch.lengthSq() < 1e-8) {
-          this._collisionScratch.copy(t.steerDir)
+        const radial = this._obstacleRadial.copy(pos).normalize()
+        this._collisionScratch.copy(pos).sub(b.position)
+        this._collisionScratch.addScaledVector(radial, -this._collisionScratch.dot(radial))
+
+        let distSq = this._collisionScratch.lengthSq()
+        if (distSq < 1e-8) {
+          this._collisionScratch.copy(t.velocity).addScaledVector(radial, -t.velocity.dot(radial))
+          if (this._collisionScratch.lengthSq() < 1e-8) {
+            this._collisionScratch.copy(t.steerDir)
+          }
+          if (this._collisionScratch.lengthSq() < 1e-8) continue
+          distSq = this._collisionScratch.lengthSq()
         }
-        if (this._collisionScratch.lengthSq() < 1e-8) continue
-        distSq = this._collisionScratch.lengthSq()
+
+        const minDist = BOT_COLLISION_RADIUS + b.radius
+        if (distSq >= minDist * minDist) continue
+
+        anyOverlap = true
+        collided = true
+
+        const dist = Math.sqrt(distSq)
+        const normal = this._collisionScratch.multiplyScalar(1 / dist)
+        const push = minDist - dist + 4e-4
+
+        this._passEscapeAccum.add(normal)
+
+        pos.addScaledVector(normal, push)
+        pos.setLength(groundR)
+        t.onGround = true
       }
 
-      const minDist = BOT_COLLISION_RADIUS + b.radius
-      if (distSq >= minDist * minDist) continue
-
-      const dist = Math.sqrt(distSq)
-      const normal = this._collisionScratch.multiplyScalar(1 / dist)
-      const push = minDist - dist + 1e-4
-      pos.addScaledVector(normal, push)
-      pos.setLength(groundR)
-      t.onGround = true
-      collided = true
-      this._botAvoidScratch.add(normal)
-
-      const into = t.velocity.dot(normal)
-      if (into < 0) t.velocity.addScaledVector(normal, -into * 1.08)
-      t.velocity.multiplyScalar(0.55)
-      t.steerDir.addScaledVector(normal, 0.35)
-      t.steerDir.addScaledVector(radial, -t.steerDir.dot(radial))
-      if (t.steerDir.lengthSq() > 1e-8) t.steerDir.normalize()
+      if (!anyOverlap) break
+      escapeForVelocity.copy(this._passEscapeAccum)
     }
 
-    return collided
+    if (!collided) return false
+
+    const radialOut = this._obstacleRadial.copy(pos).normalize()
+
+    if (escapeForVelocity.lengthSq() > 1e-12) {
+      const slide = this._collisionScratch.copy(escapeForVelocity)
+      slide.addScaledVector(radialOut, -slide.dot(radialOut))
+      if (slide.lengthSq() > 1e-10) {
+        slide.normalize()
+        this._botAvoidScratch.add(slide)
+
+        const vn = t.velocity.dot(slide)
+        if (vn < 0) {
+          t.velocity.addScaledVector(slide, -vn * 1.02)
+        }
+      }
+    }
+
+    const radialComp = t.velocity.dot(radialOut)
+    this._vF.copy(t.velocity).addScaledVector(radialOut, -radialComp)
+    this._vF.multiplyScalar(0.94)
+    t.velocity.copy(radialOut).multiplyScalar(radialComp).add(this._vF)
+
+    return true
   }
 
   private pickWanderTarget(currentPos: THREE.Vector3): THREE.Vector3 {
@@ -1041,6 +1118,8 @@ export class TargetPlayersSystem {
       stateTimer: 0,
       wanderTarget: null,
       chasing: false,
+      propAvoidTangent: new THREE.Vector3(0, 0, 1),
+      propAvoidStrength: 0,
       lookPhase: Math.random() * Math.PI * 2,
       lastBotFireMs: 0,
       lastBotFireAnimMs: 0,
@@ -1130,6 +1209,8 @@ export class TargetPlayersSystem {
     t.lastBotFireAnimMs = 0
     t.velocity.set(0, 0, 0)
     t.steerDir.set(0, 0, 0)
+    t.propAvoidStrength = 0
+    t.propAvoidTangent.set(0, 0, 1)
     t.onGround = true
     t.nextJumpAtMs = performance.now() + 800 + Math.random() * 2400
 

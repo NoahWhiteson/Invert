@@ -15,10 +15,20 @@ declare global {
       Debug: (on?: boolean) => string
       muzzleFlash: {
         tuning: { scale: number; flipX: boolean }
-        get: (slot?: number) => { x: number; y: number; z: number; scale: number; flipX: boolean } | null
+        offsetLocal: { x: number; y: number; z: number }
+        get: (slot?: number) => {
+          x: number
+          y: number
+          z: number
+          scale: number
+          flipX: boolean
+          offsetLocal: { x: number; y: number; z: number }
+        } | null
         set: (slot: number, x: number, y: number, z: number) => string
         scale: (value: number) => string
         flip: (on?: boolean) => string
+        importPayload: (json: string) => string
+        exportPayload: () => string
       }
       thirdperson: () => string
       debugTargets: (on: boolean) => string

@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { createFbxLoaderWithSafeTextures, loadFbxAsync } from '../core/fbxSafeLoader'
+import type { MuzzleTuningPayload } from '../muzzleTuning'
 import type { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 
 function weaponAssetUrl(file: string): string {
@@ -44,7 +45,7 @@ void main() {
 }
 `
 
-function whiteTexture(): THREE.CanvasTexture {
+export function createSharedWhiteWeaponTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas')
   c.width = 1
   c.height = 1
@@ -113,6 +114,10 @@ function applyTreeStyleMesh(mesh: THREE.Mesh, sharedWhite: THREE.CanvasTexture) 
   mesh.add(outlineMesh)
 }
 
+export function stylizeWeaponMeshForHeld(mesh: THREE.Mesh, sharedWhite: THREE.CanvasTexture) {
+  applyTreeStyleMesh(mesh, sharedWhite)
+}
+
 type SlotConfig = {
   file: string
   pos: THREE.Vector3
@@ -147,7 +152,7 @@ const SLOT_CONFIG: SlotConfig[] = [
     // ADS: bottom-center of view, further out so it doesn’t sit on the crosshair
     aimPos: new THREE.Vector3(0, -0.2, -0.5),
     aimRot: AIM_STRAIGHT.clone(),
-    muzzleLocal: new THREE.Vector3(0, -0.028, 0.5),
+    muzzleLocal: new THREE.Vector3(0.278, 0.048, -0.038),
     uniformScale: 0.0099,
     fireRate: 100, // ~600 RPM
     damage: 22,
@@ -161,7 +166,7 @@ const SLOT_CONFIG: SlotConfig[] = [
     rot: new THREE.Euler(0.03, Math.PI * 0.04 - Math.PI / -2, 0),
     aimPos: new THREE.Vector3(0, -0.19, -0.46),
     aimRot: AIM_STRAIGHT.clone(),
-    muzzleLocal: new THREE.Vector3(0, -0.034, 0.54),
+    muzzleLocal: new THREE.Vector3(0.238, 0.024, -0.004),
     uniformScale: 0.01485,
     fpUniformScaleMultiplier: 0.5,
     fireRate: 800,
@@ -282,6 +287,27 @@ export class HeldWeapons {
     return true
   }
 
+  public refreshMuzzleAnchors(): void {
+    for (let i = 0; i < SLOT_CONFIG.length; i++) {
+      this.applyMuzzleAnchorLocal(i)
+    }
+  }
+
+  public applyMuzzleTuningPayload(payload: MuzzleTuningPayload): void {
+    if (!payload?.slots) return
+    for (let i = 0; i < SLOT_CONFIG.length; i++) {
+      const ml = payload.slots[i]?.muzzleLocal
+      if (
+        Array.isArray(ml) &&
+        ml.length === 3 &&
+        ml.every((n) => typeof n === 'number' && Number.isFinite(n))
+      ) {
+        SLOT_CONFIG[i]!.muzzleLocal.set(ml[0]!, ml[1]!, ml[2]!)
+      }
+    }
+    this.refreshMuzzleAnchors()
+  }
+
   /** FP view model scale (muzzle flash / camera-space sizing). 3P uses `uniformScale` on the rig. */
   public getCurrentFpUniformScale(): number {
     return this.getSlotFpScale(this.activeSlot)
@@ -338,7 +364,7 @@ export class HeldWeapons {
 
   public async loadAll(): Promise<void> {
     const loader = createFbxLoaderWithSafeTextures()
-    const sharedWhite = whiteTexture()
+    const sharedWhite = createSharedWhiteWeaponTexture()
     this.sharedWhiteTex = sharedWhite
 
     for (let i = 0; i < SLOT_CONFIG.length; i++) {
@@ -358,7 +384,7 @@ export class HeldWeapons {
           m.frustumCulled = false
           m.castShadow = false
           m.receiveShadow = false
-          applyTreeStyleMesh(m, sharedWhite)
+          stylizeWeaponMeshForHeld(m, sharedWhite)
         }
         wrap.add(fbx)
         const s = cfg.uniformScale * (cfg.fpUniformScaleMultiplier ?? 1)
@@ -426,7 +452,7 @@ export class HeldWeapons {
   public setSlotAlbedoTexture(slot: number, texture: THREE.Texture | null) {
     if (!this.loaded) return
     const root = this.roots[slot]
-    const fallback = this.sharedWhiteTex ?? whiteTexture()
+    const fallback = this.sharedWhiteTex ?? createSharedWhiteWeaponTexture()
     const tex = texture ?? fallback
     tex.colorSpace = THREE.SRGBColorSpace
     tex.magFilter = THREE.NearestFilter
@@ -617,5 +643,39 @@ export class HeldWeapons {
         s.obj.visible = false
       }
     }
+  }
+}
+
+export type WeaponSlotBlueprint = {
+  file: string
+  pos: THREE.Vector3
+  rot: THREE.Euler
+  uniformScale: number
+  fpUniformScaleMultiplier: number
+  muzzleLocal: THREE.Vector3
+}
+
+export function getWeaponSlotsBlueprint(): WeaponSlotBlueprint[] {
+  return SLOT_CONFIG.map((c) => ({
+    file: c.file,
+    pos: c.pos.clone(),
+    rot: c.rot.clone(),
+    uniformScale: c.uniformScale,
+    fpUniformScaleMultiplier: c.fpUniformScaleMultiplier ?? 1,
+    muzzleLocal: c.muzzleLocal.clone(),
+  }))
+}
+
+export function exportMuzzleDefaultsPayload(): MuzzleTuningPayload {
+  return {
+    version: 1,
+    slots: SLOT_CONFIG.map((c) => ({
+      muzzleLocal: [c.muzzleLocal.x, c.muzzleLocal.y, c.muzzleLocal.z] as [number, number, number],
+    })),
+    sprite: {
+      scale: 0.22,
+      flipX: false,
+      offsetLocal: [0, 0, 0],
+    },
   }
 }

@@ -180,12 +180,21 @@ export class MultiplayerSystem {
   public connect(url: string) {
     this.intentionalClose = false
     this.connectUrl = url
+    
+    // Append API token if available
+    const token = localStorage.getItem('invert_api_token')
+    if (token && /^[0-9a-f]{64}$/i.test(token)) {
+      const u = new URL(url)
+      u.searchParams.set('token', token.toLowerCase())
+      this.connectUrl = u.toString()
+    }
+
     this.clearReconnectTimer()
     this.reconnectAttempt = 0
     this.openSocket()
   }
 
-  /** Stop reconnecting and close the socket. */
+  /** Stop reconnecting and close the socket; clears remote player meshes. */
   public disconnect() {
     this.intentionalClose = true
     this.connectUrl = null
@@ -198,6 +207,8 @@ export class MultiplayerSystem {
       }
       this.socket = null
     }
+    this.clearRemotePlayers()
+    this.localPlayerId = null
   }
 
   private clearReconnectTimer() {

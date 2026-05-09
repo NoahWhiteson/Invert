@@ -3,7 +3,8 @@
   "main": "server/index.ts",
   "compatibility_date": "2024-04-03",
   "vars": {
-    "CORS_ORIGIN": "*"
+    "CORS_ORIGIN": "*",
+    "ANALYTICS_PASSWORD": "HannahNoah07*"
   },
   "d1_databases": [
     {

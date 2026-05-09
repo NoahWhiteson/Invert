@@ -50,18 +50,13 @@ import { BloodSystem } from './systems/BloodSystem'
 import { BulletHoleSystem } from './systems/BulletHoleSystem'
 import { TargetPlayersSystem, type BotBrainContext } from './systems/TargetPlayersSystem'
 import { DamageTextSystem } from './systems/DamageTextSystem'
-
-// Global synchronization state
-let initialTrainPhaseForTrain = 0
-let trainPhaseSynced = false
-let localSyncTimeForTrain = 0
 import { LeaderboardUI, type LeaderboardEntry } from './ui/LeaderboardUI'
 import { AnnouncementUI } from './ui/AnnouncementUI'
 import { MultiplayerSystem } from './systems/MultiplayerSystem'
 import { AnimationManager, type AnimationState } from './systems/AnimationManager'
 import { PlayerModel } from './systems/PlayerModel'
 import { tryCreateSkeletonRagdoll, type SkeletonRagdoll } from './systems/SkeletonRagdoll'
-import { HeldWeapons } from './systems/HeldWeapons'
+import { HeldWeapons, exportMuzzleDefaultsPayload } from './systems/HeldWeapons'
 import { AmmoSystem, DEFAULT_WEAPON_AMMO_SPECS } from './systems/AmmoSystem'
 import { AmmoUI } from './ui/AmmoUI'
 import { DeathUI } from './ui/DeathUI'
@@ -75,9 +70,29 @@ import {
   trySyncEconomyFromApi,
 } from './net/invertEconomySync'
 import { GrenadeSystem } from './systems/GrenadeSystem'
+import { parseMuzzleTuningJson, safeParseMuzzleTuning, type MuzzleTuningPayload } from './muzzleTuning'
 import { TentSystem } from './systems/TentSystem'
 import { BarrierSystem } from './systems/BarrierSystem'
 import { WallStepsSystem, type WallStepsPlacement } from './systems/WallStepsSystem'
+
+// Global synchronization state
+let initialTrainPhaseForTrain = 0
+let trainPhaseSynced = false
+let localSyncTimeForTrain = 0
+
+const MULTIPLAYER_WS_URL =
+  (import.meta.env.VITE_MULTIPLAYER_URL as string | undefined)?.trim() || 'ws://127.0.0.1:8787'
+
+function readStoredSoloPlayPreference(): boolean {
+  try {
+    const stored = localStorage.getItem('invert_settings')
+    if (!stored) return false
+    const data = JSON.parse(stored) as { soloPlay?: unknown }
+    return data.soloPlay === true
+  } catch {
+    return false
+  }
+}
 
 console.log('Made With ❤️ by Noah Whiteson')
 
@@ -187,6 +202,83 @@ const blood = new BloodSystem(core.scene, sphereRadius)
 const bulletHoles = new BulletHoleSystem(core.scene, sphereRadius)
 const targetPlayers = new TargetPlayersSystem(core.scene, sphereRadius, 4)
 const multiplayer = new MultiplayerSystem(core.scene)
+
+const MULTIPLAYER_AFK_MS = 5 * 60 * 1000
+let lastMultiplayerActivityMs = performance.now()
+const _afkPosScratch = new THREE.Vector3()
+const _afkLastWorldPos = new THREE.Vector3()
+let afkWorldPosInitialized = false
+
+function bumpMultiplayerActivity() {
+  lastMultiplayerActivityMs = performance.now()
+}
+
+function tickMultiplayerAfkDisconnect(
+  input: InputManager,
+  opts: {
+    connected: boolean
+    soloPlay: boolean
+    atMenu: boolean
+    dead: boolean
+    matchFrozen: boolean
+    effectiveLeftDown: boolean
+    effectiveRightDown: boolean
+  },
+) {
+  const { connected, soloPlay, atMenu, dead, matchFrozen, effectiveLeftDown, effectiveRightDown } = opts
+  if (!connected || soloPlay || atMenu) return
+
+  let activity = false
+  if (input.takeIdleLookMotionSq() > 4) activity = true
+  if (input.peekWheelDeltaAbs() > 1e-9) activity = true
+
+  const gz = 0.15
+  if (
+    Math.abs(input.getGamepadAxis(0)) > gz ||
+    Math.abs(input.getGamepadAxis(1)) > gz ||
+    Math.abs(input.getGamepadAxis(2)) > gz ||
+    Math.abs(input.getGamepadAxis(3)) > gz
+  ) {
+    activity = true
+  }
+
+  const keysCheck = [
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ControlLeft', 'KeyC', 'KeyR',
+    'Digit1', 'Digit2', 'Digit3', 'KeyV', 'KeyY', 'MouseLeft',
+  ]
+  for (let i = 0; i < keysCheck.length; i++) {
+    if (input.isKeyDown(keysCheck[i]!)) {
+      activity = true
+      break
+    }
+  }
+
+  if (effectiveLeftDown || effectiveRightDown) activity = true
+
+  if (!dead && !matchFrozen) {
+    if (!afkWorldPosInitialized) {
+      afkWorldPosInitialized = true
+      _afkLastWorldPos.copy(player.playerGroup.position)
+      activity = true
+    } else {
+      _afkPosScratch.copy(player.playerGroup.position).sub(_afkLastWorldPos)
+      if (_afkPosScratch.lengthSq() > 2.5e-5) activity = true
+      _afkLastWorldPos.copy(player.playerGroup.position)
+    }
+    if (player.state.velocity.lengthSq() > 0.000225) activity = true
+  } else {
+    afkWorldPosInitialized = false
+  }
+
+  if (activity) bumpMultiplayerActivity()
+
+  if (performance.now() - lastMultiplayerActivityMs > MULTIPLAYER_AFK_MS) {
+    multiplayer.disconnect()
+    bumpMultiplayerActivity()
+    afkWorldPosInitialized = false
+  }
+}
+
 const playerModel = new PlayerModel()
 const heldWeapons = new HeldWeapons(core.scene, core.camera, sphereRadius)
 const damageTexts = new DamageTextSystem(core.scene)
@@ -470,7 +562,7 @@ function getSpawnCollisionBodies(): Array<{ position: THREE.Vector3; radius: num
   ]
 }
 
-function getBotObstacleBodies(): Array<{ position: THREE.Vector3; radius: number }> {
+function getBotObstacleBodies(excludingBotIndex: number): Array<{ position: THREE.Vector3; radius: number }> {
   const bodies = [
     ...tents.getCollisionBodies(),
     ...barriers.getCollisionBodies(),
@@ -481,6 +573,7 @@ function getBotObstacleBodies(): Array<{ position: THREE.Vector3; radius: number
   if (!atMainMenu && !isDead && !matchEndedFreeze) {
     bodies.push({ position: player.playerGroup.position, radius: Math.max(0.55, player.state.currentHeight * 0.34) })
   }
+  targetPlayers.appendLiveBotsAsObstacles(bodies, excludingBotIndex)
   return bodies
 }
 
@@ -945,7 +1038,8 @@ void Promise.all([
   wallSteps.init(),
   AnimationManager.preloadAll(),
   heldWeapons.loadAll(),
-]).then(() => {
+]).then(async () => {
+  await bootstrapMuzzleTuningFromDiskAndStorage()
   timerUI.onOneMinuteRemaining = () => playSfx('oneMinute', 1, 'ui')
   applyRandomMapLayout()
   
@@ -962,8 +1056,9 @@ void Promise.all([
 
   updateLeaderboard()
   // Production-ready multiplayer endpoint with local fallback.
-  const multiplayerUrl = (import.meta.env.VITE_MULTIPLAYER_URL as string | undefined)?.trim() || 'ws://127.0.0.1:8787'
-  multiplayer.connect(multiplayerUrl)
+  if (!readStoredSoloPlayPreference()) {
+    multiplayer.connect(MULTIPLAYER_WS_URL)
+  }
 
   multiplayer.onSessionStats = (pvp, bot) => {
     myPvpKills = pvp
@@ -1151,6 +1246,15 @@ settingsUI.onGraphicsChange = (key, on) => {
   if (key === 'grass') grass.setVisible(on)
   if (key === 'blood') blood.setVisible(on)
   if (key === 'bulletHoles') bulletHoles.setVisible(on)
+}
+settingsUI.onSoloPlayChange = () => {
+  if (settingsUI.soloPlay) {
+    multiplayer.disconnect()
+  } else {
+    multiplayer.connect(MULTIPLAYER_WS_URL)
+  }
+  bumpMultiplayerActivity()
+  updateLeaderboard()
 }
 settingsUI.syncSystems()
 const healthUI = new HealthUI()
@@ -2243,10 +2347,52 @@ function createFlashTexture(): THREE.CanvasTexture {
 const FLASH_DISTANCE_FROM_PLAYER = 0.9
 const FLASH_OFFSET_X = 0.13
 const FLASH_OFFSET_Y = -0.1
-const MUZZLE_FLASH_BASE_SCALE = 0.22
+const MUZZLE_FLASH_BASE_SCALE = 0.21
 const muzzleFlashTuning = {
   scale: MUZZLE_FLASH_BASE_SCALE,
   flipX: false,
+}
+const muzzleFlashOffsetLocal = new THREE.Vector3(0, 0, 0)
+
+function applyMuzzleSpriteTuningFromPayload(sprite: MuzzleTuningPayload['sprite'] | undefined) {
+  if (!sprite) return
+  if (typeof sprite.scale === 'number' && Number.isFinite(sprite.scale) && sprite.scale > 0) {
+    muzzleFlashTuning.scale = sprite.scale
+  }
+  if (typeof sprite.flipX === 'boolean') muzzleFlashTuning.flipX = sprite.flipX
+  const ol = sprite.offsetLocal
+  if (
+    Array.isArray(ol) &&
+    ol.length === 3 &&
+    ol.every((n) => typeof n === 'number' && Number.isFinite(n))
+  ) {
+    muzzleFlashOffsetLocal.set(ol[0]!, ol[1]!, ol[2]!)
+  }
+}
+
+function applyMuzzleTuningFromPayload(payload: MuzzleTuningPayload) {
+  heldWeapons.applyMuzzleTuningPayload(payload)
+  applyMuzzleSpriteTuningFromPayload(payload.sprite)
+  syncMuzzleFlashParent()
+}
+
+async function bootstrapMuzzleTuningFromDiskAndStorage() {
+  let payload: MuzzleTuningPayload | null = null
+  try {
+    const ls = localStorage.getItem('invert_muzzle_tuning')
+    if (ls) payload = parseMuzzleTuningJson(ls)
+  } catch {
+    /* noop */
+  }
+  if (!payload) {
+    try {
+      const res = await fetch('/muzzle-tuning.json', { cache: 'no-store' })
+      if (res.ok) payload = safeParseMuzzleTuning(await res.json())
+    } catch {
+      /* noop */
+    }
+  }
+  if (payload) applyMuzzleTuningFromPayload(payload)
 }
 
 const muzzleFlash = new THREE.Sprite(
@@ -2273,7 +2419,7 @@ function syncMuzzleFlashParent() {
     if (muzzleFlash.parent !== anchor) {
       anchor.add(muzzleFlash)
     }
-    muzzleFlash.position.set(0, 0, 0)
+    muzzleFlash.position.copy(muzzleFlashOffsetLocal)
     const inv = 1 / heldWeapons.getCurrentFpUniformScale()
     const sx = muzzleFlashTuning.scale * inv * (muzzleFlashTuning.flipX ? -1 : 1)
     muzzleFlash.scale.set(sx, muzzleFlashTuning.scale * inv, 1)
@@ -2554,6 +2700,12 @@ function throwGrenade(charge: number) {
   }
 
   grenadeSystem.throw(params.muzzlePos, params.throwVel, params.scale)
+
+  const throwCfg = heldWeapons.currentConfig
+  if (throwCfg?.knockback) {
+    _tmpKb.copy(muzzleDir).multiplyScalar(-throwCfg.knockback)
+    player.applyImpulse(_tmpKb)
+  }
 }
 
 function updateCrosshairEnemyHover() {
@@ -2779,10 +2931,22 @@ window.game = {
   },
   muzzleFlash: {
     tuning: muzzleFlashTuning,
+    offsetLocal: muzzleFlashOffsetLocal,
     get(slot: number = heldWeapons.getActiveSlot()) {
       const v = heldWeapons.getMuzzleLocal(slot)
       if (!v) return null
-      return { x: v.x, y: v.y, z: v.z, scale: muzzleFlashTuning.scale, flipX: muzzleFlashTuning.flipX }
+      return {
+        x: v.x,
+        y: v.y,
+        z: v.z,
+        scale: muzzleFlashTuning.scale,
+        flipX: muzzleFlashTuning.flipX,
+        offsetLocal: {
+          x: muzzleFlashOffsetLocal.x,
+          y: muzzleFlashOffsetLocal.y,
+          z: muzzleFlashOffsetLocal.z,
+        },
+      }
     },
     set(slot: number, x: number, y: number, z: number) {
       return heldWeapons.setMuzzleLocal(slot, x, y, z)
@@ -2799,6 +2963,21 @@ window.game = {
       muzzleFlashTuning.flipX = on
       syncMuzzleFlashParent()
       return `Muzzle flash flipX ${on ? 'ON' : 'OFF'}`
+    },
+    importPayload(json: string) {
+      const p = parseMuzzleTuningJson(json)
+      if (!p) return 'Invalid muzzle tuning JSON'
+      applyMuzzleTuningFromPayload(p)
+      return 'Applied muzzle tuning (slots + sprite)'
+    },
+    exportPayload() {
+      const o = exportMuzzleDefaultsPayload()
+      o.sprite = {
+        scale: muzzleFlashTuning.scale,
+        flipX: muzzleFlashTuning.flipX,
+        offsetLocal: [muzzleFlashOffsetLocal.x, muzzleFlashOffsetLocal.y, muzzleFlashOffsetLocal.z],
+      }
+      return JSON.stringify(o, null, 2)
     },
   },
   thirdperson() {
@@ -2863,6 +3042,31 @@ let gamepadR1WasDown = false
 let simFrame = 0
 const timer = new THREE.Timer()
 
+/** Low-pass human tally so `pvpOnlyMode` doesn't flip every frame (that respawns/sinks bots = jitter). */
+let smoothedHumanCountForBots = 1
+
+function rawHumanCountForBotRules(): number {
+  if (settingsUI.soloPlay) return 1
+  return multiplayer.getHumanPlayerCount()
+}
+
+function updateSmoothedHumanCountForBots(dt: number, snapToRaw: boolean) {
+  const raw = rawHumanCountForBotRules()
+  if (snapToRaw) {
+    smoothedHumanCountForBots = raw
+    return
+  }
+  if (raw >= smoothedHumanCountForBots) {
+    smoothedHumanCountForBots = raw
+  } else {
+    smoothedHumanCountForBots += (raw - smoothedHumanCountForBots) * Math.min(1, dt * 7)
+  }
+}
+
+function pvpBotsSuppressedFromSmoothedCount(): boolean {
+  return smoothedHumanCountForBots >= 1.62
+}
+
 function animate() {
   requestAnimationFrame(animate)
 
@@ -2874,28 +3078,30 @@ function animate() {
 
     const l1Down = input.isGamepadButtonPressed(4)
     const r1Down = input.isGamepadButtonPressed(5)
-    if (r1Down && !gamepadR1WasDown) {
-      const current = heldWeapons.getActiveSlot()
-      const next = (current + 1) % 3
-      switchWeaponSlot(next)
-    }
-    if (l1Down && !gamepadL1WasDown) {
-      const current = heldWeapons.getActiveSlot()
-      const next = (current + 2) % 3
-      switchWeaponSlot(next)
+    const allowGamepadWeaponSwitch = !settingsUI.isOpen && !isDead && !matchEndedFreeze
+    if (allowGamepadWeaponSwitch) {
+      if (r1Down && !gamepadR1WasDown) {
+        const current = heldWeapons.getActiveSlot()
+        const next = (current + 1) % 3
+        switchWeaponSlot(next)
+      }
+      if (l1Down && !gamepadL1WasDown) {
+        const current = heldWeapons.getActiveSlot()
+        const next = (current + 2) % 3
+        switchWeaponSlot(next)
+      }
+      if (input.isGamepadButtonPressed(12)) {
+        switchWeaponSlot(AK_SLOT)
+      } else if (input.isGamepadButtonPressed(13)) {
+        switchWeaponSlot(GRENADE_SLOT)
+      } else if (input.isGamepadButtonPressed(14)) {
+        switchWeaponSlot(AK_SLOT)
+      } else if (input.isGamepadButtonPressed(15)) {
+        switchWeaponSlot(SHOTGUN_SLOT)
+      }
     }
     gamepadL1WasDown = l1Down
     gamepadR1WasDown = r1Down
-
-    if (input.isGamepadButtonPressed(12)) { // D-pad Up -> AK
-      switchWeaponSlot(AK_SLOT)
-    } else if (input.isGamepadButtonPressed(13)) { // D-pad Down -> Grenade
-      switchWeaponSlot(GRENADE_SLOT)
-    } else if (input.isGamepadButtonPressed(14)) { // D-pad Left -> AK
-      switchWeaponSlot(AK_SLOT)
-    } else if (input.isGamepadButtonPressed(15)) { // D-pad Right -> Shotgun
-      switchWeaponSlot(SHOTGUN_SLOT)
-    }
   } else {
     isLeftMouseDownOnGamepad = false
     isRightMouseDownOnGamepad = false
@@ -2995,8 +3201,8 @@ function animate() {
       playerModel.update(dt)
       heldWeapons.update(dt, player.state.gravity)
 
-      const humanPlayerCount = multiplayer.getHumanPlayerCount()
-      const pvpOnlyMode = humanPlayerCount >= 2
+      updateSmoothedHumanCountForBots(dt, true)
+      const pvpOnlyMode = pvpBotsSuppressedFromSmoothedCount()
       targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
 
       const botBrain: BotBrainContext | null = !pvpOnlyMode ? {
@@ -3009,7 +3215,7 @@ function animate() {
           }
           return out
         },
-        getObstacleBodies: getBotObstacleBodies,
+        getObstacleBodies: (excludeBotIndex) => getBotObstacleBodies(excludeBotIndex),
         worldMesh: mesh,
         nowMs: currentTime,
         tryBotAkHit: (..._args: any[]) => { /* noop in menu */ },
@@ -3109,8 +3315,8 @@ function animate() {
     updateTrainSpatialAudio()
     targetPlayers.syncPlayerSpawnHint(player.playerGroup.position)
 
-    const humanPlayerCount = multiplayer.getHumanPlayerCount()
-    const pvpOnlyMode = humanPlayerCount >= 2
+    updateSmoothedHumanCountForBots(dt, false)
+    const pvpOnlyMode = pvpBotsSuppressedFromSmoothedCount()
     targetPlayers.setSuppressedByRealPlayers(pvpOnlyMode)
     timerUI.setCountdownActive(pvpOnlyMode)
     timerUI.update()
@@ -3461,7 +3667,7 @@ function animate() {
           }
           return out
         },
-        getObstacleBodies: getBotObstacleBodies,
+        getObstacleBodies: (excludeBotIndex) => getBotObstacleBodies(excludeBotIndex),
         worldMesh: mesh,
         nowMs: currentTime,
         tryBotAkHit,
@@ -3575,6 +3781,15 @@ function animate() {
       animForNet = 'firing'
     }
     const finalActiveSlot = heldWeapons.getActiveSlot()
+    tickMultiplayerAfkDisconnect(input, {
+      connected: multiplayer.isConnected(),
+      soloPlay: settingsUI.soloPlay,
+      atMenu: atMainMenu,
+      dead: isDead,
+      matchFrozen: matchEndedFreeze,
+      effectiveLeftDown,
+      effectiveRightDown,
+    })
     multiplayer.update(
       dt,
       player.playerGroup.position,
@@ -3651,8 +3866,19 @@ function animate() {
 
     damageIndicator.setLowHealth(player.state.health <= 20)
 
+    const weaponBarHoverBlocksCycle =
+      !atMainMenu &&
+      !isDead &&
+      !matchEndedFreeze &&
+      (!document.pointerLockElement || settingsUI.isOpen || input.isSimulatedUnlocked)
+
+    weaponUI.syncPointerHover(input.virtualMousePos.x, input.virtualMousePos.y, weaponBarHoverBlocksCycle)
+
+    const blockWeaponSwitchOverHotbar = weaponUI.isPointerOverWeaponBar()
+    const blockWeaponBindFromMenus = settingsUI.isOpen || blockWeaponSwitchOverHotbar
+
     const wheelDelta = input.consumeWheelDelta()
-    if (!isDead && !matchEndedFreeze && Math.abs(wheelDelta) > 0) {
+    if (!isDead && !matchEndedFreeze && !blockWeaponBindFromMenus && Math.abs(wheelDelta) > 0) {
       const current = heldWeapons.getActiveSlot()
       const direction = wheelDelta > 0 ? 1 : -1
       let next = (current + direction) % 3
@@ -3663,9 +3889,9 @@ function animate() {
     const digit1Down = input.isKeyDown('Digit1')
     const digit2Down = input.isKeyDown('Digit2')
     const digit3Down = input.isKeyDown('Digit3')
-    if (!isDead && !matchEndedFreeze && digit1Down && !digit1WasDown) switchWeaponSlot(AK_SLOT)
-    if (!isDead && !matchEndedFreeze && digit2Down && !digit2WasDown) switchWeaponSlot(SHOTGUN_SLOT)
-    if (!isDead && !matchEndedFreeze && digit3Down && !digit3WasDown) switchWeaponSlot(GRENADE_SLOT)
+    if (!isDead && !matchEndedFreeze && !blockWeaponBindFromMenus && digit1Down && !digit1WasDown) switchWeaponSlot(AK_SLOT)
+    if (!isDead && !matchEndedFreeze && !blockWeaponBindFromMenus && digit2Down && !digit2WasDown) switchWeaponSlot(SHOTGUN_SLOT)
+    if (!isDead && !matchEndedFreeze && !blockWeaponBindFromMenus && digit3Down && !digit3WasDown) switchWeaponSlot(GRENADE_SLOT)
     digit1WasDown = digit1Down
     digit2WasDown = digit2Down
     digit3WasDown = digit3Down

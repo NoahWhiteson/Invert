@@ -19,6 +19,9 @@ export default defineConfig({
   build: {
     emptyOutDir: false,
     rollupOptions: {
+      input: {
+        main: './index.html',
+      },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/three')) return 'three'

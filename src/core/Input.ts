@@ -4,6 +4,7 @@ export class InputManager {
   public isSimulatedUnlocked: boolean = false
   public virtualMousePos: { x: number; y: number } = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
   private virtualLookDelta = { x: 0, y: 0 }
+  private idleLookMotionSq = 0
   private mobileControlsActive = false
   private _wheelDelta: number = 0
 
@@ -16,6 +17,7 @@ export class InputManager {
 
   private syncPointerFromEvent(e: PointerEvent) {
     if (document.pointerLockElement) {
+      this.idleLookMotionSq += e.movementX * e.movementX + e.movementY * e.movementY
       this.virtualMousePos.x += e.movementX
       this.virtualMousePos.y += e.movementY
     } else {
@@ -163,6 +165,7 @@ export class InputManager {
   public addVirtualLookDelta(dx: number, dy: number) {
     this.virtualLookDelta.x += dx
     this.virtualLookDelta.y += dy
+    this.idleLookMotionSq += dx * dx + dy * dy
   }
 
   public consumeVirtualLookDelta(): { x: number; y: number } {
@@ -185,5 +188,16 @@ export class InputManager {
     const d = this._wheelDelta
     this._wheelDelta = 0
     return d
+  }
+
+  public peekWheelDeltaAbs(): number {
+    return Math.abs(this._wheelDelta)
+  }
+
+  /** Squared look delta while pointer-locked since last call (for AFK / idle detection). */
+  public takeIdleLookMotionSq(): number {
+    const v = this.idleLookMotionSq
+    this.idleLookMotionSq = 0
+    return v
   }
 }

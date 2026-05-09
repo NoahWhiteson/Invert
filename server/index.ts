@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { apiPreflight, handleApiRequest } from "./api";
+import { apiPreflight, handleApiRequest, sha256Hex } from "./api";
 import type { Env } from "./env";
 import {
 	DAMAGE_COOLDOWN_MS,
@@ -82,6 +82,340 @@ export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
 
+		if (url.pathname === "/analytics") {
+			const password = env.ANALYTICS_PASSWORD || "HannahNoah07*";
+			const provided = url.searchParams.get("p");
+			if (provided !== password) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+
+			// Get global DB stats
+			const globalStats = await env.DB.prepare(`
+				SELECT 
+					COUNT(*) as total_players,
+					SUM(total_kills) as total_kills,
+					SUM(total_play_time_ms) as total_play_time_ms,
+					(SELECT SUM(coins) FROM account_coins) as total_coins,
+					(SELECT COUNT(*) FROM accounts WHERE created_at > ?) as new_players_24h
+				FROM accounts
+			`).bind(Date.now() - 86400000).first<{ 
+				total_players: number; 
+				total_kills: number; 
+				total_play_time_ms: number; 
+				total_coins: number;
+				new_players_24h: number;
+			}>();
+
+			const topKillers = await env.DB.prepare(`
+				SELECT username, total_kills 
+				FROM accounts 
+				WHERE username IS NOT NULL 
+				ORDER BY total_kills DESC 
+				LIMIT 5
+			`).all<{ username: string; total_kills: number }>();
+
+			const topRichest = await env.DB.prepare(`
+				SELECT a.username, c.coins 
+				FROM accounts a
+				JOIN account_coins c ON a.id = c.account_id
+				WHERE a.username IS NOT NULL
+				ORDER BY c.coins DESC 
+				LIMIT 5
+			`).all<{ username: string; coins: number }>();
+
+			// Get live room data
+			const rooms: Array<{ name: string; count: number; players: Array<{ name: string; kills: number }> }> = [];
+			for (let i = 1; i <= 20; i++) {
+				const roomName = `room_${i}`;
+				const id = env.GAME_ROOM.idFromName(roomName);
+				const room = env.GAME_ROOM.get(id);
+				try {
+					const res = await room.fetch("http://game/analytics-data");
+					if (res.ok) {
+						const data = await res.json() as { count: number; players: Array<{ name: string; kills: number }> };
+						if (data.count > 0) {
+							rooms.push({ name: roomName, ...data });
+						}
+					}
+				} catch { /* skip */ }
+			}
+
+			const totalLivePlayers = rooms.reduce((acc, r) => acc + r.count, 0);
+			const totalSec = Math.floor((globalStats?.total_play_time_ms || 0) / 1000);
+			const totalHrs = Math.floor(totalSec / 3600);
+			const totalMin = Math.floor((totalSec % 3600) / 60);
+
+			const html = `
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Undersphere // Enterprise Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100;300;400;500;600;700;800;900&display=swap');
+        :root {
+            --background: 0 0% 2%;
+            --foreground: 0 0% 98%;
+            --card: 0 0% 4%;
+            --card-foreground: 0 0% 98%;
+            --primary: 0 0% 98%;
+            --primary-foreground: 0 0% 9%;
+            --secondary: 0 0% 10%;
+            --secondary-foreground: 0 0% 98%;
+            --muted: 0 0% 12%;
+            --muted-foreground: 0 0% 60%;
+            --accent: 0 0% 15%;
+            --accent-foreground: 0 0% 98%;
+            --border: 0 0% 15%;
+            --ring: 0 0% 80%;
+        }
+        body {
+            background-color: hsl(var(--background));
+            color: hsl(var(--foreground));
+            font-family: 'Geist', sans-serif;
+            letter-spacing: -0.01em;
+        }
+        .glass-card {
+            background: rgba(10, 10, 10, 0.4);
+            backdrop-filter: blur(12px);
+            border: 1px solid hsl(var(--border));
+            border-radius: 12px;
+        }
+        .stat-card {
+            background-color: hsl(var(--card));
+            border: 1px solid hsl(var(--border));
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .stat-card:hover {
+            border-color: hsl(var(--ring));
+            transform: translateY(-2px);
+        }
+        .data-table th {
+            font-weight: 500;
+            color: hsl(var(--muted-foreground));
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 1rem 1.5rem;
+        }
+        .data-table td {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid hsl(var(--border));
+        }
+        .badge {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-green { background: rgba(34, 197, 94, 0.1); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.2); }
+        .badge-blue { background: rgba(59, 130, 246, 0.1); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.2); }
+        .chart-wrapper { height: 240px; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- Sidebar / Nav Mock -->
+    <div class="flex">
+        <aside class="w-64 border-r border-border h-screen sticky top-0 p-6 hidden lg:block">
+            <div class="flex items-center gap-3 mb-10">
+                <div class="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
+                    <div class="w-4 h-4 bg-black rounded-sm"></div>
+                </div>
+                <span class="font-bold text-xl tracking-tighter">UNDERSPHERE</span>
+            </div>
+            <nav class="space-y-2">
+                <a href="#" class="flex items-center gap-3 px-3 py-2 bg-secondary rounded-md text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" stroke-width="2"/></svg>
+                    Overview
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-secondary rounded-md text-sm font-medium transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-width="2"/></svg>
+                    Players
+                </a>
+                <a href="#" class="flex items-center gap-3 px-3 py-2 text-muted-foreground hover:bg-secondary rounded-md text-sm font-medium transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" stroke-width="2"/></svg>
+                    Economy
+                </a>
+            </nav>
+        </aside>
+
+        <main class="flex-1 p-8 lg:p-12">
+            <div class="flex justify-between items-end mb-10">
+                <div>
+                    <h2 class="text-sm font-medium text-muted-foreground uppercase tracking-widest mb-1">Intelligence Dashboard</h2>
+                    <h1 class="text-4xl font-bold tracking-tighter">Executive Overview</h1>
+                </div>
+                <div class="flex gap-3">
+                    <div class="badge badge-green flex items-center gap-2 py-1.5 px-3">
+                        <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                        Live: ${totalLivePlayers} Online
+                    </div>
+                </div>
+            </div>
+
+            <!-- Primary Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+                <div class="stat-card">
+                    <div class="text-muted-foreground text-xs font-semibold uppercase mb-4">Total Ecosystem Value</div>
+                    <div class="text-3xl font-bold mb-1">${(globalStats?.total_coins || 0).toLocaleString()}</div>
+                    <div class="text-xs text-green-500 font-medium">In-game currency (Coins)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-muted-foreground text-xs font-semibold uppercase mb-4">User Acquisition</div>
+                    <div class="text-3xl font-bold mb-1">${globalStats?.total_players || 0}</div>
+                    <div class="text-xs text-blue-500 font-medium">+${globalStats?.new_players_24h || 0} in last 24h</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-muted-foreground text-xs font-semibold uppercase mb-4">Total Engagement</div>
+                    <div class="text-3xl font-bold mb-1">${totalHrs}h ${totalMin}m</div>
+                    <div class="text-xs text-muted-foreground font-medium">Cumulative play time</div>
+                </div>
+                <div class="stat-card">
+                    <div class="text-muted-foreground text-xs font-semibold uppercase mb-4">Combat Throughput</div>
+                    <div class="text-3xl font-bold mb-1">${(globalStats?.total_kills || 0).toLocaleString()}</div>
+                    <div class="text-xs text-red-500 font-medium">Total PvP eliminations</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-3 gap-8 mb-10">
+                <!-- Live Distribution -->
+                <div class="xl:col-span-2 stat-card">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-bold text-lg">Real-time Room Distribution</h3>
+                        <div class="text-xs text-muted-foreground">Load balancing across instances</div>
+                    </div>
+                    <div class="chart-wrapper">
+                        <canvas id="mainChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Top Performers -->
+                <div class="stat-card">
+                    <h3 class="font-bold text-lg mb-6">Top Killers (All Time)</h3>
+                    <div class="space-y-5">
+                        ${topKillers.results.map((p, i) => `
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-bold">${i+1}</div>
+                                    <span class="font-medium text-sm">${p.username}</span>
+                                </div>
+                                <span class="text-sm font-bold">${p.total_kills.toLocaleString()}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <div class="mt-8 pt-6 border-t border-border">
+                        <h3 class="font-bold text-lg mb-6">Richest Players</h3>
+                        <div class="space-y-5">
+                            ${topRichest.results.map((p, i) => `
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-secondary flex items-center justify-center text-xs font-bold">${i+1}</div>
+                                        <span class="font-medium text-sm">${p.username}</span>
+                                    </div>
+                                    <span class="text-sm font-bold text-yellow-500">${p.coins.toLocaleString()}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Sessions Table -->
+            <div class="stat-card p-0 overflow-hidden">
+                <div class="p-6 border-b border-border flex justify-between items-center">
+                    <h3 class="font-bold text-lg">Active Match Instances</h3>
+                    <div class="badge badge-blue">${rooms.length} Active Rooms</div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full data-table text-left">
+                        <thead>
+                            <tr>
+                                <th>Instance ID</th>
+                                <th>Occupancy</th>
+                                <th>Live Roster</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rooms.length === 0 ? '<tr><td colspan="4" class="text-center py-12 text-muted-foreground">No active combat sessions detected.</td></tr>' : rooms.map(r => `
+                                <tr>
+                                    <td class="font-mono text-xs font-bold">${r.name.toUpperCase()}</td>
+                                    <td>
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden max-w-[100px]">
+                                                <div class="h-full bg-white" style="width: ${(r.count/8)*100}%"></div>
+                                            </div>
+                                            <span class="text-xs font-medium">${r.count}/8</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            ${r.players.map(p => `
+                                                <span class="text-[10px] bg-secondary px-2 py-0.5 rounded border border-border">${p.name} (${p.kills})</span>
+                                            `).join('')}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="flex items-center gap-2 text-[10px] font-bold text-green-500">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                            STABLE
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const ctx = document.getElementById('mainChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ${JSON.stringify(rooms.map(r => r.name.replace('room_', 'Instance ')))},
+                datasets: [{
+                    label: 'Player Count',
+                    data: ${JSON.stringify(rooms.map(r => r.count))},
+                    backgroundColor: '#ffffff',
+                    borderRadius: 4,
+                    barThickness: 24
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 8,
+                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                        ticks: { color: '#666', font: { size: 10 } }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: '#666', font: { size: 10 } }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+			`;
+
+			return new Response(html, { headers: { "Content-Type": "text/html" } });
+		}
+
 		if (url.pathname.startsWith("/api/")) {
 			if (request.method === "OPTIONS") {
 				return apiPreflight(request, env);
@@ -146,6 +480,7 @@ export class GameRoom extends DurableObject<Env> {
 	private lastDamagePairMs = new Map<string, number>();
 	private botKillTs = new Map<string, number[]>();
 	private joinTimes = new Map<string, number>();
+	private accountIds = new Map<string, string>();
 
 	constructor(state: DurableObjectState, env: Env) {
 		super(state, env);
@@ -235,6 +570,17 @@ export class GameRoom extends DurableObject<Env> {
 				return new Response(this.players.size.toString());
 			}
 
+			if (url.pathname === "/analytics-data") {
+				const playerList = Array.from(this.players.values())
+					.filter(p => !p.atMenu)
+					.map(p => ({ name: p.username, kills: p.kills }));
+				
+				return new Response(JSON.stringify({
+					count: playerList.length,
+					players: playerList
+				}), { headers: { "Content-Type": "application/json" } });
+			}
+
 			const roomName = request.headers.get("X-Room-Name") ?? "global";
 
 			const upgradeHeader = request.headers.get("Upgrade");
@@ -243,7 +589,8 @@ export class GameRoom extends DurableObject<Env> {
 			}
 
 			const [client, server] = new WebSocketPair();
-			this.handleSession(server, roomName);
+			const token = url.searchParams.get("token");
+			this.handleSession(server, roomName, token);
 
 			return new Response(null, {
 				status: 101,
@@ -355,11 +702,22 @@ export class GameRoom extends DurableObject<Env> {
 		return this.emergencyUsername(excludePlayerId);
 	}
 
-	handleSession(ws: WebSocket, roomName: string) {
+	handleSession(ws: WebSocket, roomName: string, token: string | null) {
 		const playerId = crypto.randomUUID();
 		this.sessions.add(ws);
 		this.playerSockets.set(playerId, ws);
 		this.joinTimes.set(playerId, Date.now());
+
+		if (token) {
+			void (async () => {
+				const hash = await sha256Hex(token);
+				const row = await this.env.DB.prepare("SELECT id FROM accounts WHERE token_hash = ? LIMIT 1").bind(hash).first<{ id: string }>();
+				if (row) {
+					this.accountIds.set(playerId, row.id);
+				}
+			})();
+		}
+
 		ws.accept();
 
 		void this.sendDiscordNotification(
@@ -455,8 +813,20 @@ export class GameRoom extends DurableObject<Env> {
 			const p = this.players.get(playerId);
 			const username = p?.username ?? "Unknown";
 			const joinTime = this.joinTimes.get(playerId) ?? Date.now();
-			const durationSec = Math.floor((Date.now() - joinTime) / 1000);
+			const durationMs = Date.now() - joinTime;
+			const durationSec = Math.floor(durationMs / 1000);
 			const durationStr = durationSec > 60 ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` : `${durationSec}s`;
+
+			const accountId = this.accountIds.get(playerId);
+			if (accountId && p) {
+				void this.env.DB.prepare(`
+					UPDATE accounts 
+					SET total_kills = total_kills + ?, 
+					    total_play_time_ms = total_play_time_ms + ?,
+					    username = ?
+					WHERE id = ?
+				`).bind(p.kills, durationMs, p.username, accountId).run();
+			}
 
 		void this.sendDiscordNotification(
 			"👋 Player Left",
@@ -473,6 +843,7 @@ export class GameRoom extends DurableObject<Env> {
 			this.sessions.delete(ws);
 			this.playerSockets.delete(playerId);
 			this.joinTimes.delete(playerId);
+			this.accountIds.delete(playerId);
 			this.cleanupRateState(playerId);
 			this.broadcast({
 				type: "player_left",

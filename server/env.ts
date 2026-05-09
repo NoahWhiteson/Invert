@@ -8,4 +8,5 @@ export interface Env {
    */
   CORS_ORIGIN?: string
   DISCORD_WEBHOOK_URL?: string
+  ANALYTICS_PASSWORD?: string
 }

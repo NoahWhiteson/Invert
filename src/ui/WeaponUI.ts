@@ -3,6 +3,7 @@ export class WeaponUI {
   private slots: HTMLDivElement[] = []
   private activeIndex: number = -1
   private onSlotSelect?: (index: number) => void
+  private pointerOverBar = false
 
   constructor(onSlotSelect?: (index: number) => void) {
     this.onSlotSelect = onSlotSelect
@@ -98,6 +99,29 @@ export class WeaponUI {
       slot.style.backgroundColor = 'transparent'
       slot.style.border = 'none'
     }
+  }
+
+  /** Updates hover hit-test for blocking wheel / digit binds while using cursor over hotbar. */
+  public syncPointerHover(screenX: number, screenY: number, trackHover: boolean) {
+    if (!trackHover) {
+      this.pointerOverBar = false
+      return
+    }
+    const r = this.container.getBoundingClientRect()
+    if (r.width < 2 || r.height < 2) {
+      this.pointerOverBar = false
+      return
+    }
+    const pad = 10
+    this.pointerOverBar =
+      screenX >= r.left - pad &&
+      screenX <= r.right + pad &&
+      screenY >= r.top - pad &&
+      screenY <= r.bottom + pad
+  }
+
+  public isPointerOverWeaponBar(): boolean {
+    return this.pointerOverBar
   }
 
   public setOpacity(alpha: number) {
